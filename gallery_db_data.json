@@ -1,0 +1,160 @@
+{
+  "name": "projects/project-4b410c97-a152-49e7-940/databases/ai-studio-2507c181-4e37-4730-b71a-25b639c27e22/documents/school_data/gallery",
+  "fields": {
+    "teachers": {
+      "arrayValue": {
+        "values": [
+          {
+            "mapValue": {
+              "fields": {
+                "role": {
+                  "stringValue": "Group PHoto"
+                },
+                "image": {
+                  "stringValue": "https://i.postimg.cc/kM08rjz7/607734500-1458678629597887-5287650768801356980-n-jpg-stp-dst-jpegr-tt6-nc-cat-102-ccb-1-7-nc-sid-7.jpg"
+                },
+                "type": {
+                  "stringValue": "image"
+                },
+                "id": {
+                  "integerValue": "1777580538738"
+                },
+                "name": {
+                  "stringValue": "Teacher Team"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "role": {
+                  "stringValue": "Principal Sir"
+                },
+                "id": {
+                  "integerValue": "1777581241422"
+                },
+                "name": {
+                  "stringValue": "Mr.Pappu Jha"
+                },
+                "image": {
+                  "stringValue": "https://i.postimg.cc/Hxs0xBCd/606350985-1458678509597899-5556893883060728495-n-jpg-stp-dst-jpegr-tt6-nc-cat-111-ccb-1-7-nc-sid-7.jpg"
+                },
+                "type": {
+                  "stringValue": "image"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "events": {
+      "arrayValue": {
+        "values": [
+          {
+            "mapValue": {
+              "fields": {
+                "title": {
+                  "stringValue": "CelebratingTihar "
+                },
+                "type": {
+                  "stringValue": "image"
+                },
+                "image": {
+                  "stringValue": "https://i.postimg.cc/YqMyRVjy/561894617-1392494136216337-7405517675609160943-n-jpg-stp-cp6-dst-jpg-tt6-nc-cat-102-ccb-1-7-nc-sid.jpg"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "image": {
+                  "stringValue": "https://firebasestorage.googleapis.com/v0/b/school-c5948.firebasestorage.app/o/media%2F1781671401678_0xdtn0tdsiy.jpeg?alt=media&token=a4fdeb6e-904e-4f4d-bb21-239f327fbad2"
+                },
+                "type": {
+                  "stringValue": "image"
+                },
+                "title": {
+                  "stringValue": "Sarsawati pooja 2082"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "batches": {
+      "arrayValue": {
+        "values": [
+          {
+            "mapValue": {
+              "fields": {
+                "type": {
+                  "stringValue": "image"
+                },
+                "image": {
+                  "stringValue": "https://i.postimg.cc/DZ9zDw6d/659954107-1539242788208137-533627622005642841-n-jpg-stp-cp6-dst-jpg-tt6-nc-cat-105-ccb-1-7-nc-sid.jpg"
+                },
+                "year": {
+                  "stringValue": "Batch Year :2082 B.S"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "type": {
+                  "stringValue": "image"
+                },
+                "year": {
+                  "stringValue": "Batch Year:2081 B.S."
+                },
+                "image": {
+                  "stringValue": "https://i.postimg.cc/KzSSh3XB/486690176-3465631286904873-1013976993402343512-n-jpg-stp-dst-jpegr-tt6-nc-cat-103-ccb-1-7-nc-sid-7.jpg"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "image": {
+                  "stringValue": "https://i.postimg.cc/0Qd3gt09/492158102-1235611335237952-3766331980945055615-n-jpg-nc-cat-101-ccb-1-7-nc-sid-7b2446-nc-ohc-pu-Pu.jpg"
+                },
+                "year": {
+                  "stringValue": "Batch Year:2080 B.S."
+                },
+                "type": {
+                  "stringValue": "image"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "type": {
+                  "stringValue": "image"
+                },
+                "year": {
+                  "stringValue": "Batch Year:2079 B.S."
+                },
+                "image": {
+                  "stringValue": "https://i.postimg.cc/yYWfn655/487207764-1208826874583065-8374062338069603012-n-jpg-nc-cat-107-ccb-1-7-nc-sid-7b2446-nc-ohc-JWw.jpg"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "hasMergedDefaults": {
+      "booleanValue": true
+    }
+  },
+  "createTime": "2026-06-29T01:01:04.293833Z",
+  "updateTime": "2026-06-29T16:32:19.559590Z"
+}

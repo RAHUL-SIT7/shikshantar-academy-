@@ -1,0 +1,205 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role information.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
+        "phone": { "type": "string" },
+        "fullName": { "type": "string" },
+        "studentId": { "type": "string" },
+        "class": { "type": "string" },
+        "section": { "type": "string" },
+        "rollNo": { "type": "string" },
+        "parentPhone": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "School announcement.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "validUntil": { "type": "string", "format": "date" },
+        "priority": { "type": "string", "enum": ["Normal", "Urgent"] },
+        "targets": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["Draft", "Published", "Archived"] },
+        "isPinned": { "type": "boolean" },
+        "timestamp": { "type": "object" },
+        "readBy": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["title", "message", "date", "status", "targets"]
+    },
+    "Admission": {
+      "title": "Admission",
+      "description": "Enrollment application.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "submittedAt": { "type": "object" }
+      },
+      "required": ["status", "submittedAt"]
+    },
+    "Exam": {
+      "title": "Exam",
+      "description": "Details of an examination.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "class": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "published": { "type": "boolean" }
+      },
+      "required": ["name", "type", "class", "academicYear", "published"]
+    },
+    "Result": {
+      "title": "Result",
+      "description": "Individual subject result for a student.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "examId": { "type": "string" },
+        "subject": { "type": "string" },
+        "marks": { "type": "number" },
+        "fullMarks": { "type": "number", "default": 100 }
+      },
+      "required": ["studentId", "examId", "subject", "marks"]
+    },
+    "ResultSummary": {
+      "title": "Result Summary",
+      "description": "Aggregated result for a student in an exam.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "examId": { "type": "string" },
+        "total": { "type": "number" },
+        "percentage": { "type": "number" },
+        "grade": { "type": "string" },
+        "rank": { "type": "number" }
+      },
+      "required": ["studentId", "examId", "total", "percentage", "grade", "rank"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application configuration.",
+      "type": "object",
+      "properties": {
+        "fields": { "type": "array", "items": { "type": "object" } },
+        "home_content": { "type": "object" }
+      }
+    },
+    "FeeStructure": {
+      "title": "Fee Structure",
+      "description": "Fee categorization per class and year.",
+      "type": "object",
+      "properties": {
+        "class": { "type": "string" },
+        "tuitionFee": { "type": "number" },
+        "busFee": { "type": "number" },
+        "examFee": { "type": "number" },
+        "annualFee": { "type": "number" }
+      },
+      "required": ["class", "tuitionFee", "busFee", "examFee", "annualFee"]
+    },
+    "StudentFee": {
+      "title": "Student Fee",
+      "description": "Monthly fee record for a student.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "month": { "type": "string" },
+        "totalFee": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "dueAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "due"] }
+      },
+      "required": ["studentId", "month", "totalFee", "paidAmount", "dueAmount", "status"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A payment transaction.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "receipt": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "class": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string" },
+        "collectedBy": { "type": "string" },
+        "status": { "type": "string", "enum": ["SUCCESS", "REFUNDED"] },
+        "months": { "type": "array", "items": { "type": "string" } },
+        "remarks": { "type": "string" }
+      },
+      "required": ["date", "receipt", "studentId", "amount", "method", "status"]
+    },
+    "RemitBill": {
+      "title": "Remit Bill",
+      "description": "Pre-payment demand bills configured class-wise.",
+      "type": "object",
+      "properties": {
+        "billNo": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "class": { "type": "string" },
+        "billingPeriod": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "paid"] }
+      },
+      "required": ["billNo", "studentId", "studentName", "class", "billingPeriod", "totalAmount", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user profile documents."
+    },
+    "/notices/{noticeId}": {
+      "schema": "Notice",
+      "description": "School announcements."
+    },
+    "/admissions/{admissionId}": {
+      "schema": "Admission",
+      "description": "Student admission applications."
+    },
+    "/exams/{examId}": {
+      "schema": "Exam",
+      "description": "Examinations."
+    },
+    "/results/{resultId}": {
+      "schema": "Result",
+      "description": "Marks per subject."
+    },
+    "/resultSummary/{summaryId}": {
+      "schema": "ResultSummary",
+      "description": "Summarized marks per exam."
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "Global app configurations."
+    },
+    "/feeStructure/{feeId}": {
+      "schema": "FeeStructure",
+      "description": "Class fee structures."
+    },
+    "/studentFees/{feeId}": {
+      "schema": "StudentFee",
+      "description": "Student fee payments."
+    },
+    "/transactions/{txId}": {
+      "schema": "Transaction",
+      "description": "Fee payment transactions."
+    },
+    "/remitBills/{billId}": {
+      "schema": "RemitBill",
+      "description": "Distributed pre-payment class-wise billing receipts."
+    }
+  }
+}

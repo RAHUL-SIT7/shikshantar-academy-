@@ -1,0 +1,54 @@
+src/pages/Scholarship.tsx:43:          unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+src/pages/Admin.tsx:88:             unsubExams = onSnapshot(collection(db, 'exams'), (snap) => {
+src/pages/Admin.tsx:98:             unsubSummary = onSnapshot(collection(db, 'resultSummary'), (snap) => {
+src/pages/Admin.tsx:108:             unsubResults = onSnapshot(collection(db, 'results'), (snap) => {
+src/pages/NoticeBoard.tsx:69:      let q = query(collection(db, 'notices'), orderBy('date', 'desc'));
+src/pages/NoticeBoard.tsx:166:             await addDoc(collection(db, 'notices'), payload);
+src/pages/NoticeBoard.tsx:180:        await addDoc(collection(db, 'notices'), {
+src/pages/Admission.tsx:215:      await addDoc(collection(db, "admissions"), {
+src/pages/SalaryAdmin.tsx:21:         const qT = query(collection(db, 'users'), where('role', '==', 'teacher'));
+src/pages/SalaryAdmin.tsx:27:         const unsubStructures = onSnapshot(collection(db, 'salary_structures'), (snap) => {
+src/pages/SalaryAdmin.tsx:31:         const unsubRecords = onSnapshot(collection(db, 'salary_records'), (snap) => {
+src/pages/TeacherSalary.tsx:32:         const qR = query(collection(db, 'salary_records'), where('teacherId', '==', user.uid));
+src/pages/AdminProfileView.tsx:92:          const txSnap = await getDocs(query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(15)));
+src/pages/Result.tsx:32:             examsSnap = await getDocs(query(collection(db, 'exams'), where('published', '==', true)));
+src/pages/Result.tsx:58:             summarySnap = await getDocs(query(collection(db, 'resultSummary'), where('studentId', '==', uid)));
+src/pages/Result.tsx:79:             resultsSnap = await getDocs(query(collection(db, 'results'), where('studentId', '==', uid)));
+src/pages/Result.tsx:97:                 const allRes = await getDocs(query(collection(db, 'results'), where('examId', '==', examId)));
+src/pages/Result.tsx:261:         const summariesSnap = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', currentResult.examId)));
+src/pages/Result.tsx:262:         const resultsSnap = await getDocs(query(collection(db, 'results'), where('examId', '==', currentResult.examId)));
+src/pages/Result.tsx:324:         const summariesSnap = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', currentResult.examId)));
+src/pages/AccountAdmin.tsx:158:             unsubStudents = onSnapshot(query(collection(db, 'users'), where('role', '==', 'student')), (snap) => {
+src/pages/AccountAdmin.tsx:163:             unsubTx = onSnapshot(collection(db, 'transactions'), (snap) => {
+src/pages/AccountAdmin.tsx:168:             unsubFees = onSnapshot(collection(db, 'studentFees'), (snap) => {
+src/pages/FeeStructure.tsx:109:          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+src/pages/FeeStructure.tsx:178:          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+src/pages/FeeStructure.tsx:251:          const q = query(collection(db, 'users'), where('role', '==', 'student'));
+src/pages/Home.tsx:77:          unsubTx = onSnapshot(query(collection(db, 'transactions'), where('status', '==', 'SUCCESS')), (txSnap) => {
+src/pages/Home.tsx:124:          unsubFees = onSnapshot(query(collection(db, 'studentFees'), where('status', '==', 'due')), (feesSnap) => {
+src/pages/Home.tsx:142:          unsubUsers = onSnapshot(collection(db, 'users'), (usersSnap) => {
+src/pages/Home.tsx:176:                             const examsSnap = await getDocs(query(collection(db, 'exams'), where('published', '==', true)));
+src/pages/Home.tsx:180:                             const sumsRef = await getDocs(query(collection(db, 'resultSummary'), where('studentId', '==', user.uid)));
+src/pages/Home.tsx:190:                             const resultsRef = await getDocs(query(collection(db, 'results_secure', user.uid, 'records')));
+src/pages/Home.tsx:284:      let q = query(collection(db, 'notices'), orderBy('date', 'desc'));
+src/pages/Home.tsx:312:        const qAdmissions = query(collection(db, 'admissions'), where('status', '==', 'Pending'));
+src/pages/Home.tsx:324:        const qRecentAdmissions = query(collection(db, 'admissions'), orderBy('submittedAt', 'desc'));
+src/pages/Login.tsx:423:      const usersRef = collection(db, 'users');
+src/pages/UserApprovals.tsx:56:        unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+src/pages/Iemis.tsx:66:      const q = query(collection(db, 'users'), where('role', '==', 'student'));
+src/pages/AdminAdmissions.tsx:33:        const q = query(collection(db, 'admissions'), orderBy('submittedAt', 'desc'));
+src/pages/Account.tsx:81:             const feesSnap1 = await getDocs(query(collection(db, 'studentFees'), where('studentId', '==', studentId)));
+src/pages/Account.tsx:85:                const feesSnap2 = await getDocs(query(collection(db, 'studentFees'), where('studentId', '==', customId)));
+src/pages/Account.tsx:89:             const txSnap1 = await getDocs(query(collection(db, 'transactions'), where('studentId', '==', studentId)));
+src/pages/Account.tsx:96:                const txSnap2 = await getDocs(query(collection(db, 'transactions'), where('studentId', '==', customId)));
+src/components/fee_management/SimpleStudentLedgerTab.tsx:289:            const txRef = doc(collection(db, 'transactions'));
+src/components/fee_management/CashLedgerTab.tsx:31:    const unsub = onSnapshot(collection(db, 'cash_ledger'), (snap) => {
+src/components/fee_management/CashLedgerTab.tsx:47:      await addDoc(collection(db, 'cash_ledger'), {
+src/components/fee_management/ScholarshipTab.tsx:12:         const q = query(collection(db, 'studentFees'), where('studentId', '==', studentId));
+src/components/fee_management/TransactionHistoryTab.tsx:380:         const feeQuery = query(collection(db, 'studentFees'), where('transactionId', '==', refundModalTx.id));
+src/components/admin/ManualEntryTab.tsx:72:          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student'), where('class', '==', selectedClass)));
+src/components/admin/ManualEntryTab.tsx:478:        const summaryDocs = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', examId)));
+src/components/admin/ViewManageTab.tsx:256:         const noticeRef = doc(collection(db, 'notices'));
+src/components/admin/UploadTab.tsx:247:        const summaryDocs = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', examId)));
+src/components/Layout.tsx:106:      let q = query(collection(db, 'notices'), orderBy('date', 'desc'));
+src/components/Layout.tsx:138:        const qAdmissions = query(collection(db, 'admissions'), where('status', '==', 'Pending'));

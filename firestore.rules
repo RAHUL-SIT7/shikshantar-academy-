@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && 
+             request.auth.token != null && 
+             (request.auth.token.get('email', '') == 'rahulsah4534@gmail.com' ||
+              request.auth.token.email == 'rahulsah4534@gmail.com');
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin')
+      );
+    }
+
+    function isTeacher() {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Teacher')
+      );
+    }
+
+    function isBillGenerator() {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'bill_generator' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'bill-generator' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'BillGenerator' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Bill Generator')
+      );
+    }
+
+    function isOwner(studentId) {
+      return isSignedIn() && (
+        request.auth.uid == studentId ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('studentId', '') == studentId)
+      );
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if true;
+      allow update: if isAdmin() || (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
+      allow create: if true;
+      allow delete: if isAdmin();
+    }
+
+    // Settings
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // User Calendars
+    match /userCalendars/{calendarId} {
+      allow read, write: if isSignedIn() && (calendarId.split('_')[0] == request.auth.uid || isAdmin());
+    }
+
+    // School Data
+    match /school_data/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Results
+    match /results/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /years/{year}/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /examConfigs/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /results_secure/{studentId}/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /resultSummary/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /exams/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // Admissions
+    match /admissions/{document=**} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin() || isTeacher();
+    }
+
+    // Contact Enquiries
+    match /contact_enquiries/{document=**} {
+      allow create: if true;
+      allow read, update, delete: if true;
+    }
+
+    // Alumni Submissions
+    match /alumni_submissions/{document=**} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin() || isTeacher();
+    }
+
+    // Notices
+    match /notices/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // Fee Management
+    match /feeStructure/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /studentFees/{feeDocId} {
+      allow read: if true;
+      allow write: if isAdmin() || isBillGenerator();
+    }
+
+    match /financial_students/{studentId} {
+      allow read: if true;
+      allow write: if isAdmin() || isBillGenerator();
+    }
+
+    match /financial_transactions/{transactionId} {
+      allow read: if true;
+      allow write: if isAdmin() || isBillGenerator();
+    }
+
+    // Transactions (alternate collection name)
+    match /transactions/{transactionId} {
+      allow read: if true;
+      allow write: if isAdmin() || isBillGenerator();
+    }
+
+    // Remit Bills Collection
+    match /remitBills/{billId} {
+      allow read: if isSignedIn() || isAdmin() || isBillGenerator();
+      allow write: if isAdmin() || isBillGenerator() || isTeacher();
+    }
+
+    // Cash Ledger Collection
+    match /cash_ledger/{ledgerId} {
+      allow read: if isSignedIn() || isAdmin() || isBillGenerator();
+      allow write: if isAdmin() || isBillGenerator();
+    }
+
+    // --- NEW SALARY COLLECTIONS ---
+
+    match /salary_structures/{teacherId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == teacherId);
+      allow write: if isAdmin();
+    }
+
+    match /salary_records/{recordId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.teacherId == request.auth.uid);
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /salary_requests/{requestId} {
+      allow read, write: if isSignedIn();
+    }
+
+  }
+}

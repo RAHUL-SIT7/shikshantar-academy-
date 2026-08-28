@@ -1,0 +1,23 @@
+{
+  "short_name": "Shikshantar",
+  "name": "Shikshantar Academy Siraha",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0A2540",
+  "theme_color": "#0A2540",
+  "display": "standalone",
+  "orientation": "portrait"
+}
