@@ -1098,7 +1098,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
       <Helmet>
         <title>Fee Structure | Shikshantar Academy</title>
         <meta name="description" content="View the detailed fee structure for different classes at Shikshantar Academy." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/feestructure" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/fee-structure" />
       </Helmet>
       Loading fee structure...</div>;
   }

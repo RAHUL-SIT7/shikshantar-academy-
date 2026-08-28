@@ -35,7 +35,7 @@ export default function Events() {
       <Helmet>
         <title>Events | Shikshantar Academy</title>
         <meta name="description" content="Discover upcoming and recent events, sports meets, and cultural programs at Shikshantar Academy." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/events" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/events" />
       </Helmet>
       
       <div className="md:col-span-2 flex flex-col gap-5">

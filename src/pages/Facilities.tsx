@@ -164,7 +164,7 @@ export default function Facilities() {
       <Helmet>
         <title>Facilities | Shikshantar Academy</title>
         <meta name="description" content="Explore the modern facilities, science labs, computer labs, and library at Shikshantar Academy." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/facilities" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/facilities" />
       </Helmet>
       
       {/* Header section with Edit controls */}

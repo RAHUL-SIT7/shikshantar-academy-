@@ -1467,6 +1467,8 @@ export default function AcademicCalendar() {
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 flex flex-col items-center">
       <Helmet>
         <title>Academic Calendar {selectedYear} | Shikshantar Academy</title>
+        <meta name="description" content="View the annual academic calendar, holiday schedules, examination dates, and event list for Shikshantar Academy." />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/calendar" />
       </Helmet>
 
       {/* HEADER CONTROLS */}

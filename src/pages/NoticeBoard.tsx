@@ -364,7 +364,7 @@ export default function NoticeBoard() {
       <Helmet>
         <title>Notice Board | Shikshantar Academy</title>
         <meta name="description" content="Stay updated with the latest notices, announcements, and news from Shikshantar Academy." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/noticeboard" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/notices" />
       </Helmet>
       
       {/* HEADER SECTION */}

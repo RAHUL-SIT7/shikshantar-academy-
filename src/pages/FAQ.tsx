@@ -248,7 +248,7 @@ export default function FAQ() {
       <Helmet>
         <title>FAQ & Help | Shikshantar Academy</title>
         <meta name="description" content="Find answers to frequently asked questions about Shikshantar Academy." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/faq" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/faq" />
       </Helmet>
       
       <div className="max-w-[1000px] mx-auto px-4">

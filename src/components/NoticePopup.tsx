@@ -15,7 +15,8 @@ import {
   Printer, 
   Check, 
   Eye,
-  Sparkles
+  Info,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import DOMPurify from 'isomorphic-dompurify';
@@ -68,7 +69,7 @@ export default function NoticePopup({
     phone: '+977 9709867048, +977 9807790805',
     whatsapp: '+977 9713688926',
     email: 'academyshikshantar@gmail.com',
-    estd: 'ESTD. 2064 B.S. (2007 A.D.)',
+    estd: 'ESTD. 2072 B.S. (2015 A.D.)',
     affiliation: 'Govt. Approved • Karjanhana, Siraha'
   });
 
@@ -168,11 +169,11 @@ export default function NoticePopup({
 
           {/* Right: Institutional Badge */}
           <div className="hidden sm:flex flex-col items-end text-right pr-7">
-            <div className="text-right">
-              <span className="text-[10px] font-black tracking-widest text-[#F0A500] uppercase block">
-                {schoolContact.estd}
+            <div className="bg-white/80 dark:bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-200/80 dark:border-slate-700/80 shadow-xs text-right">
+              <span className="text-[11px] font-extrabold tracking-wider text-slate-800 dark:text-slate-100 block">
+                ESTD. 2072 B.S. (2015 A.D.)
               </span>
-              <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500">
+              <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
                 {schoolContact.addressNe}
               </span>
             </div>
@@ -357,9 +358,9 @@ export default function NoticePopup({
 
       {/* 4. Bottom Acknowledgment Action Control */}
       <div className="px-6 py-3.5 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1">
-          <Sparkles className="w-3 h-3 text-amber-500" />
-          <span>यो सूचना ७ दिनसम्म प्रदर्शित हुनेछ । (Active memo for 7 days)</span>
+        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
+          <Info className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
+          <span>सूचना ७ दिनसम्म सक्रिय रहनेछ (Active notice memo)</span>
         </div>
 
         <AnimatePresence mode="wait">
@@ -371,7 +372,7 @@ export default function NoticePopup({
               exit={{ opacity: 0, scale: 0.95 }}
               className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-xs flex items-center gap-2 select-none"
             >
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>
+              <div className="w-2 h-2 rounded-full bg-red-500"></div>
               <span>Reviewing ({popupTimer}s)</span>
             </motion.div>
           ) : (
@@ -383,10 +384,10 @@ export default function NoticePopup({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
               onClick={onClose}
-              className="px-5 py-2.5 bg-gradient-to-r from-[#1B4F72] via-[#153e5b] to-[#0a2334] hover:from-[#F0A500] hover:to-[#d49200] text-white hover:text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-md transition-all duration-200 cursor-pointer flex items-center gap-2"
+              className="px-5 py-2.5 bg-gradient-to-r from-[#1B4F72] via-[#153e5b] to-[#0a2334] hover:from-[#F0A500] hover:to-[#d49200] text-white hover:text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl shadow-sm transition-all duration-200 cursor-pointer flex items-center gap-2"
             >
+              <Check className="w-3.5 h-3.5" />
               <span>Acknowledge & Close</span>
-              <span>✕</span>
             </motion.button>
           )}
         </AnimatePresence>

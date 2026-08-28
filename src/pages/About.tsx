@@ -116,7 +116,7 @@ export default function About() {
       <Helmet>
         <title>About Us | Shikshantar Academy</title>
         <meta name="description" content="Learn about the history, mission, and vision of Shikshantar Academy, providing excellence in education in Siraha." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/about" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/about" />
       </Helmet>
       
       {/* Admin Action Bar */}

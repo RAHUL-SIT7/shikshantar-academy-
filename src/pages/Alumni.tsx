@@ -358,7 +358,7 @@ export default function Alumni() {
       <Helmet>
         <title>Alumni Network | Shikshantar Academy</title>
         <meta name="description" content="Connect with the alumni network of Shikshantar Academy. See where our former students are today." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/alumni" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/alumni" />
       </Helmet>
       
       

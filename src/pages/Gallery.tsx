@@ -1195,7 +1195,7 @@ export default function Gallery() {
       <Helmet>
         <title>Gallery | Shikshantar Academy</title>
         <meta name="description" content="View photos of events, classroom activities, and school life at Shikshantar Academy." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/gallery" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/gallery" />
       </Helmet>
       
       {/* Visual Chronicles Hero Block */}

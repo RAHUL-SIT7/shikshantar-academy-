@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://shikshantaracademy.edu.np/sitemap.xml
+Sitemap: https://www.shikshantaracademy.edu.np/sitemap.xml

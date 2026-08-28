@@ -186,7 +186,7 @@ export default function ContactUs() {
       <Helmet>
         <title>Contact Us | Shikshantar Academy</title>
         <meta name="description" content="Get in touch with Shikshantar Academy. Find our location, phone number, and email address." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/contactus" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/contact" />
       </Helmet>
       
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">

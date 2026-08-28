@@ -654,7 +654,7 @@ Submitted via Digital Admission Portal.`;
       <Helmet>
         <title>Admissions | Shikshantar Academy</title>
         <meta name="description" content="Apply for admission to Shikshantar Academy. Check fee structures, requirements, and enroll online." />
-        <link rel="canonical" href="https://shikshantaracademy.edu.np/admission" />
+        <link rel="canonical" href="https://www.shikshantaracademy.edu.np/admission" />
       </Helmet>
       
         <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
