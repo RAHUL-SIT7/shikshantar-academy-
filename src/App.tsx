@@ -436,6 +436,14 @@ export default function App() {
         setIsAuthenticated(false);
         setUserRole("guest");
         localStorage.removeItem("userRole");
+        localStorage.removeItem("studentId");
+        localStorage.removeItem("studentClass");
+        localStorage.removeItem("adminSearchStudentId");
+        localStorage.removeItem("isGuest");
+        localStorage.removeItem("teacherSubjects");
+        localStorage.removeItem("lastUserUid");
+        localStorage.removeItem("localSessionId");
+        localStorage.removeItem("shikshantar_last_activity");
         if (unSubDoc) {
           unSubDoc();
           unSubDoc = null;

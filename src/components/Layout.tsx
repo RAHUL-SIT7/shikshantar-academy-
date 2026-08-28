@@ -5,7 +5,7 @@ import { Menu, X, Home, Building, Image, Calendar, User, FileText, LogOut, LogIn
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { useNotices } from '../contexts/NoticeContext';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, where, updateDoc, doc, getDoc, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, updateDoc, doc, getDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import WhatsAppWidget from './WhatsAppWidget';
 import CalculatorWidget from './CalculatorWidget';
@@ -384,7 +384,26 @@ export default function Layout({
   const academicYearString = `${currentBSYear}-${currentBSYear + 1} B.S.`;
 
   const handleLogout = async () => {
-    await signOut(auth);
+    try {
+      if (auth.currentUser) {
+        const localSessionId = localStorage.getItem('localSessionId');
+        if (localSessionId) {
+          // Remove this device's active session token from Firestore
+          await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+            activeSessions: arrayRemove(localSessionId)
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("Logout session cleanup error:", e);
+    }
+
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Sign out error:", err);
+    }
+
     setIsAuthenticated(false);
     localStorage.removeItem('userRole');
     localStorage.removeItem('studentId');
@@ -392,7 +411,12 @@ export default function Layout({
     localStorage.removeItem('adminSearchStudentId');
     localStorage.removeItem('isGuest');
     localStorage.removeItem('teacherSubjects');
-    navigate('/login');
+    localStorage.removeItem('lastUserUid');
+    localStorage.removeItem('localSessionId');
+    localStorage.removeItem('shikshantar_last_activity');
+    sessionStorage.clear();
+    
+    navigate('/login?reason=manual');
   };
 
   // Base navigation for all roles

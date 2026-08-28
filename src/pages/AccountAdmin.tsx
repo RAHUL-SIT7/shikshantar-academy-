@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, Wallet, TrendingUp, AlertTriangle, Users, BookOpen, Clock, LogOut, GraduationCap } from 'lucide-react';
+import { CreditCard, Wallet, TrendingUp, AlertTriangle, Users, BookOpen, Clock, LogOut, GraduationCap, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { formatBSDate, formatBSDateYMD } from '../lib/nepaliDate';
 
 import SimpleStudentLedgerTab from '../components/fee_management/SimpleStudentLedgerTab';
 import FeeStructure from './FeeStructure';
@@ -26,6 +27,7 @@ export default function AccountAdmin() {
   const [loading, setLoading] = useState(true);
   const [studentsData, setStudentsData] = useState<any[]>([]);
   const [transactionsData, setTransactionsData] = useState<any[]>([]);
+  const [cashEntriesData, setCashEntriesData] = useState<any[]>([]);
   const [feeStructures, setFeeStructures] = useState<any[]>([]);
 
   const [stats, setStats] = useState({
@@ -35,6 +37,10 @@ export default function AccountAdmin() {
      collectedThisYear: 0,
      collectionRate: 85,
      expectedThisMonth: 0,
+     todayIncome: 0,
+     todayExpense: 0,
+     todayNetCash: 0,
+     todayDateBS: formatBSDate(new Date()),
   });
 
   const fetchFeeData = () => { /* No-op, updates automatically */ };
@@ -47,12 +53,14 @@ export default function AccountAdmin() {
      let unsubStudents: any;
      let unsubTx: any;
      let unsubFees: any;
+     let unsubCash: any;
 
      const unsubAuth = onAuthStateChanged(auth, (user) => {
          if (unsubSettings) unsubSettings();
          if (unsubStudents) unsubStudents();
          if (unsubTx) unsubTx();
          if (unsubFees) unsubFees();
+         if (unsubCash) unsubCash();
          if (user) {
              setLoading(true);
              
@@ -61,10 +69,12 @@ export default function AccountAdmin() {
              let currentStudents: any[] = [];
              let currentTx: any[] = [];
              let currentFees: any[] = [];
+             let currentCashEntries: any[] = [];
 
              const updateData = () => {
                  setFeeStructures(currentStructs);
                  setTransactionsData(currentTx);
+                 setCashEntriesData(currentCashEntries);
 
                  const mergedStudents = currentStudents.map(s => {
                      const studentFees = currentFees.filter(f => f.studentId === s.id);
@@ -125,7 +135,7 @@ export default function AccountAdmin() {
                  let collectedYear = 0;
                  
                  currentTx.forEach((tx: any) => {
-                     if (tx.status === 'SUCCESS') collectedYear += tx.amount;
+                     if (tx.status === 'SUCCESS') collectedYear += Number(tx.amount || 0);
                  });
 
                  currentFees.forEach(f => {
@@ -137,6 +147,42 @@ export default function AccountAdmin() {
 
                  const expectedTotal = collectedYear + outstanding;
                  const rate = expectedTotal > 0 ? Math.round((collectedYear / expectedTotal) * 100) : 0;
+
+                 // Calculate Today's Inflow, Outflow, and Net Cash
+                 const todayBS = formatBSDateYMD(new Date());
+                 let todayFeeIncome = 0;
+                 currentTx.forEach((tx: any) => {
+                     let txDate = tx.date || '';
+                     if (!txDate && tx.createdAt) {
+                         try {
+                             txDate = formatBSDateYMD(tx.createdAt.seconds ? tx.createdAt.seconds * 1000 : tx.createdAt);
+                         } catch(e) {}
+                     }
+                     if (tx.status === 'SUCCESS' && (txDate === todayBS || txDate.startsWith(todayBS))) {
+                         todayFeeIncome += Number(tx.amount || 0);
+                     }
+                 });
+
+                 let todayManualIncome = 0;
+                 let todayExpense = 0;
+                 currentCashEntries.forEach((entry: any) => {
+                     let eDate = entry.date || '';
+                     if (!eDate && entry.timestamp) {
+                         try {
+                             eDate = formatBSDateYMD(entry.timestamp.seconds ? entry.timestamp.seconds * 1000 : entry.timestamp);
+                         } catch(e) {}
+                     }
+                     if (eDate === todayBS || eDate.startsWith(todayBS)) {
+                         if (entry.type === 'Income' && entry.category !== 'Fee Collection') {
+                             todayManualIncome += Number(entry.amount || 0);
+                         } else if (entry.type === 'Expense') {
+                             todayExpense += Number(entry.amount || 0);
+                         }
+                     }
+                 });
+
+                 const todayTotalIncome = todayFeeIncome + todayManualIncome;
+                 const todayNetCash = todayTotalIncome - todayExpense;
 
                  let lastCollectionDate = 'N/A';
                  const sortedTx = [...currentTx].sort((a: any, b: any) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
@@ -153,7 +199,11 @@ export default function AccountAdmin() {
                      collectedThisYear: collectedYear,
                      collectionRate: Math.min(rate, 100),
                      expectedThisMonth: 0,
-                     lastCollectionDate
+                     lastCollectionDate,
+                     todayIncome: todayTotalIncome,
+                     todayExpense: todayExpense,
+                     todayNetCash: todayNetCash,
+                     todayDateBS: formatBSDate(new Date())
                  }));
 
                  setLoading(false);
@@ -179,12 +229,18 @@ export default function AccountAdmin() {
                  currentFees = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                  updateData();
              }, (err) => { console.error('Error fetching fees:', err); });
+
+             unsubCash = onSnapshot(collection(db, 'cash_ledger'), (snap) => {
+                 currentCashEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                 updateData();
+             }, (err) => { console.error('Error fetching cash ledger:', err); });
          } else {
              setLoading(false);
              if (unsubSettings) unsubSettings();
              if (unsubStudents) unsubStudents();
              if (unsubTx) unsubTx();
              if (unsubFees) unsubFees();
+             if (unsubCash) unsubCash();
          }
      });
 
@@ -194,6 +250,7 @@ export default function AccountAdmin() {
          if (unsubStudents) unsubStudents();
          if (unsubTx) unsubTx();
          if (unsubFees) unsubFees();
+         if (unsubCash) unsubCash();
      };
   }, []);
 
@@ -217,9 +274,9 @@ export default function AccountAdmin() {
              <h1 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight uppercase">Fee Management</h1>
              <p className="text-sm font-medium text-gray-500 mt-1 uppercase tracking-widest">Financial Overview • Academic Year {(stats as any).academicYear || '2083'}</p>
           </div>
-          <div className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-full shadow-sm border border-emerald-100 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="text-xs font-black uppercase tracking-widest">Auto-Invoice Active</span>
+          <div className="bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 px-4 py-2 rounded-xl shadow-xs border border-emerald-200/80 dark:border-emerald-800/50 flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
+              <span className="text-xs font-bold uppercase tracking-wide">Auto-Invoice Active</span>
           </div>
       </div>
 
@@ -227,27 +284,58 @@ export default function AccountAdmin() {
       
       {/* Modern Bento Grid Summary */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5 animate-in fade-in zoom-in-95 duration-700 mb-8">
-        {/* Main large collection card */}
-        <div className="md:col-span-8 lg:col-span-5 bg-gradient-to-br from-[#1a2b4c] to-[#111d33] rounded-[2rem] p-8 text-white relative overflow-hidden flex flex-col justify-between shadow-xl shadow-blue-900/10">
-           <div className="absolute top-0 right-0 p-6 opacity-20">
+        {/* Main large collection card - Daily Net Cash Collection */}
+        <div className="md:col-span-8 lg:col-span-5 bg-gradient-to-br from-[#1a2b4c] to-[#111d33] rounded-[2rem] p-7 text-white relative overflow-hidden flex flex-col justify-between shadow-xl shadow-blue-900/10 min-h-[260px]">
+           <div className="absolute top-0 right-0 p-6 opacity-15 pointer-events-none">
                <TrendingUp className="w-32 h-32" />
            </div>
+           
            <div className="relative z-10">
-              <p className="text-sm font-bold text-blue-200 uppercase tracking-widest mb-2">Collected This Year</p>
-              <div className="text-4xl md:text-5xl font-black tracking-tight mb-2">NRs. {stats.collectedThisYear.toLocaleString()}</div>
-              <p className="text-xs font-medium text-blue-300">Updated {(stats as any).lastCollectionDate || 'N/A'}</p>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-blue-200 uppercase tracking-widest">Today's Net Collection</span>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-white/10 text-emerald-300">
+                    Daily Net
+                  </span>
+                </div>
+                <TrendingUp className="w-5 h-5 text-emerald-400 shrink-0" />
+              </div>
+
+              <div className="text-4xl md:text-5xl font-black tracking-tight text-white mt-1">
+                NRs. {stats.todayNetCash.toLocaleString()}
+              </div>
+
+              {/* Inflow vs Outflow side-by-side */}
+              <div className="flex items-center gap-4 mt-3 pt-3 border-t border-white/10 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <ArrowDownRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="text-blue-300 text-[10px] font-bold block uppercase">Today's Inflow</span>
+                    <span className="font-black text-emerald-300">NRs. {stats.todayIncome.toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="h-6 w-px bg-white/15"></div>
+                <div className="flex items-center gap-1.5">
+                  <ArrowUpRight className="w-4 h-4 text-rose-400 shrink-0" />
+                  <div>
+                    <span className="text-blue-300 text-[10px] font-bold block uppercase">Today's Expense</span>
+                    <span className="font-black text-rose-300">NRs. {stats.todayExpense.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
            </div>
            
-           <div className="relative z-10 mt-10 flex flex-col gap-3">
-              <div className="flex justify-between items-end">
-                <span className="text-sm text-blue-100 font-bold uppercase tracking-wider">Collection Rate</span>
-                <span className="text-3xl font-black">{stats.collectionRate}%</span>
+           <div className="relative z-10 mt-5 flex flex-col gap-2 pt-2 border-t border-white/10">
+              <div className="flex justify-between items-center text-xs font-semibold text-blue-200">
+                <span>Yearly Collected: <strong className="text-white font-black">NRs. {stats.collectedThisYear.toLocaleString()}</strong></span>
+                <span className="text-[11px] font-black px-2 py-0.5 rounded bg-blue-500/20 text-blue-200">
+                  Rate: {stats.collectionRate}%
+                </span>
               </div>
-              <div className="w-full bg-blue-900/60 rounded-full h-2.5 overflow-hidden">
-                 <div className="bg-blue-400 h-full rounded-full relative transition-all duration-1000 ease-out" style={{ width: `${stats.collectionRate}%` }}>
-                    <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-r from-transparent to-white/30 rounded-full"></div>
-                 </div>
+              <div className="w-full bg-blue-950/80 rounded-full h-2 overflow-hidden">
+                 <div className="bg-gradient-to-r from-blue-400 to-emerald-400 h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${stats.collectionRate}%` }}></div>
               </div>
+              <p className="text-[10px] text-blue-300/90 font-medium">Date: {stats.todayDateBS}</p>
            </div>
         </div>
 

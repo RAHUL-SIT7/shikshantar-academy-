@@ -176,7 +176,7 @@ export default function Breadcrumbs({ className = '', userRole = 'student' }: Br
 
         {/* Right Side: Quick Portal Badge / Indicator */}
         <div className="hidden md:flex items-center gap-2 text-[11px] text-gray-400 dark:text-gray-500 font-medium select-none shrink-0">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
           <span>Shikshantar Portal</span>
         </div>
       </div>

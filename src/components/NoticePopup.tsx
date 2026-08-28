@@ -185,14 +185,10 @@ export default function NoticePopup({
           <h2 className={`font-black text-lg sm:text-xl md:text-2xl leading-snug tracking-tight ${isUrgent ? 'text-[#D92525] dark:text-rose-400' : 'text-[#1B4F72] dark:text-[#F0A500]'}`}>
             {notice.title}
           </h2>
-          <div className="flex items-center justify-center flex-wrap gap-2 sm:gap-3 mt-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
-            <span className="inline-flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-300">
+          <div className="flex items-center justify-center gap-2 mt-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
               <span>प्रकाशन मिति: {displayDate}</span>
-            </span>
-            <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">•</span>
-            <span className="text-[11px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300 font-semibold">
-              लक्षित वर्ग: {Array.isArray(notice.targets) ? notice.targets.join(', ') : 'All'}
             </span>
           </div>
         </div>
@@ -321,7 +317,7 @@ export default function NoticePopup({
 
       {/* 3. Bottom Official Customer Care / Helpline Strip (Updated with True School Details) */}
       <div className="bg-[#D92525] dark:bg-red-950 text-white px-5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium border-t border-red-700/50 shrink-0">
-        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full justify-center sm:justify-start">
           <div className="flex items-center gap-1">
             <Phone className="w-3 h-3 text-white" />
             <span className="font-bold">सम्पर्क / HELPLINE:</span>
@@ -336,33 +332,10 @@ export default function NoticePopup({
             <span>{schoolContact.address}</span>
           </div>
         </div>
-
-        {/* Quick Action Buttons on right */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleCopyNotice}
-            className="p-1 rounded bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
-            title="Copy Notice Link"
-          >
-            {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <span className="text-[10px] font-bold px-1">Share</span>}
-          </button>
-          <button
-            onClick={handlePrint}
-            className="p-1 rounded bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
-            title="Print Notice"
-          >
-            <Printer className="w-3.5 h-3.5" />
-          </button>
-        </div>
       </div>
 
       {/* 4. Bottom Acknowledgment Action Control */}
-      <div className="px-6 py-3.5 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
-          <Info className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
-          <span>सूचना ७ दिनसम्म सक्रिय रहनेछ (Active notice memo)</span>
-        </div>
-
+      <div className="px-6 py-3.5 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
         <AnimatePresence mode="wait">
           {popupTimer > 0 ? (
             <motion.div

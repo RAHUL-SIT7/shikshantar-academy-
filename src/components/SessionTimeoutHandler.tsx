@@ -39,6 +39,12 @@ export default function SessionTimeoutHandler({ isAuthenticated }: SessionTimeou
       localStorage.removeItem('userRole');
       localStorage.removeItem('studentId');
       localStorage.removeItem('studentClass');
+      localStorage.removeItem('adminSearchStudentId');
+      localStorage.removeItem('isGuest');
+      localStorage.removeItem('teacherSubjects');
+      localStorage.removeItem('lastUserUid');
+      localStorage.removeItem('localSessionId');
+      sessionStorage.clear();
       await signOut(auth);
       window.location.href = '/login?reason=expired';
     } catch (err) {
