@@ -261,10 +261,10 @@ export default function Layout({
          localStorage.removeItem('studentClass');
       }
 
-      const isOfficial = user && (role === 'admin' || role === 'teacher' || role === 'bill_generator');
+      const isAdmin = user && role === 'admin';
 
-      if (isOfficial) {
-        // Subscribe to Pending Admissions
+      if (isAdmin) {
+        // Subscribe to Pending Admissions (Admin Only)
         const qAdmissions = query(collection(db, 'admissions'), where('status', '==', 'Pending'));
         unsubAdmissions = onSnapshot(qAdmissions, (snap) => {
           setPendingAdmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -272,7 +272,7 @@ export default function Layout({
           console.warn("Admissions fetch warning:", error);
         });
 
-        // Subscribe to Unread Web Enquiries
+        // Subscribe to Unread Web Enquiries (Admin Only)
         const qEnquiries = query(collection(db, 'contact_enquiries'), where('status', '==', 'unread'));
         unsubEnquiries = onSnapshot(qEnquiries, (snap) => {
           setPendingEnquiries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -280,7 +280,7 @@ export default function Layout({
           console.warn("Web enquiries fetch warning:", error);
         });
 
-        // Subscribe to Pending Alumni Submissions
+        // Subscribe to Pending Alumni Submissions (Admin Only)
         const qAlumni = query(collection(db, 'alumni_submissions'), where('status', '==', 'pending'));
         unsubAlumni = onSnapshot(qAlumni, (snap) => {
           setPendingAlumniSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -479,7 +479,7 @@ export default function Layout({
   const unreadEnquiriesCount = pendingEnquiries.filter(e => (!e.readBy || !e.readBy.includes(currentUid)) && !localReads.includes(e.id)).length;
   const unreadAlumniCount = pendingAlumniSubmissions.filter(al => (!al.readBy || !al.readBy.includes(currentUid)) && !localReads.includes(al.id)).length;
 
-  const unreadUrgentCount = (role === 'admin' || role === 'teacher' || role === 'bill_generator') 
+  const unreadUrgentCount = (role === 'admin') 
     ? unreadNoticesCount + unreadAdmissionsCount + unreadEnquiriesCount + unreadAlumniCount 
     : unreadNoticesCount;
 
@@ -539,9 +539,9 @@ export default function Layout({
       }
     });
 
-    const isOfficial = role === 'admin' || role === 'teacher' || role === 'bill_generator';
+    const isAdmin = role === 'admin';
 
-    if (isOfficial) {
+    if (isAdmin) {
       pendingAdmissions.forEach(a => {
         if (!a.readBy || !a.readBy.includes(uid)) {
           if (!newReads.includes(a.id)) newReads.push(a.id);

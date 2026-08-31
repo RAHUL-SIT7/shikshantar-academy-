@@ -88,12 +88,12 @@ import {
   YAxis,
 } from "recharts";
 import principalImageSrc from "../assets/images/regenerated_image_1780334392921.jpg";
+import principalJpgSrc from "../assets/principal.jpg";
 import logoImageSrc from "../assets/logo.png";
 const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "https://i.postimg.cc/nc9G7pRB/image.png";
-const fallbackImg =
-  "https://ui-avatars.com/api/?name=Principal&background=0D8ABC&color=fff&size=512";
-const principalImg = principalImageSrc;
+const principalImg = principalImageSrc || principalJpgSrc;
+const principalFallbackImg = principalJpgSrc || principalImageSrc || "https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=600&auto=format&fit=crop";
 
 const mapDummyImage = (url: string): string => {
   if (!url) return '';
@@ -827,8 +827,10 @@ export default function Home() {
             !data.principalImage ||
             data.principalImage === "/principal.jpg" ||
             data.principalImage.includes("ui-avatars.com") ||
+            data.principalImage.includes("postimg.cc") ||
             data.principalImage.includes("Jn2Qcnk6") ||
-            data.principalImage.includes("TP6GTp2w")
+            data.principalImage.includes("TP6GTp2w") ||
+            data.principalImage.startsWith("http://")
           ) {
             data.principalImage = principalImg;
           }
@@ -3238,8 +3240,9 @@ export default function Home() {
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover object-top transition-transform duration-500 group-hover/photo:scale-110"
                       onError={(e) => {
-                        if ((e.target as HTMLImageElement).src !== fallbackImg) {
-                          (e.target as HTMLImageElement).src = fallbackImg;
+                        const target = e.target as HTMLImageElement;
+                        if (target.src !== principalFallbackImg && target.src !== principalImg) {
+                          target.src = principalFallbackImg;
                         }
                       }}
                     />
@@ -3819,45 +3822,52 @@ export default function Home() {
               {
                 emoji: "🏫",
                 title: "Modern Infrastructure",
-                sentence1: "Our campus features child-friendly classrooms integrated with Building as a Learning Aid (BALA) wall murals.",
-                sentence2: "Students enjoy safe recreational playgrounds, clean sanitary amenities, and an inspiring daily learning environment."
+                desc: "Our child-friendly campus is equipped with curriculum-integrated BALA wall murals, spacious interactive classrooms, safe playgrounds, and hygienic amenities designed to inspire daily curiosity.",
+                tag: "Campus & Safety",
+                accentGlow: "from-blue-500/10 to-indigo-500/10"
               },
               {
                 emoji: "🔬",
                 title: "Science & Computer Lab",
-                sentence1: "Equipped with modern computer systems and practical laboratory apparatus for foundational and secondary classes.",
-                sentence2: "Learners gain hands-on scientific curiosity and essential technological literacy under experienced faculty mentorship."
+                desc: "Equipped with modern desktop computers and practical science apparatus, learners build hands-on technological literacy, experimental curiosity, and analytical thinking under expert faculty mentorship.",
+                tag: "Practical Learning",
+                accentGlow: "from-cyan-500/10 to-blue-500/10"
               },
               {
                 emoji: "🌐",
                 title: "English Medium",
-                sentence1: "All core curriculum subjects are taught in English to build global communicative confidence and strong analytical skills.",
-                sentence2: "We balance international academic standards with rich Nepali cultural values, ethics, and moral science."
+                desc: "All core curriculum subjects are taught in English to build global communicative confidence and analytical fluency, harmoniously balanced with rich Nepali cultural values, ethics, and moral science.",
+                tag: "Academic Excellence",
+                accentGlow: "from-emerald-500/10 to-teal-500/10"
               },
               {
                 emoji: "📊",
                 title: "Regular Assessments",
-                sentence1: "We conduct four systematic terminal examinations each academic year to measure and guide student progress.",
-                sentence2: "Parents receive timely feedback along with 24/7 digital access to report cards and attendance records on our portal."
+                desc: "We conduct four structured terminal examinations each academic year to closely monitor progress, backed by 24/7 digital report card access and transparent parent-teacher progress evaluations.",
+                tag: "Continuous Evaluation",
+                accentGlow: "from-amber-500/10 to-orange-500/10"
               },
               {
                 emoji: "🏆",
                 title: "Extra-Curricular Activities",
-                sentence1: "Students actively participate in inter-house sports tournaments, debates, creative arts, and annual cultural celebrations.",
-                sentence2: "These diverse activities build teamwork, leadership skills, emotional resilience, and lifelong physical fitness."
+                desc: "Through inter-house sports tournaments, debates, creative arts, and celebratory cultural programs, students develop vital leadership qualities, teamwork, and strong character alongside academics.",
+                tag: "Holistic Growth",
+                accentGlow: "from-rose-500/10 to-pink-500/10"
               },
               {
                 emoji: "💰",
                 title: "Affordable Fees",
-                sentence1: "We deliver quality private schooling with competitive, transparent, and family-friendly fee structures.",
-                sentence2: "Merit-based scholarships and need-based tuition concessions are provided to empower every deserving student."
+                desc: "We provide high-standard private schooling with transparent, honest fee structures, complemented by merit-based and need-based scholarship concessions for deserving students.",
+                tag: "Accessible Quality",
+                accentGlow: "from-violet-500/10 to-purple-500/10"
               },
               {
                 emoji: "📍",
                 title: "Central Location",
                 fullWidth: true,
-                sentence1: "Conveniently located in Bastipur, Karjanha-02, Siraha with safe, accessible student transit connectivity.",
-                sentence2: "The campus provides a secure, peaceful, and green setting away from highway noise for focused learning."
+                desc: "Conveniently situated in Bastipur, Karjanha-02, Siraha with dedicated bus transit connectivity, offering a secure, serene, green environment away from highway noise for distraction-free study.",
+                tag: "Peaceful Environment",
+                accentGlow: "from-sky-500/10 to-indigo-500/10"
               }
             ].map((facility, idx) => (
               <motion.div
@@ -3866,13 +3876,13 @@ export default function Home() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-40px" }}
                 transition={{ duration: 0.4, delay: idx * 0.05, type: "spring", stiffness: 120 }}
-                className={`group [perspective:1200px] h-[250px] sm:h-[265px] md:h-[275px] cursor-pointer select-none ${
+                className={`group [perspective:1200px] h-[240px] sm:h-[250px] md:h-[260px] cursor-pointer select-none ${
                   facility.fullWidth ? "col-span-1 lg:col-span-2" : "col-span-1"
                 }`}
                 onClick={() => setActiveCardIdx(activeCardIdx === idx ? null : idx)}
               >
                 <div 
-                  className={`relative w-full h-full transition-transform duration-700 [transform-style:preserve-3d] shadow-[0_8px_24px_rgba(0,0,0,0.06)] rounded-[28px] sm:rounded-[32px] ${
+                  className={`relative w-full h-full transition-transform duration-700 [transform-style:preserve-3d] shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.3)] rounded-[26px] sm:rounded-[28px] ${
                     activeCardIdx === idx 
                       ? "[transform:rotateY(180deg)]" 
                       : "group-hover:[transform:rotateY(180deg)]"
@@ -3881,67 +3891,72 @@ export default function Home() {
                 >
                   {/* FRONT SIDE */}
                   <div 
-                    className="absolute inset-0 bg-white dark:bg-slate-900 rounded-[28px] sm:rounded-[32px] border border-slate-200/90 dark:border-slate-800 border-l-[12px] sm:border-l-[16px] border-l-[#143D5C] dark:border-l-sky-600 px-7 sm:px-10 py-6 sm:py-7 flex flex-col justify-between transition-all duration-300 group-hover:shadow-2xl overflow-hidden"
+                    className="absolute inset-0 bg-white dark:bg-slate-900 rounded-[26px] sm:rounded-[28px] border border-slate-200/90 dark:border-slate-800 border-l-[10px] sm:border-l-[12px] border-l-[#143D5C] dark:border-l-sky-500 px-6 sm:px-8 py-5 sm:py-6 flex flex-col justify-between transition-all duration-300 group-hover:shadow-2xl overflow-hidden"
                     style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
                   >
-                    {/* Top Content: 3D Icon + Bold Facility Title */}
-                    <div className="flex items-center gap-6 sm:gap-8 my-auto">
-                      {/* 3D Emoji / Icon */}
-                      <div className="w-18 h-18 sm:w-22 sm:h-22 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700 flex items-center justify-center text-4xl sm:text-5xl shadow-xs shrink-0 group-hover:scale-105 transition-transform">
+                    {/* Background subtle glow effect on hover */}
+                    <div className={`absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br ${facility.accentGlow} rounded-full blur-2xl pointer-events-none group-hover:scale-150 transition-transform duration-700`} />
+
+                    {/* Top Content: 3D Icon + Badge + Bold Facility Title */}
+                    <div className="relative z-10 flex items-center gap-5 sm:gap-6 my-auto">
+                      {/* 3D Emoji / Icon with animated floating effect */}
+                      <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/60 dark:from-slate-800 dark:to-slate-700/60 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center text-3xl sm:text-4xl shadow-inner shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
                         <span>{facility.emoji}</span>
                       </div>
 
-                      {/* Bold Facility Title */}
-                      <div className="min-w-0">
-                        <h3 className="text-2xl sm:text-3xl lg:text-[28px] font-bold font-display text-[#0E2C44] dark:text-white leading-tight tracking-tight">
+                      {/* Bold Facility Title + Tag */}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <span className="inline-block text-[10.5px] font-bold uppercase tracking-wider text-blue-700 dark:text-sky-400 bg-blue-50 dark:bg-sky-950/60 border border-blue-100 dark:border-sky-900/50 px-2.5 py-0.5 rounded-full font-mono">
+                          {facility.tag}
+                        </span>
+                        <h3 className="text-xl sm:text-2xl lg:text-[25px] font-bold font-display text-[#0E2C44] dark:text-white leading-tight tracking-tight group-hover:text-[#1B4F72] dark:group-hover:text-amber-400 transition-colors">
                           {facility.title}
                         </h3>
                       </div>
                     </div>
 
                     {/* Bottom Row: Light Divider + Gold HOVER TO SEE DETAILS + Arrow */}
-                    <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                      <span className="text-xs sm:text-sm font-extrabold tracking-widest text-[#B8860B] dark:text-[#F0A500] uppercase font-mono">
-                        {isTouchDevice ? "TAP TO SEE DETAILS" : "HOVER TO SEE DETAILS"}
+                    <div className="relative z-10 pt-3.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                      <span className="text-xs sm:text-xs font-bold tracking-widest text-[#B8860B] dark:text-[#F0A500] uppercase font-mono">
+                        {isTouchDevice ? "TAP TO REVEAL DETAILS" : "HOVER TO REVEAL DETAILS"}
                       </span>
-                      <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6 text-[#B8860B] dark:text-[#F0A500] group-hover:translate-x-1.5 transition-transform" />
+                      <ChevronRight className="w-5 h-5 text-[#B8860B] dark:text-[#F0A500] group-hover:translate-x-1.5 transition-transform" />
                     </div>
                   </div>
 
-                  {/* BACK SIDE - EXACTLY TWO CONCISE SENTENCES WITH GENEROUS ROOM */}
+                  {/* BACK SIDE - CONTINUOUS SINGLE FLOW PASSAGE WITH GOLD ACCENT */}
                   <div 
-                    className="absolute inset-0 bg-gradient-to-br from-[#0c2438] via-[#12395b] to-[#0a1c2c] dark:from-slate-900 dark:to-slate-950 rounded-[28px] sm:rounded-[32px] border border-white/20 border-l-[12px] sm:border-l-[16px] border-l-[#F0A500] px-7 sm:px-10 py-6 sm:py-7 flex flex-col justify-between text-white shadow-2xl overflow-hidden"
+                    className="absolute inset-0 bg-gradient-to-br from-[#0c2438] via-[#12395b] to-[#0a1c2c] dark:from-slate-900 dark:to-slate-950 rounded-[26px] sm:rounded-[28px] border border-white/20 border-l-[10px] sm:border-l-[12px] border-l-[#F0A500] px-6 sm:px-8 py-5 sm:py-6 flex flex-col justify-between text-white shadow-2xl overflow-hidden"
                     style={{ 
                       transform: "rotateY(180deg)", 
                       backfaceVisibility: "hidden", 
                       WebkitBackfaceVisibility: "hidden" 
                     }}
                   >
-                    <div>
+                    <div className="flex-1 flex flex-col justify-center">
                       {/* Back Header Bar */}
-                      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-3 mb-3">
+                      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2.5 mb-2.5">
                         <div className="flex items-center gap-2.5">
-                          <span className="text-2xl">{facility.emoji}</span>
-                          <span className="text-base sm:text-lg font-bold font-display text-white tracking-tight">
+                          <span className="text-xl">{facility.emoji}</span>
+                          <span className="text-sm sm:text-base font-bold font-display text-white tracking-tight">
                             {facility.title}
                           </span>
                         </div>
+                        <span className="text-[10px] font-bold text-[#F0A500] uppercase tracking-wider bg-white/10 px-2 py-0.5 rounded-full font-mono">
+                          {facility.tag}
+                        </span>
                       </div>
 
-                      {/* Concise 2-Sentence Description */}
-                      <div className="space-y-2.5 pt-1">
-                        <p className="text-sm sm:text-[15px] text-slate-100 font-sans leading-relaxed">
-                          {facility.sentence1}
-                        </p>
-                        <p className="text-sm sm:text-[15px] text-slate-300 font-sans leading-relaxed">
-                          {facility.sentence2}
-                        </p>
-                      </div>
+                      {/* Continuous Single-Flow Description */}
+                      <p className="text-xs sm:text-[13.5px] text-slate-100 font-sans leading-[1.65] font-normal">
+                        {facility.desc}
+                      </p>
                     </div>
 
                     {/* Back Footer */}
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 pt-3 border-t border-white/10 flex items-center justify-end font-mono">
-                      <span>{isTouchDevice ? "Tap to flip front" : "Hover out to flip"}</span>
+                    <div className="text-[10.5px] font-bold uppercase tracking-widest text-slate-300/80 pt-2.5 border-t border-white/10 flex items-center justify-between font-mono">
+                      <span className="text-[#F0A500]">Shikshantar Advantage</span>
+                      <span>{isTouchDevice ? "Tap to flip back" : "Hover out to flip"}</span>
                     </div>
                   </div>
                 </div>

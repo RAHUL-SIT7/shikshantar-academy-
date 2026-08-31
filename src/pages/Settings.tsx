@@ -4,6 +4,7 @@ import { doc, setDoc, onSnapshot, deleteDoc, collection, getDocs, query, where, 
 import { Save, Settings as SettingsIcon, MonitorPlay, Calendar, Clock, Plus, X, Mail, Key, CheckCircle2, Wrench, ShieldAlert, Copy, ExternalLink, AlertTriangle, Eye } from 'lucide-react';
 
 import ThemeSettings from './ThemeSettings';
+import principalImageSrc from '../assets/images/regenerated_image_1780334392921.jpg';
 
 const DEFAULT_CONTENT = {
   tagline1: 'Welcome to',
@@ -149,7 +150,7 @@ const DEFAULT_CONTENT = {
   // Principal & Contact
   principalName: 'Mr. Pappu Kumar Jha',
   principalTitle: 'Principal, Shikshantar Academy',
-  principalImage: 'https://i.postimg.cc/TP6GTp2w/606350985-1458678509597899-5556893883060728495-n-jpg-stp-dst-jpegr-p720x720-tt6-nc-cat-111-ccb-1-7.jpg',
+  principalImage: principalImageSrc,
   findUsAddress: 'Bastipur-5, Karjanhana Municipality\nWard No. 05, Siraha,\nMadhesh Pradesh, Nepal'
 };
 
