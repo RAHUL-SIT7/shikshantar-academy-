@@ -1,7 +1,6 @@
 import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+import logoImage from '../assets/logo.png';
 
 const addSchoolHeaderToSheet = async (
   workbook: ExcelJS.Workbook,

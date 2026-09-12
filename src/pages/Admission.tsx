@@ -46,8 +46,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { auth } from "../firebase";
-
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+import logoImage from "../assets/logo.png";
 
 export default function Admission() {
   const navigate = useNavigate();

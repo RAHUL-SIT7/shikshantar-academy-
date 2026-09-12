@@ -1,7 +1,7 @@
 import { Helmet } from 'react-helmet-async';
 import { 
   Info, Target, Eye, Heart, History as HistoryIcon, Edit2, Save, X, 
-  MapPin, Sparkles, Quote, Award, GraduationCap, School, BookOpen, ShieldCheck,
+  MapPin, Quote, Award, School, BookOpen, ShieldCheck,
   Compass, Lightbulb, Users, Calendar
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -11,7 +11,7 @@ import principalImg from '../assets/images/regenerated_image_1780334392921.jpg';
 import logoImageSrc from '../assets/logo.png';
 
 const logoImage = logoImageSrc || "/logo.png";
-const logoFallback = "https://i.postimg.cc/nc9G7pRB/image.png";
+const logoFallback = "/logo.png";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -161,11 +161,6 @@ export default function About() {
           
           {/* Main Hero Typography */}
           <div className="lg:col-span-7 space-y-6">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500/10 to-blue-500/10 dark:from-indigo-500/20 dark:to-blue-500/20 border border-indigo-500/15 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-black uppercase tracking-widest">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              Discover Our Academy
-            </div>
-            
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black leading-none text-slate-900 dark:text-white tracking-tight">
               Shikshantar <br />
               <span className="bg-gradient-to-r from-indigo-600 via-primary to-blue-600 bg-clip-text text-transparent">Academy</span>
@@ -307,16 +302,6 @@ export default function About() {
             )}
 
             <div className="border-t border-slate-100 dark:border-slate-800 pt-6 flex flex-wrap gap-6 text-slate-500 dark:text-slate-400">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300">
-                  <GraduationCap className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Education Standard</p>
-                  <p className="text-xs font-black text-slate-800 dark:text-white">Madhesh Province Top-tier</p>
-                </div>
-              </div>
-
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300">
                   <School className="w-5 h-5" />
@@ -466,7 +451,6 @@ export default function About() {
                  <Heart className="w-5 h-5 animate-pulse" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest">Our DNA</p>
                 <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">Our Core Values</h2>
               </div>
             </div>

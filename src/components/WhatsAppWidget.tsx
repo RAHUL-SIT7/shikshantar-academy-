@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, X, Send, UserCheck, CreditCard } from 'lucide-react';
+import logoImage from '../assets/logo.png';
 
 interface Department {
   name: string;
@@ -97,12 +98,16 @@ export default function WhatsAppWidget() {
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/95 p-1 flex items-center justify-center shadow-sm overflow-hidden shrink-0">
                       <img
-                        src="https://i.postimg.cc/nc9G7pRB/image.png"
+                        src={logoImage || "/logo.png"}
                         alt="Shikshantar Academy Logo"
                         className="w-full h-full object-contain"
                         referrerPolicy="no-referrer"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
+                          if (target.src !== '/logo.png') {
+                            target.src = '/logo.png';
+                            return;
+                          }
                           target.style.display = 'none';
                           const parent = target.parentElement;
                           if (parent) {

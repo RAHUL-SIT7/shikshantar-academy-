@@ -13,6 +13,7 @@ import 'nepali-datepicker-reactjs/dist/index.css';
 import NepaliDate from 'nepali-date-converter';
 import { exportToPDF } from '../../lib/pdfExport';
 import { exportToExcel, exportMultiSheetExcel } from '../../lib/excelExport';
+import logoImage from '../../assets/logo.png';
 
 export default function TransactionHistoryTab({ transactionsData, studentsData = [], onRefresh, initialSearchTerm = '', onSearchTermChange }: { transactionsData: any[], studentsData?: any[], onRefresh: () => void, initialSearchTerm?: string, onSearchTermChange?: (val: string) => void }) {
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm);
@@ -208,7 +209,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                      }
                      body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1f2937; line-height: 1.35; padding: 10px; background-color: #fff; }
                      .receipt-container { max-width: 650px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 15px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); position: relative; overflow: hidden; }
-                     .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 280px; background-image: url('https://i.postimg.cc/nc9G7pRB/image.png'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.04; pointer-events: none; z-index: 0; }
+                     .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 280px; background-image: url('/logo.png'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.04; pointer-events: none; z-index: 0; }
                      .header, .receipt-title-bar, .info-grid, table, .summary-box, .notes-box, .footer { position: relative; z-index: 10; }
                      .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-bottom: 10px; }
                      .header-left { display: flex; align-items: center; gap: 10px; }
@@ -244,7 +245,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                      <!-- Header -->
                      <div class="header">
                          <div class="header-left">
-                             <img class="school-logo" src="https://i.postimg.cc/nc9G7pRB/image.png" onerror="this.onerror=null; this.src='https://ui-avatars.com/api/?name=S+A&background=10b981&color=fff&size=100&bold=true';" alt="Logo" />
+                             <img class="school-logo" src="/logo.png" onerror="this.onerror=null; this.src='https://ui-avatars.com/api/?name=S+A&background=10b981&color=fff&size=100&bold=true';" alt="Logo" />
                              <div>
                                  <h1 class="school-name">SHIKSHANTAR ACADEMY</h1>
                                  <p class="school-info">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>
@@ -418,7 +419,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                      }
                      body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1f2937; line-height: 1.35; padding: 10px; background-color: #fff; }
                      .receipt-container { max-width: 650px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 15px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); position: relative; overflow: hidden; }
-                     .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 280px; background-image: url('https://i.postimg.cc/nc9G7pRB/image.png'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.04; pointer-events: none; z-index: 0; }
+                     .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 280px; background-image: url('/logo.png'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.04; pointer-events: none; z-index: 0; }
                      .header, .receipt-title-bar, .info-grid, table, .summary-box, .notes-box, .footer { position: relative; z-index: 10; }
                      .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-bottom: 10px; }
                      .header-left { display: flex; align-items: center; gap: 10px; }
@@ -452,7 +453,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                      <!-- Header -->
                      <div class="header">
                          <div class="header-left">
-                             <img class="school-logo" src="https://i.postimg.cc/nc9G7pRB/image.png" onerror="this.onerror=null; this.src='https://ui-avatars.com/api/?name=S+A&background=10b981&color=fff&size=100&bold=true';" alt="Logo" />
+                             <img class="school-logo" src="/logo.png" onerror="this.onerror=null; this.src='https://ui-avatars.com/api/?name=S+A&background=10b981&color=fff&size=100&bold=true';" alt="Logo" />
                              <div>
                                  <h1 class="school-name">SHIKSHANTAR ACADEMY</h1>
                                  <p class="school-info">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>
@@ -1343,7 +1344,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                            <div className="text-center mb-8">
                              <div className="mx-auto flex justify-center mb-4">
                                <img 
-                                  src="https://i.postimg.cc/nc9G7pRB/image.png" 
+                                  src="/logo.png" 
                                   onError={(e) => {
                                     e.currentTarget.onerror = null;
                                     e.currentTarget.src = 'https://ui-avatars.com/api/?name=S+A&background=10b981&color=fff&size=100&bold=true';

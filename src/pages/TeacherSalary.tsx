@@ -9,8 +9,7 @@ import { collection, onSnapshot, query, where, doc, getDoc, setDoc } from 'fireb
 import { onAuthStateChanged } from 'firebase/auth';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
-
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+import logoImage from '../assets/logo.png';
 
 export default function TeacherSalary() {
   const [records, setRecords] = useState<any[]>([]);

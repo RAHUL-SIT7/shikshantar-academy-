@@ -30,8 +30,7 @@ import NepaliDate from "nepali-date-converter";
 import autoTable from "jspdf-autotable";
 import jsPDF from "jspdf";
 import ModernClockCalendar from "../components/ModernClockCalendar";
-
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+import logoImage from "../assets/logo.png";
 
 const DEFAULT_MONTHS_2083 = [
   {

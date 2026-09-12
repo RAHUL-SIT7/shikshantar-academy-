@@ -9,8 +9,7 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
 import { ReportCardTemplate } from './ReportCardTemplate';
-
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+import logoImage from '../../assets/logo.png';
 
 export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRole, assignedClasses, teacherProfile }: any) {
   const [filterClass, setFilterClass] = useState('');

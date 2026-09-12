@@ -14,7 +14,7 @@ import NoticePopup from './NoticePopup';
 import Breadcrumbs from './Breadcrumbs';
 import logoImageSrc from '../assets/logo.png';
 
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "/logo.png";
 
 interface Notice {

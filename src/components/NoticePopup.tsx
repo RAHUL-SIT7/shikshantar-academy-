@@ -25,7 +25,7 @@ import logoImageSrc from '../assets/logo.png';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
-const fallbackLogo = "https://i.postimg.cc/nc9G7pRB/image.png";
+const fallbackLogo = logoImageSrc || "/logo.png";
 
 export interface Notice {
   id: string;

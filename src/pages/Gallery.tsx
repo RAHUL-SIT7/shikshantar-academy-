@@ -23,22 +23,74 @@ import { db, auth, storage } from '../firebase';
 import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-const teachersGroupImg = "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?q=80&w=1470&auto=format&fit=crop";
-const tiharEventImg = "https://images.unsplash.com/photo-1605151523425-46fdad6ff468?q=80&w=1548&auto=format&fit=crop";
+import principalImg from '../assets/gallery/principal_pappu_jha.jpg';
+import teachersGroupImg from '../assets/gallery/teacher_team.jpg';
+import batch2082Img from '../assets/gallery/batch_2082.jpg';
+import batch2081Img from '../assets/gallery/batch_2081.jpg';
+import batch2080Img from '../assets/gallery/batch_2080.jpg';
+import batch2079Img from '../assets/gallery/batch_2079.jpg';
+import tiharEventImg from '../assets/gallery/event_tihar.jpg';
 
-const mapDummyImage = (url: string): string => {
+const mapDummyImage = (url: string, meta?: { name?: string; role?: string; title?: string; year?: string }): string => {
   if (!url) return '';
-  if (url.includes('picsum.photos')) {
-    if (url.includes('/seed/t1/')) return 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/t2/')) return 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/t3/')) return 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/t4/')) return 'https://images.unsplash.com/photo-1580894732444-8fecef2271ff?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/b82/')) return 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/seed/b81/')) return 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/seed/e1/')) return 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/seed/e2/')) return 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=800&h=600&auto=format&fit=crop';
-    return 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&h=600&auto=format&fit=crop';
+  const u = url.toLowerCase();
+  const contextStr = `${meta?.name || ''} ${meta?.role || ''} ${meta?.title || ''} ${meta?.year || ''}`.toLowerCase();
+
+  // 1. Principal Pappu Kumar Jha
+  if (u.includes('hxs0xbcd') || contextStr.includes('pappu') || (contextStr.includes('principal') && !contextStr.includes('staff'))) {
+    return principalImg;
   }
+
+  // 2. Teacher Team & Faculty Staff Group Photo
+  if (u.includes('km08rjz7') || contextStr.includes('team') || contextStr.includes('faculty') || contextStr.includes('staff') || contextStr.includes('group photo')) {
+    return teachersGroupImg;
+  }
+
+  // 3. Batch 2082 B.S.
+  if (u.includes('dz9zdw6d') || contextStr.includes('2082')) {
+    return batch2082Img;
+  }
+
+  // 4. Batch 2081 B.S.
+  if (u.includes('kzssh3xb') || contextStr.includes('2081')) {
+    return batch2081Img;
+  }
+
+  // 5. Batch 2080 B.S.
+  if (u.includes('0qd3gt09') || contextStr.includes('2080')) {
+    return batch2080Img;
+  }
+
+  // 6. Batch 2079 B.S.
+  if (u.includes('yywfn655') || contextStr.includes('2079')) {
+    return batch2079Img;
+  }
+
+  // 7. Celebrating Tihar / Festival
+  if (u.includes('yqmyrvjy') || contextStr.includes('tihar') || contextStr.includes('deepawali')) {
+    return tiharEventImg;
+  }
+
+  // Handle broken/expired firebasestorage or dummy avatars
+  if (u.includes('school-c5948.firebasestorage.app') || u.includes('ui-avatars.com')) {
+    if (contextStr.includes('pooja') || contextStr.includes('saraswati') || contextStr.includes('sarsawati')) {
+      return tiharEventImg;
+    }
+    if (contextStr.includes('teacher') || contextStr.includes('faculty')) {
+      return teachersGroupImg;
+    }
+    if (contextStr.includes('batch')) {
+      return batch2082Img;
+    }
+    return tiharEventImg;
+  }
+
+  if (url.includes('picsum.photos')) {
+    if (contextStr.includes('teacher') || contextStr.includes('faculty')) return teachersGroupImg;
+    if (contextStr.includes('batch')) return batch2082Img;
+    return tiharEventImg;
+  }
+
   return url;
 };
 
@@ -656,10 +708,20 @@ function NatureBoard({
                       </div>
                     ) : (
                       <img 
-                        src={item.image} 
+                        src={item.image || principalImg} 
                         alt={titleText} 
                         className="w-full h-full object-cover select-none pointer-events-none" 
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          if (titleText.toLowerCase().includes('pappu') || titleText.toLowerCase().includes('principal')) {
+                            if (target.src !== principalImg && !target.src.includes('principal.jpg')) {
+                              target.src = principalImg;
+                              return;
+                            }
+                          }
+                          target.src = teachersGroupImg;
+                        }}
                       />
                     )}
                   </div>
@@ -919,32 +981,30 @@ export default function Gallery() {
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'school_data', 'gallery'), (docSnap) => {
       const defaultTeachers = [
-        { id: 1, name: 'Teaching Faculty', role: 'Principal & Staff', image: teachersGroupImg, type: 'image' },
-        { id: 2, name: 'Mr. Pappu Kumar Jha', role: 'Principal', image: 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=400&h=500&auto=format&fit=crop', type: 'image' },
-        { id: 3, name: 'Mrs. Sharma', role: 'Science Teacher', image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&h=500&auto=format&fit=crop', type: 'image' },
-        { id: 4, name: 'Mr. Koirala', role: 'Math Teacher', image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=400&h=500&auto=format&fit=crop', type: 'image' },
-        { id: 5, name: 'Ms. Thapa', role: 'English Teacher', image: 'https://images.unsplash.com/photo-1580894732444-8fecef2271ff?q=80&w=400&h=500&auto=format&fit=crop', type: 'image' },
+        { id: 1, name: 'Teacher Team', role: 'Group Photo', image: teachersGroupImg, type: 'image' },
+        { id: 2, name: 'Mr. Pappu Kumar Jha', role: 'Principal Sir', image: principalImg, type: 'image' },
       ];
       const defaultBatches = [
-        { year: '2082 B.S', image: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?q=80&w=800&h=600&auto=format&fit=crop', type: 'image' },
-        { year: '2081 B.S', image: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&h=600&auto=format&fit=crop', type: 'image' },
+        { year: 'Batch Year : 2082 B.S', image: batch2082Img, type: 'image' },
+        { year: 'Batch Year : 2081 B.S', image: batch2081Img, type: 'image' },
+        { year: 'Batch Year : 2080 B.S', image: batch2080Img, type: 'image' },
+        { year: 'Batch Year : 2079 B.S', image: batch2079Img, type: 'image' },
       ];
       const defaultEvents = [
         { title: 'Celebrating Tihar', image: tiharEventImg, type: 'image' },
-        { title: 'Annual Sports Day', image: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=800&h=600&auto=format&fit=crop', type: 'image' },
-        { title: 'Science Exhibition', image: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=800&h=600&auto=format&fit=crop', type: 'image' },
+        { title: 'Sarsawati Pooja 2082', image: tiharEventImg, type: 'image' },
       ];
 
       if (docSnap.exists()) {
         const data = docSnap.data();
         const currentTeachers = (data.teachers !== undefined) 
-          ? data.teachers.map((t: any) => ({ ...t, image: mapDummyImage(t.image) }))
+          ? data.teachers.map((t: any) => ({ ...t, image: mapDummyImage(t.image, { name: t.name, role: t.role }) }))
           : defaultTeachers;
         const currentBatches = (data.batches !== undefined) 
-          ? data.batches.map((b: any) => ({ ...b, image: mapDummyImage(b.image) }))
+          ? data.batches.map((b: any) => ({ ...b, image: mapDummyImage(b.image, { year: b.year }) }))
           : defaultBatches;
         const currentEvents = (data.events !== undefined) 
-          ? data.events.map((e: any) => ({ ...e, image: mapDummyImage(e.image) }))
+          ? data.events.map((e: any) => ({ ...e, image: mapDummyImage(e.image, { title: e.title }) }))
           : defaultEvents;
 
         setTeachers(currentTeachers);
@@ -1698,6 +1758,22 @@ export default function Gallery() {
                         alt={`S.E.E. Batch ${batch.year}`}
                         className="w-full h-full object-cover transition-transform duration-550 group-hover:scale-106"
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          if ((batch.year || '').includes('2081')) {
+                            target.src = batch2081Img;
+                            return;
+                          }
+                          if ((batch.year || '').includes('2080')) {
+                            target.src = batch2080Img;
+                            return;
+                          }
+                          if ((batch.year || '').includes('2079')) {
+                            target.src = batch2079Img;
+                            return;
+                          }
+                          target.src = batch2082Img;
+                        }}
                       />
                     )}
                     
@@ -1816,6 +1892,10 @@ export default function Gallery() {
                         alt={event.title}
                         className="w-full h-full object-cover transition-transform duration-550 group-hover:scale-106"
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = tiharEventImg;
+                        }}
                       />
                     )}
                     
@@ -1894,6 +1974,10 @@ export default function Gallery() {
                     className="max-w-[92vw] max-h-[85vh] object-contain rounded-2xl drop-shadow-2xl pointer-events-auto block mx-auto border border-white/5"
                     referrerPolicy="referrer"
                     onClick={() => setExpandedImage(null)}
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = teachersGroupImg;
+                    }}
                   />
                 </TransformComponent>
               </TransformWrapper>

@@ -7,6 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, writeBatch, serverTimestamp, onSnapshot, query, where, getDoc, setDoc, getDocs, deleteField } from 'firebase/firestore';
 import { Search, Loader2, Plus, X, FileText, CheckCircle2, AlertCircle, Trash2, Printer, Clock, Banknote, Check } from 'lucide-react';
 import { formatBSDate, getBSYearMonthDate } from '../../lib/nepaliDate';
+import logoImage from '../../assets/logo.png';
 
 const MONTHS = ['Baisakh', 'Jestha', 'Asar', 'Shrawan', 'Bhadra', 'Ashwin', 'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'];
 
@@ -310,7 +311,7 @@ export default function RemitBillsGeneratorTab({
   useEffect(() => {
     const fetchLogo = async () => {
       try {
-        const response = await fetch("https://i.postimg.cc/nc9G7pRB/image.png");
+        const response = await fetch(logoImage || "/logo.png");
         const blob = await response.blob();
         const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
@@ -1666,7 +1667,7 @@ export default function RemitBillsGeneratorTab({
           }
           body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1f2937; line-height: 1.5; padding: 20px; background-color: #fff; }
           .bill-container { max-width: 750px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 16px; padding: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); position: relative; overflow: hidden; }
-          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 340px; height: 340px; background-image: url('https://i.postimg.cc/nc9G7pRB/image.png'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.05; pointer-events: none; z-index: 0; }
+          .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 340px; height: 340px; background-image: url('${logoImage || "/logo.png"}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.05; pointer-events: none; z-index: 0; }
           .header, .bill-info-grid, table, .notes-box, .footer { position: relative; z-index: 10; }
           .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1B4F72; padding-bottom: 15px; margin-bottom: 20px; }
           .header-left { display: flex; align-items: center; gap: 15px; }
@@ -1700,7 +1701,7 @@ export default function RemitBillsGeneratorTab({
           <!-- Header -->
           <div class="header">
             <div class="header-left">
-              <img class="school-logo" src="https://i.postimg.cc/nc9G7pRB/image.png" alt="School Logo" />
+              <img class="school-logo" src="${logoImage || "/logo.png"}" alt="School Logo" />
               <div>
                 <h1 class="school-name">SHIKSHANTAR ACADEMY</h1>
                 <p class="school-info">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>
@@ -2888,13 +2889,13 @@ export default function RemitBillsGeneratorTab({
               {/* Logo Watermark in background */}
               <div 
                 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 sm:w-96 sm:h-96 bg-contain bg-no-repeat bg-center opacity-[0.06] pointer-events-none select-none z-0"
-                style={{ backgroundImage: `url('https://i.postimg.cc/nc9G7pRB/image.png')` }}
+                style={{ backgroundImage: `url('${logoImage || "/logo.png"}')` }}
               />
 
               {/* Header block */}
               <div className="flex justify-between items-start border-b border-slate-200 pb-6 relative z-10">
                 <div className="flex items-start gap-4">
-                  <img src="https://i.postimg.cc/nc9G7pRB/image.png" alt="Shikshantar Academy Logo" className="w-16 h-16 object-contain shrink-0" referrerPolicy="no-referrer" />
+                  <img src={logoImage || "/logo.png"} alt="Shikshantar Academy Logo" className="w-16 h-16 object-contain shrink-0" referrerPolicy="no-referrer" />
                   <div>
                     <h2 className="text-xl font-black text-slate-900 tracking-tight leading-none uppercase">Shikshantar Academy</h2>
                     <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1.5 leading-tight">Bastipur, Karjanha-05, Siraha, Nepal • Ph: +977 9709867048, +977 9807790805</p>

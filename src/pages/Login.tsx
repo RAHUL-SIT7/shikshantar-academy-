@@ -39,7 +39,7 @@ import SpotlightCard from '../components/SpotlightCard';
 import LiquidButton from '../components/ui/LiquidButton';
 import logoImageSrc from '../assets/logo.png';
 
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "/logo.png";
 
 const ensureSafePassword = (pwd: string) => {

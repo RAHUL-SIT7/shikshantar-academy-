@@ -1,8 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatBSDate } from './nepaliDate';
-
-const logoImage = "https://i.postimg.cc/nc9G7pRB/image.png";
+import logoImage from '../assets/logo.png';
 
 export const exportToPDF = async (
     title: string, 

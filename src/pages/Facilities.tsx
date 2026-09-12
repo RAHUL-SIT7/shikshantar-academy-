@@ -19,37 +19,37 @@ const DEFAULT_FACILITIES: Facility[] = [
     id: 'classroom',
     title: 'Classes',
     description: 'Spacious, well-ventilated, and equipped with modern teaching aids. Our classrooms provide a vibrant atmosphere for modern learning.',
-    image: 'https://i.postimg.cc/mD4gP09j/conseil-de-classe.jpg',
+    image: 'https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'computer-lab',
     title: 'Computer Lab',
     description: 'State-of-art computer lab for practical work and digital skills. Equipped with latest generation PCs and high-speed internet.',
-    image: 'https://i.postimg.cc/hvxs2Qj6/068A2257.webp',
+    image: 'https://images.unsplash.com/photo-1562774053-701939374585?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'playground',
     title: 'Sports & Playground',
     description: 'A large playground for various sports and physical activities. Promoting health, teamwork, and sportsmanship among students.',
-    image: 'https://i.postimg.cc/VsjXH845/SPORT-Muga-Pitch-1.jpg',
+    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'science-lab',
     title: 'Science Lab',
     description: 'Fully equipped physics, chemistry, and biology laboratories providing practical exposure and hands-on learning experiences.',
-    image: 'https://i.postimg.cc/kgb6YVrn/Warsaw-High-School-Renovation-Science-Classrooms-2-scaled.jpg',
+    image: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'library',
     title: 'Library',
     description: 'A well-stocked library with a vast collection of academic books, reference texts, and periodicals to encourage reading habits.',
-    image: 'https://i.postimg.cc/mkmC4KVR/61897a35583a9b51db018d3e-Martin-Public-Seating-97560-Importance-School-Library-blogbanner1.jpg',
+    image: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'transport',
     title: 'Safe School Transport',
     description: 'A fleet of dedicated school buses ensuring a safe, comfortable, and reliable daily commute for students across designated routes.',
-    image: 'https://i.postimg.cc/50NtJyrW/547205678-1362865155845902-8684032019183338938-n-jpg-stp-dst-jpg-tt6-cstp-mx2000x1126-ctp-s2000x1126.jpg',
+    image: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=1000&auto=format&fit=crop',
   },
 ];
 

@@ -91,26 +91,70 @@ import principalImageSrc from "../assets/images/regenerated_image_1780334392921.
 import principalJpgSrc from "../assets/principal.jpg";
 import logoImageSrc from "../assets/logo.png";
 const logoImage = logoImageSrc || "/logo.png";
-const logoFallback = "https://i.postimg.cc/nc9G7pRB/image.png";
+const logoFallback = "/logo.png";
 const principalImg = principalImageSrc || principalJpgSrc;
 const principalFallbackImg = principalJpgSrc || principalImageSrc || "https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=600&auto=format&fit=crop";
 
-const mapDummyImage = (url: string): string => {
+const mapDummyImage = (url: string, meta?: { name?: string; role?: string; title?: string; year?: string }): string => {
   if (!url) return '';
-  if (url.includes('picsum.photos')) {
-    if (url.includes('/seed/t1/')) return 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/t2/')) return 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/t3/')) return 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/t4/')) return 'https://images.unsplash.com/photo-1580894732444-8fecef2271ff?q=80&w=400&h=500&auto=format&fit=crop';
-    if (url.includes('/seed/b82/')) return 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/seed/b81/')) return 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/seed/e1/')) return 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/seed/e2/')) return 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=800&h=600&auto=format&fit=crop';
-    if (url.includes('/sports/')) return 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?q=80&w=800&h=500&auto=format&fit=crop';
-    if (url.includes('/sciencefair/')) return 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=800&h=500&auto=format&fit=crop';
-    if (url.includes('/cultural/')) return 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&h=500&auto=format&fit=crop';
-    return 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&h=600&auto=format&fit=crop';
+  const u = url.toLowerCase();
+  const contextStr = `${meta?.name || ''} ${meta?.role || ''} ${meta?.title || ''} ${meta?.year || ''}`.toLowerCase();
+
+  // 1. Principal Pappu Kumar Jha
+  if (u.includes('hxs0xbcd') || contextStr.includes('pappu') || (contextStr.includes('principal') && !contextStr.includes('staff'))) {
+    return '/gallery/principal_pappu_jha.jpg';
   }
+
+  // 2. Teacher Team & Staff Group Photo
+  if (u.includes('km08rjz7') || contextStr.includes('team') || contextStr.includes('faculty') || contextStr.includes('staff') || contextStr.includes('group photo')) {
+    return '/gallery/teacher_team.jpg';
+  }
+
+  // 3. Batch 2082 B.S.
+  if (u.includes('dz9zdw6d') || contextStr.includes('2082')) {
+    return '/gallery/batch_2082.jpg';
+  }
+
+  // 4. Batch 2081 B.S.
+  if (u.includes('kzssh3xb') || contextStr.includes('2081')) {
+    return '/gallery/batch_2081.jpg';
+  }
+
+  // 5. Batch 2080 B.S.
+  if (u.includes('0qd3gt09') || contextStr.includes('2080')) {
+    return '/gallery/batch_2080.jpg';
+  }
+
+  // 6. Batch 2079 B.S.
+  if (u.includes('yywfn655') || contextStr.includes('2079')) {
+    return '/gallery/batch_2079.jpg';
+  }
+
+  // 7. Celebrating Tihar / Festival
+  if (u.includes('yqmyrvjy') || contextStr.includes('tihar') || contextStr.includes('deepawali')) {
+    return '/gallery/event_tihar.jpg';
+  }
+
+  // Handle broken/expired firebasestorage or dummy avatars
+  if (u.includes('school-c5948.firebasestorage.app') || u.includes('ui-avatars.com')) {
+    if (contextStr.includes('pooja') || contextStr.includes('saraswati') || contextStr.includes('sarsawati')) {
+      return '/gallery/event_tihar.jpg';
+    }
+    if (contextStr.includes('teacher') || contextStr.includes('faculty')) {
+      return '/gallery/teacher_team.jpg';
+    }
+    if (contextStr.includes('batch')) {
+      return '/gallery/batch_2082.jpg';
+    }
+    return '/gallery/event_tihar.jpg';
+  }
+
+  if (url.includes('picsum.photos')) {
+    if (contextStr.includes('teacher') || contextStr.includes('faculty')) return '/gallery/teacher_team.jpg';
+    if (contextStr.includes('batch')) return '/gallery/batch_2082.jpg';
+    return '/gallery/event_tihar.jpg';
+  }
+
   return url;
 };
 
@@ -328,6 +372,7 @@ export default function Home() {
   const [totalTeachers, setTotalTeachers] = useState<number>(0);
 
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [isHeroHovered, setIsHeroHovered] = useState(false);
   const [currentGallerySlide, setCurrentGallerySlide] = useState(0);
   const [activeTab, setActiveTab] = useState("montessori");
 
@@ -363,13 +408,14 @@ export default function Home() {
     }
   };
 
-  // Automatic Hero Slide Rotation with 4-second hold duration
+  // Automatic Hero Slide Rotation with 5.5-second hold duration, paused on hover
   useEffect(() => {
+    if (isHeroHovered) return;
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % 3);
-    }, 4000);
+    }, 5500);
     return () => clearInterval(timer);
-  }, []);
+  }, [isHeroHovered]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -848,23 +894,23 @@ export default function Home() {
         if (docSnap.exists()) {
           const data = docSnap.data();
           const currentBatches = (data.batches || []).map((b: any) => ({
-            image: mapDummyImage(b.image),
+            image: mapDummyImage(b.image, { year: b.year, title: b.caption }),
             caption: b.year || b.caption || "Shikshantar Batch",
           }));
           const currentEvents = (data.events || []).map((e: any) => ({
-            image: mapDummyImage(e.image),
+            image: mapDummyImage(e.image, { title: e.title || e.caption }),
             caption: e.title || e.caption || "Academic Event Details",
           }));
           const currentTeachers = (data.teachers || []).map((t: any) => ({
-            image: mapDummyImage(t.image),
+            image: mapDummyImage(t.image, { name: t.name, role: t.role }),
             caption: t.name || t.caption || "Shikshantar Faculty Member",
             role: t.role || "",
           }));
           
           setGalleryImages([...currentBatches, ...currentEvents, ...currentTeachers]);
-          setDbBatches((data.batches || []).map((b: any) => ({ ...b, image: mapDummyImage(b.image) })));
-          setDbEvents((data.events || []).map((e: any) => ({ ...e, image: mapDummyImage(e.image) })));
-          setDbTeachers((data.teachers || []).map((t: any) => ({ ...t, image: mapDummyImage(t.image) })));
+          setDbBatches((data.batches || []).map((b: any) => ({ ...b, image: mapDummyImage(b.image, { year: b.year, title: b.caption }) })));
+          setDbEvents((data.events || []).map((e: any) => ({ ...e, image: mapDummyImage(e.image, { title: e.title || e.caption }) })));
+          setDbTeachers((data.teachers || []).map((t: any) => ({ ...t, image: mapDummyImage(t.image, { name: t.name, role: t.role }) })));
         }
       },
       (err) => {
@@ -2822,211 +2868,243 @@ export default function Home() {
       {/* 2. Hero Section - Professional Academic Institutional Showcase */}
       <section 
         className="relative h-[660px] sm:h-[640px] md:h-[600px] lg:h-[640px] xl:h-[680px] max-h-[92vh] min-h-[520px] overflow-hidden select-none w-full bg-[#071726]"
+        onMouseEnter={() => setIsHeroHovered(true)}
+        onMouseLeave={() => setIsHeroHovered(false)}
       >
         {/* Subtle background ambient lighting */}
         <div className="absolute inset-0 bg-gradient-to-r from-[#040e18] via-[#092238] to-[#040e18] opacity-95"></div>
 
-        {[
-          {
-            id: 0,
-            tabLabel: "Principal's Vision",
-            category: "Academic Leadership",
-            image: principalImageSrc,
-            badge: "Academic Leadership & Vision",
-            title: "Inspiring Character, Intellect & Moral Values",
-            desc: "Under the dedicated leadership of Founder Principal Mr. Pappu Kumar Jha, Shikshantar Academy nurtures every child with quality English-medium education, disciplined guidance, and enduring moral values in Bastipur, Karjanha.",
-            link: "/about",
-            cta: "Explore Our Story",
-            secondaryLink: "/admission",
-            secondaryCta: "Admission Enquiry",
-            isLogoSlide: false,
-            objectPosition: "object-[center_68%] md:object-[center_62%]",
-            imageClassName: "scale-110 md:scale-105",
-            cardTitle: "Mr. Pappu Kumar Jha",
-            cardSubtitle: "Founder Principal & Academic Director"
-          },
-          {
-            id: 1,
-            tabLabel: "BALA Smart Campus",
-            category: "Interactive Environment",
-            image: content.slide2Image || "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1200&auto=format&fit=crop",
-            badge: content.slide2Badge || "Building as a Learning Aid",
-            title: content.slide2Title || "Building as a Learning Aid (BALA)",
-            desc: content.slide2Desc || "Every wall and corridor teaches a lesson. Custom educational murals, Nepali Barnamala alphabets, mathematics curves, and geographical maps encourage natural curiosity and intuitive learning.",
-            link: content.slide2Link || "/facilities",
-            cta: content.slide2Cta ? content.slide2Cta.replace(/[📜📝🎨🏛️🖼️📞→]/g, "").trim() : "Tour BALA Classrooms",
-            secondaryLink: "/facilities",
-            secondaryCta: "View Facilities",
-            isLogoSlide: false,
-            isBalaSlide: true,
-            objectPosition: "object-[center_72%] md:object-right-bottom",
-            cardTitle: "BALA Smart Classrooms",
-            cardSubtitle: "Curriculum-Integrated Educational Walls"
-          },
-          {
-            id: 2,
-            tabLabel: "Academy Heritage",
-            category: "Institutional Legacy",
-            image: logoImage,
-            badge: "Institutional Heritage",
-            title: "A Decade of Community Trust & Excellence",
-            desc: "Serving Bastipur, Karjanha since 2072 B.S. with committed educators, comprehensive student support, and a proven track record of 100% SEE board success.",
-            link: "/about",
-            cta: "Discover Our Vision",
-            secondaryLink: "/contact",
-            secondaryCta: "Contact School Office",
-            isLogoSlide: true,
-            objectPosition: "object-center",
-            cardTitle: "Shikshantar Academy",
-            cardSubtitle: "Estd. 2072 B.S. • Bastipur, Siraha"
-          }
-        ].map((slide, idx) => (
-          <div
-            key={idx}
-            className={`absolute inset-0 w-full h-full flex flex-col md:flex-row transition-all duration-1000 ease-in-out ${
-              currentSlide === idx ? "opacity-100 scale-100 z-10" : "opacity-0 scale-102 z-0 pointer-events-none"
-            }`}
-          >
-            {/* Left Column: Dignified Academic Editorial Panel */}
-            <div className="w-full h-[56%] sm:h-[52%] md:h-full md:w-[50%] lg:w-[46%] xl:w-[42%] flex flex-col justify-start pt-5 sm:pt-7 md:justify-center bg-gradient-to-br from-[#0c2b42] via-[#092236] to-[#04121e] p-6 sm:p-8 md:p-10 lg:p-12 xl:p-14 z-20 relative text-white border-b-4 md:border-b-0 md:border-r-4 border-[#F0A500] shadow-[16px_0_35px_rgba(0,0,0,0.65)]">
-              {/* Subtle watermark logo for institutional texture */}
-              <div className="absolute inset-0 opacity-[0.02] bg-center bg-no-repeat bg-contain pointer-events-none select-none" style={{ backgroundImage: `url(${logoImage})`, backgroundSize: '75%' }}></div>
-              
-              <div className="space-y-3 sm:space-y-4 md:space-y-4.5 relative z-10">
-                {/* School Header Tag */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] sm:text-[11px] font-bold tracking-widest text-[#F0A500] uppercase font-poppins">
-                    {slide.badge}
-                  </span>
-                  <span className="text-white/30 text-xs">•</span>
-                  <span className="text-[10px] sm:text-[11px] text-slate-300 font-medium tracking-wide">
-                    Bastipur, Karjanha
-                  </span>
-                </div>
+        {(() => {
+          const heroSlides = [
+            {
+              id: 0,
+              tabLabel: "Principal's Vision",
+              category: "Academic Leadership",
+              image: principalImageSrc,
+              badge: "Academic Leadership & Vision",
+              title: "Inspiring Character, Intellect & Moral Values",
+              desc: "Under the dedicated leadership of Founder Principal Mr. Pappu Kumar Jha, Shikshantar Academy nurtures every child with quality English-medium education, disciplined guidance, and enduring moral values in Bastipur, Karjanha.",
+              link: "/about",
+              cta: "Explore Our Story",
+              secondaryLink: "/admission",
+              secondaryCta: "Admission Enquiry",
+              isLogoSlide: false,
+              objectPosition: "object-[center_68%] md:object-[center_62%]",
+              imageClassName: "scale-110 md:scale-105",
+              cardTitle: "Mr. Pappu Kumar Jha",
+              cardSubtitle: "Founder Principal & Academic Director"
+            },
+            {
+              id: 1,
+              tabLabel: "BALA Smart Campus",
+              category: "Interactive Environment",
+              image: content.slide2Image || "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1200&auto=format&fit=crop",
+              badge: content.slide2Badge || "Building as a Learning Aid",
+              title: content.slide2Title || "Building as a Learning Aid (BALA)",
+              desc: content.slide2Desc || "Every wall and corridor teaches a lesson. Custom educational murals, Nepali Barnamala alphabets, mathematics curves, and geographical maps encourage natural curiosity and intuitive learning.",
+              link: content.slide2Link || "/facilities",
+              cta: content.slide2Cta ? content.slide2Cta.replace(/[📜📝🎨🏛️🖼️📞→]/g, "").trim() : "Tour BALA Classrooms",
+              secondaryLink: "/facilities",
+              secondaryCta: "View Facilities",
+              isLogoSlide: false,
+              isBalaSlide: true,
+              objectPosition: "object-[center_72%] md:object-right-bottom",
+              cardTitle: "BALA Smart Classrooms",
+              cardSubtitle: "Curriculum-Integrated Educational Walls"
+            },
+            {
+              id: 2,
+              tabLabel: "Academy Heritage",
+              category: "Institutional Legacy",
+              image: logoImage,
+              badge: "Institutional Heritage",
+              title: "A Decade of Community Trust & Excellence",
+              desc: "Serving Bastipur, Karjanha since 2072 B.S. with committed educators, comprehensive student support, and a proven track record of 100% SEE board success.",
+              link: "/about",
+              cta: "Discover Our Vision",
+              secondaryLink: "/contact",
+              secondaryCta: "Contact School Office",
+              isLogoSlide: true,
+              objectPosition: "object-center",
+              cardTitle: "Shikshantar Academy",
+              cardSubtitle: "Estd. 2072 B.S. • Bastipur, Siraha"
+            }
+          ];
 
-                {/* Main Heading */}
-                <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl xl:text-[40px] font-display font-bold leading-tight md:leading-[1.18] text-white tracking-tight drop-shadow-md">
-                  {slide.title}
-                </h1>
+          const currentSlideData = heroSlides[currentSlide] || heroSlides[0];
 
-                {/* Description */}
-                <p className="text-xs sm:text-sm md:text-sm lg:text-[15px] text-slate-200 max-w-xl leading-relaxed drop-shadow-sm font-poppins font-normal line-clamp-3 md:line-clamp-none">
-                  {slide.desc}
-                </p>
+          return (
+            <div className="absolute inset-0 w-full h-full flex flex-col md:flex-row">
+              {/* Left Column: Dignified Academic Editorial Panel */}
+              <div className="w-full h-[56%] sm:h-[52%] md:h-full md:w-[50%] lg:w-[46%] xl:w-[42%] flex flex-col justify-start pt-5 sm:pt-7 md:justify-center bg-gradient-to-br from-[#0c2b42] via-[#092236] to-[#04121e] p-6 sm:p-8 md:p-10 lg:p-12 xl:p-14 z-20 relative text-white border-b-4 md:border-b-0 md:border-r-4 border-[#F0A500] shadow-[16px_0_35px_rgba(0,0,0,0.65)]">
+                {/* Subtle watermark logo for institutional texture */}
+                <div 
+                  className="absolute inset-0 opacity-[0.02] bg-center bg-no-repeat bg-contain pointer-events-none select-none" 
+                  style={{ backgroundImage: `url(${logoImage})`, backgroundSize: '75%' }}
+                />
+                
+                <AnimatePresence mode="wait">
+                  <motion.div 
+                    key={currentSlide}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.28, ease: "easeInOut" }}
+                    className="space-y-3 sm:space-y-4 md:space-y-4.5 relative z-10"
+                  >
+                    {/* School Header Tag */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] sm:text-[11px] font-bold tracking-widest text-[#F0A500] uppercase font-poppins">
+                        {currentSlideData.badge}
+                      </span>
+                      <span className="text-white/30 text-xs">•</span>
+                      <span className="text-[10px] sm:text-[11px] text-slate-300 font-medium tracking-wide">
+                        Bastipur, Karjanha
+                      </span>
+                    </div>
 
-                {/* Refined Academic Highlights */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10">
-                    100% SEE Board Success
-                  </span>
-                  <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10">
-                    Playgroup to Grade 10
-                  </span>
-                  <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10 hidden sm:inline-flex">
-                    Estd. 2072 B.S.
-                  </span>
-                </div>
+                    {/* Main Heading */}
+                    <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl xl:text-[40px] font-display font-bold leading-tight md:leading-[1.18] text-white tracking-tight drop-shadow-md">
+                      {currentSlideData.title}
+                    </h1>
 
-                {/* Action Buttons */}
-                <div className="flex flex-wrap items-center gap-3 pt-2">
-                  {slide.link.startsWith("tel:") ? (
-                    <a
-                      href={slide.link}
-                      className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-lg text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
-                    >
-                      <span>{slide.cta}</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </a>
-                  ) : (
-                    <Link
-                      to={slide.link}
-                      className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-lg text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
-                    >
-                      <span>{slide.cta}</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  )}
+                    {/* Description */}
+                    <p className="text-xs sm:text-sm md:text-sm lg:text-[15px] text-slate-200 max-w-xl leading-relaxed drop-shadow-sm font-poppins font-normal line-clamp-3 md:line-clamp-none">
+                      {currentSlideData.desc}
+                    </p>
 
-                  {slide.secondaryLink && (
-                    <Link
-                      to={slide.secondaryLink}
-                      className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 md:px-5 md:py-3 rounded-lg text-xs md:text-sm font-semibold tracking-wide transition-all backdrop-blur-sm active:scale-95"
-                    >
-                      {slide.secondaryCta}
-                    </Link>
-                  )}
-                </div>
+                    {/* Refined Academic Highlights */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10">
+                        100% SEE Board Success
+                      </span>
+                      <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10">
+                        Playgroup to Grade 10
+                      </span>
+                      <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10 hidden sm:inline-flex">
+                        Estd. 2072 B.S.
+                      </span>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap items-center gap-3 pt-2">
+                      {currentSlideData.link.startsWith("tel:") ? (
+                        <a
+                          href={currentSlideData.link}
+                          className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-lg text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
+                        >
+                          <span>{currentSlideData.cta}</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </a>
+                      ) : (
+                        <Link
+                          to={currentSlideData.link}
+                          className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-lg text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
+                        >
+                          <span>{currentSlideData.cta}</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
+                      )}
+
+                      {currentSlideData.secondaryLink && (
+                        <Link
+                          to={currentSlideData.secondaryLink}
+                          className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 md:px-5 md:py-3 rounded-lg text-xs md:text-sm font-semibold tracking-wide transition-all backdrop-blur-sm active:scale-95"
+                        >
+                          {currentSlideData.secondaryCta}
+                        </Link>
+                      )}
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
               </div>
-            </div>
 
-            {/* Right Column: Clean Media Panel with Static Institutional Credential Plaque */}
-            <div className={`w-full h-[44%] sm:h-[48%] md:h-full md:w-[50%] lg:w-[54%] xl:w-[58%] relative overflow-hidden z-10 transition-colors duration-500 ${slide.isBalaSlide ? "bg-[#0b1522]" : "bg-slate-950"}`}>
-              {/* Left fade blend on Desktop */}
-              <div className="absolute inset-y-0 left-0 w-20 md:w-28 bg-gradient-to-r from-[#04121e] to-transparent z-20 hidden md:block"></div>
-              {/* Bottom fade into controls */}
-              <div className="absolute inset-x-0 bottom-0 h-24 md:h-32 bg-gradient-to-t from-[#04121e] to-transparent z-20 pointer-events-none"></div>
+              {/* Right Column: Clean Media Panel with Static Institutional Credential Plaque */}
+              <div className={`w-full h-[44%] sm:h-[48%] md:h-full md:w-[50%] lg:w-[54%] xl:w-[58%] relative overflow-hidden z-10 transition-colors duration-500 ${currentSlideData.isBalaSlide ? "bg-[#0b1522]" : "bg-slate-950"}`}>
+                {/* Left fade blend on Desktop */}
+                <div className="absolute inset-y-0 left-0 w-20 md:w-28 bg-gradient-to-r from-[#04121e] to-transparent z-20 hidden md:block"></div>
+                {/* Bottom fade into controls */}
+                <div className="absolute inset-x-0 bottom-0 h-24 md:h-32 bg-gradient-to-t from-[#04121e] to-transparent z-20 pointer-events-none"></div>
 
-              {slide.image && (
-                slide.isLogoSlide ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center relative p-4 sm:p-6 md:p-8 bg-[#091E33] bg-[radial-gradient(circle_at_center,_#11365A_0%,_#091E33_70%,_#05111E_100%)] overflow-hidden">
-                    <div className="absolute inset-0 opacity-[0.03] bg-center bg-no-repeat bg-contain pointer-events-none select-none" style={{ backgroundImage: `url(${logoImage})`, backgroundSize: '85%' }}></div>
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentSlide}
+                    initial={{ opacity: 0, scale: 1.02 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.35, ease: "easeInOut" }}
+                    className="w-full h-full relative"
+                  >
+                    {currentSlideData.image && (
+                      currentSlideData.isLogoSlide ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center relative p-4 sm:p-6 md:p-8 bg-[#091E33] bg-[radial-gradient(circle_at_center,_#11365A_0%,_#091E33_70%,_#05111E_100%)] overflow-hidden">
+                          <div className="absolute inset-0 opacity-[0.03] bg-center bg-no-repeat bg-contain pointer-events-none select-none" style={{ backgroundImage: `url(${logoImage})`, backgroundSize: '85%' }}></div>
 
-                    {/* Institutional Medallion */}
-                    <div className="relative z-10 flex flex-col items-center">
-                      <div className="p-2.5 md:p-3 rounded-full bg-gradient-to-b from-[#F0A500] via-[#E29300] to-[#B37200] shadow-[0_20px_50px_rgba(0,0,0,0.6)] border-2 border-white/20">
-                        <div className="p-1.5 rounded-full bg-[#071D33]">
-                          <div className="w-36 h-36 sm:w-48 sm:h-48 md:w-60 md:h-60 lg:w-72 lg:h-72 rounded-full bg-white overflow-hidden shadow-inner flex items-center justify-center p-3 sm:p-4 md:p-5 relative">
-                            <img
-                              src={slide.image}
-                              alt={slide.title}
-                              className="w-full h-full object-contain filter drop-shadow select-none pointer-events-none"
-                              referrerPolicy="no-referrer"
-                              loading="eager"
-                              fetchPriority="high"
-                              onError={(e) => {
-                                const target = e.currentTarget;
-                                if (target.src !== logoFallback) {
-                                  target.src = logoFallback;
-                                }
-                              }}
-                            />
+                          {/* Institutional Medallion */}
+                          <div className="relative z-10 flex flex-col items-center">
+                            <div className="p-2.5 md:p-3 rounded-full bg-gradient-to-b from-[#F0A500] via-[#E29300] to-[#B37200] shadow-[0_20px_50px_rgba(0,0,0,0.6)] border-2 border-white/20">
+                              <div className="p-1.5 rounded-full bg-[#071D33]">
+                                <div className="w-36 h-36 sm:w-48 sm:h-48 md:w-60 md:h-60 lg:w-72 lg:h-72 rounded-full bg-white overflow-hidden shadow-inner flex items-center justify-center p-3 sm:p-4 md:p-5 relative">
+                                  <img
+                                    src={currentSlideData.image}
+                                    alt={currentSlideData.title}
+                                    className="w-full h-full object-contain filter drop-shadow select-none pointer-events-none"
+                                    referrerPolicy="no-referrer"
+                                    loading="eager"
+                                    fetchPriority="high"
+                                    onError={(e) => {
+                                      const target = e.currentTarget;
+                                      if (target.src !== logoFallback && !target.src.endsWith('/logo.png')) {
+                                        target.src = logoFallback;
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 text-center">
+                              <div className="text-white text-xs sm:text-sm md:text-base font-bold tracking-wide font-display">
+                                SHIKSHANTAR ACADEMY
+                              </div>
+                              <div className="text-[#F0A500] text-[10px] sm:text-xs font-medium tracking-widest uppercase mt-0.5 font-poppins">
+                                Bastipur, Karjanha-02, Siraha
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      ) : (
+                        <img
+                          src={currentSlideData.image}
+                          alt={currentSlideData.title}
+                          className={`w-full h-full object-cover ${currentSlideData.objectPosition || "object-center"} ${currentSlideData.imageClassName || "scale-100"} filter brightness-[0.90] sm:brightness-[0.92] select-none pointer-events-none`}
+                          referrerPolicy="no-referrer"
+                          loading="eager"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            if (target.src !== principalImg) {
+                              target.src = principalImg;
+                            }
+                          }}
+                        />
+                      )
+                    )}
 
-                      <div className="mt-3 text-center">
-                        <div className="text-white text-xs sm:text-sm md:text-base font-bold tracking-wide font-display">
-                          SHIKSHANTAR ACADEMY
-                        </div>
-                        <div className="text-[#F0A500] text-[10px] sm:text-xs font-medium tracking-widest uppercase mt-0.5 font-poppins">
-                          Bastipur, Karjanha-02, Siraha
-                        </div>
+                    {/* Static Institutional Plaque (Glassmorphic Transparent) */}
+                    <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 md:bottom-22 z-30 max-w-[240px] sm:max-w-xs bg-black/40 backdrop-blur-md border border-white/20 p-3 rounded-xl shadow-lg text-white">
+                      <div className="text-xs sm:text-sm font-bold font-display text-white truncate">
+                        {currentSlideData.cardTitle}
+                      </div>
+                      <div className="text-[10px] sm:text-xs text-slate-200/90 font-poppins truncate mt-0.5">
+                        {currentSlideData.cardSubtitle}
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <img
-                    src={slide.image}
-                    alt={slide.title}
-                    className={`w-full h-full object-cover ${slide.objectPosition || "object-center"} ${slide.imageClassName || "scale-100"} filter brightness-[0.90] sm:brightness-[0.92] select-none pointer-events-none`}
-                    referrerPolicy="no-referrer"
-                    loading="eager"
-                  />
-                )
-              )}
-
-              {/* Static Institutional Plaque (Glassmorphic Transparent) */}
-              <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 md:bottom-22 z-30 max-w-[240px] sm:max-w-xs bg-black/40 backdrop-blur-md border border-white/20 p-3 rounded-xl shadow-lg text-white">
-                <div className="text-xs sm:text-sm font-bold font-display text-white truncate">
-                  {slide.cardTitle}
-                </div>
-                <div className="text-[10px] sm:text-xs text-slate-200/90 font-poppins truncate mt-0.5">
-                  {slide.cardSubtitle}
-                </div>
+                  </motion.div>
+                </AnimatePresence>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })()}
 
         {/* Quiet Arrow Navigation Controls */}
         <button
@@ -3458,79 +3536,79 @@ export default function Home() {
 
         {/* 7. Gallery Section - "Cherished Memories" */}
         {(() => {
-          // Dynamically map from real DB collections to ensure authentic uploaded images or default matches
-          const batch1 = dbBatches[0] || { year: '2082 B.S', image: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?q=80&w=800&h=600&auto=format&fit=crop' };
-          const batch2 = dbBatches[1] || { year: '2081 B.S', image: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=800&h=600&auto=format&fit=crop' };
+          // Strictly 5 authentic school photos in the user's exact preferred sequence:
+          // 1. Principal Mr. Pappu Kumar Jha
+          // 2. Teaching Faculty & Staff Team Group Photo
+          // 3. Batch 2082 B.S. Senior S.E.E. Candidates
+          // 4. Batch 2081 B.S. Senior S.E.E. Candidates
+          // 5. Celebrating Tihar Cultural Festival
 
-          // Find Teacher Team (role or name contains 'Staff', 'Faculty', 'Team' or has the default team URL)
-          const teacherTeamItem = dbTeachers.find((t: any) => 
-            (t.role || "").toLowerCase().includes("staff") || 
-            (t.name || "").toLowerCase().includes("faculty") || 
-            (t.name || "").toLowerCase().includes("staff") ||
-            (t.role || "").toLowerCase().includes("team") ||
-            t.image === "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?q=80&w=1470&auto=format&fit=crop"
-          ) || dbTeachers[0] || { name: 'Teaching Faculty', role: 'Principal & Staff', image: "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?q=80&w=1470&auto=format&fit=crop" };
-
-          // Find Principal (role or name contains 'Principal' or 'Pappu')
           const principalItem = dbTeachers.find((t: any) => 
-            t.image !== teacherTeamItem.image && (
-              (t.role || "").toLowerCase().includes("principal") || 
-              (t.name || "").toLowerCase().includes("principal") || 
-              (t.name || "").toLowerCase().includes("pappu")
-            )
-          ) || dbTeachers.find((t: any) => t.image !== teacherTeamItem.image) || { name: 'Mr. Pappu Kumar Jha', role: 'Principal', image: 'https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=400&h=500&auto=format&fit=crop' };
+            (t.role || "").toLowerCase().includes("principal") || 
+            (t.name || "").toLowerCase().includes("pappu")
+          );
 
-          // Find Festival celebration event photo (title contains 'Tihar', 'Deepawali', 'Celebrate', 'fest' etc)
-          const festivalItem = dbEvents.find((e: any) => 
+          const teacherTeamItem = dbTeachers.find((t: any) => 
+            (t.name || "").toLowerCase().includes("team") || 
+            (t.name || "").toLowerCase().includes("faculty") || 
+            (t.role || "").toLowerCase().includes("staff") ||
+            (t.role || "").toLowerCase().includes("group")
+          ) || dbTeachers.find((t: any) => t !== principalItem);
+
+          const batch2082 = dbBatches.find((b: any) => (b.year || "").includes("2082")) || dbBatches[0];
+          const batch2081 = dbBatches.find((b: any) => (b.year || "").includes("2081")) || dbBatches[1];
+
+          const tiharEvent = dbEvents.find((e: any) => 
             (e.title || "").toLowerCase().includes("tihar") || 
-            (e.title || "").toLowerCase().includes("celebrat") || 
-            (e.title || "").toLowerCase().includes("fest") ||
-            (e.title || "").toLowerCase().includes("deepawali") ||
-            e.image === "https://images.unsplash.com/photo-1605151523425-46fdad6ff468?q=80&w=1548&auto=format&fit=crop"
-          ) || dbEvents[0] || { title: 'Celebrating Tihar', image: "https://images.unsplash.com/photo-1605151523425-46fdad6ff468?q=80&w=1548&auto=format&fit=crop" };
+            (e.title || "").toLowerCase().includes("celebrat") ||
+            (e.title || "").toLowerCase().includes("fest")
+          ) || dbEvents[0];
 
-          // Exactly 5 unique photos ordered exactly by user request:
-          // 1. Principal's Portrait, 2. Teacher team, 3. Batch 1, 4. Batch 2, 5. Celebratory festival
           const uniquePhotos = [
             {
-              image: principalItem.image,
-              caption: principalItem.name || "Mr. Pappu Kumar Jha (Principal)",
-              sizeDetail: principalItem.role || "Academic Leadership",
-              celebrationDetail: "Guiding our children with modern standards and values",
+              image: principalItem?.image || '/gallery/principal_pappu_jha.jpg',
+              caption: principalItem?.name || "Mr. Pappu Kumar Jha",
+              sizeDetail: principalItem?.role || "Principal Sir",
+              celebrationDetail: "Guiding our children with modern standards, values, and academic excellence",
               id: "principal-jha",
-              isBatch: false
+              isBatch: false,
+              fallback: '/gallery/principal_pappu_jha.jpg'
             },
             {
-              image: teacherTeamItem.image,
-              caption: teacherTeamItem.name || "Teaching Faculty & Staff Team",
-              sizeDetail: teacherTeamItem.role || "Dedicated Faculty Members",
-              celebrationDetail: "Our team of professional educators committed to developmental learning",
+              image: teacherTeamItem?.image || '/gallery/teacher_team.jpg',
+              caption: teacherTeamItem?.name || "Teaching Faculty & Staff Team",
+              sizeDetail: teacherTeamItem?.role || "Group Photo",
+              celebrationDetail: "Our team of dedicated professional educators committed to developmental learning",
               id: "faculty-staff",
-              isBatch: false
+              isBatch: false,
+              fallback: '/gallery/teacher_team.jpg'
             },
             {
-              image: batch1.image,
-              caption: batch1.year || batch1.caption || "2082 B.S. Senior Graduation Batch",
-              sizeDetail: "",
-              celebrationDetail: "Fostering academic excellence with stellar board results",
-              id: "batch-a",
-              isBatch: false
+              image: batch2082?.image || '/gallery/batch_2082.jpg',
+              caption: batch2082?.year || "Batch Year : 2082 B.S.",
+              sizeDetail: "S.E.E. Batch 2082",
+              celebrationDetail: "Secondary Education Examination candidates and academic achievers",
+              id: "batch-2082",
+              isBatch: true,
+              fallback: '/gallery/batch_2082.jpg'
             },
             {
-              image: batch2.image,
-              caption: batch2.year || batch2.caption || "Primary Interactive Logic Session",
-              sizeDetail: "",
-              celebrationDetail: "Inspirational early childhood scientific exploration class",
-              id: "batch-b",
-              isBatch: false
+              image: batch2081?.image || '/gallery/batch_2081.jpg',
+              caption: batch2081?.year || "Batch Year : 2081 B.S.",
+              sizeDetail: "S.E.E. Batch 2081",
+              celebrationDetail: "Graduating batch with outstanding academic milestones and board results",
+              id: "batch-2081",
+              isBatch: true,
+              fallback: '/gallery/batch_2081.jpg'
             },
             {
-              image: festivalItem.image,
-              caption: festivalItem.title || festivalItem.caption || "Celebrating Tihar Festival Batch",
-              sizeDetail: "Traditional Celebrations",
-              celebrationDetail: "Deepawali student assembly with interactive value programs",
+              image: tiharEvent?.image || '/gallery/event_tihar.jpg',
+              caption: tiharEvent?.title || "Celebrating Tihar Festival",
+              sizeDetail: "Cultural Celebration",
+              celebrationDetail: "Traditional celebrations and cultural values shared across the academy",
               id: "festival-tihar",
-              isBatch: false
+              isBatch: false,
+              fallback: '/gallery/event_tihar.jpg'
             }
           ];
 
@@ -3698,10 +3776,18 @@ export default function Home() {
                       aria-label={`Slide ${currentGallerySlide + 1} of ${uniquePhotos.length}: ${activePhoto.caption}`}
                     >
                       <img
-                        src={activePhoto.image}
+                        src={activePhoto.image || principalImg}
                         className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-103"
                         alt={activePhoto.caption}
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          if (activePhoto.fallback && target.src !== activePhoto.fallback) {
+                            target.src = activePhoto.fallback;
+                            return;
+                          }
+                          target.src = "/gallery/principal_pappu_jha.jpg";
+                        }}
                       />
                     </motion.div>
                   </AnimatePresence>
@@ -4557,6 +4643,12 @@ export default function Home() {
               className="max-w-[92vw] max-h-[85vh] object-contain rounded-2xl shadow-2xl shadow-black ring-4 ring-white/10 cursor-zoom-out transition-all duration-300 hover:brightness-105"
               onClick={() => setExpandedImage(null)}
               referrerPolicy="no-referrer"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (target.src !== principalImg && !target.src.includes("principal.jpg")) {
+                  target.src = principalImg;
+                }
+              }}
             />
           </div>
         </div>,
