@@ -134,7 +134,9 @@
         "amount": { "type": "number" },
         "method": { "type": "string" },
         "collectedBy": { "type": "string" },
-        "status": { "type": "string", "enum": ["SUCCESS", "REFUNDED"] },
+        "createdBy": { "type": "string" },
+        "creatorUid": { "type": "string" },
+        "status": { "type": "string", "enum": ["SUCCESS", "REFUNDED", "OVERRIDE_SUCCESS"] },
         "months": { "type": "array", "items": { "type": "string" } },
         "remarks": { "type": "string" }
       },

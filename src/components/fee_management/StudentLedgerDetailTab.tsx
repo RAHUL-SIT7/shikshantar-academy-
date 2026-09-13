@@ -165,6 +165,7 @@ export default function StudentLedgerDetailTab({ students, transactions, onRefre
             <body onload="window.print();" style="font-family: Arial, sans-serif; padding: 30px; color: #1f2937;">
                 <div style="max-width: 650px; margin: 0 auto; border: 2px solid #e5e7eb; padding: 25px; border-radius: 12px;">
                     <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 12px; margin-bottom: 20px;">
+                        <img src="/logo.png" style="width: 60px; height: 60px; object-fit: contain; margin-bottom: 6px;" onerror="this.style.display='none'" />
                         <h2 style="margin: 0; color: #1e3a8a;">SHIKSHANTAR ACADEMY</h2>
                         <p style="margin: 4px 0; font-size: 12px; color: #4b5563;">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>
                         <p style="margin: 4px 0; font-size: 12px; font-weight: bold; color: #10b981;">MONTHLY DETAILED STATEMENT: ${monthData.month.toUpperCase()}</p>
@@ -234,9 +235,11 @@ export default function StudentLedgerDetailTab({ students, transactions, onRefre
                             if (!printWindow) return;
                             let html = `<html><head><title>Full Year Ledger - ${selectedStudent.name}</title></head>`;
                             html += `<body onload="window.print();" style="font-family: Arial, sans-serif; padding: 30px;">`;
-                            html += `<div style="text-align:center; margin-bottom:20px;">`;
-                            html += `<h2 style="margin:0;">SHIKSHANTAR ACADEMY</h2>`;
-                            html += `<p>Karjanhana, Siraha, Nepal | Complete 12-Month Financial Ledger</p></div>`;
+                            html += `<div style="text-align:center; border-bottom: 2px solid #1e3a8a; padding-bottom: 15px; margin-bottom:20px;">`;
+                            html += `<img src="/logo.png" style="width: 60px; height: 60px; object-fit: contain; margin-bottom: 6px;" onerror="this.style.display='none'" />`;
+                            html += `<h2 style="margin:0; color: #1e3a8a;">SHIKSHANTAR ACADEMY</h2>`;
+                            html += `<p style="margin: 4px 0; font-size: 12px; color: #4b5563;">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>`;
+                            html += `<p style="margin: 4px 0; font-size: 12px; font-weight: bold; color: #1e3a8a;">COMPLETE 12-MONTH FINANCIAL LEDGER STATEMENT</p></div>`;
                             html += `<p><strong>Student Name:</strong> ${selectedStudent.name} (ID: ${selectedStudent.studentId || '-'}) &nbsp;&nbsp; <strong>Class:</strong> ${selectedStudent.class} &nbsp;&nbsp; <strong>Roll:</strong> ${selectedStudent.rollNumber || '-'}</p>`;
                             html += `<table style="width:100%; border-collapse:collapse; margin-top:15px;">`;
                             html += `<thead style="background:#f3f4f6;"><tr><th style="border:1px solid #ccc; padding:8px; text-align:left;">Month</th><th style="border:1px solid #ccc; padding:8px; text-align:right;">Billed Amount</th><th style="border:1px solid #ccc; padding:8px; text-align:right;">Paid Amount</th><th style="border:1px solid #ccc; padding:8px; text-align:right;">Outstanding Due</th><th style="border:1px solid #ccc; padding:8px; text-align:center;">Status</th></tr></thead><tbody>`;

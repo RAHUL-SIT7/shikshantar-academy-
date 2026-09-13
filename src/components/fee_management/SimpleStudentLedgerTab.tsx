@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { db, handleFirestoreError, OperationType } from '../../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { collection, doc, writeBatch, serverTimestamp, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { Search, Loader2, Download, Printer, Plus, X, Receipt, Zap, BookOpen, Banknote, Bell, FileText, Table } from 'lucide-react';
 import { formatBSDate, getBSYearMonthDate } from '../../lib/nepaliDate';
@@ -93,6 +93,7 @@ export default function SimpleStudentLedgerTab({
     const [isHandwrittenMode, setIsHandwrittenMode] = useState(false);
     const [handwrittenReceiptSerial, setHandwrittenReceiptSerial] = useState('');
     const [handwrittenSignVerified, setHandwrittenSignVerified] = useState(false);
+    const [customBaseAmount, setCustomBaseAmount] = useState<string>('0');
 
     // Dynamic Extra Payments & Receipt Customization States
     const [receiptTitle, setReceiptTitle] = useState<string>('Cash Receipt');
@@ -117,6 +118,17 @@ export default function SimpleStudentLedgerTab({
     const todayBS = formatBSDate(new Date());
     const todayCollections = (transactions || []).filter(tx => tx.date === todayBS && (tx.status === 'SUCCESS' || tx.status === 'OVERRIDE_SUCCESS'));
     const todayTotal = todayCollections.reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    // Close modal on Escape key press
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && selectedStudent) {
+                setSelectedStudent(null);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedStudent]);
 
     // Handle programmatic prefilled payment redirection from Remit Bill Generator tab
     useEffect(() => {
@@ -211,10 +223,9 @@ export default function SimpleStudentLedgerTab({
             const feeType = f.type || 'Tuition Fee';
             const key = `${normM}_${feeType}`;
 
-            const rawPaid = f.paidAmount || (f.status === 'paid' ? f.totalFee : 0) || 0;
-            const paidAmt = isNaN(Number(rawPaid)) ? 0 : Number(rawPaid);
-
-            const rawDue = f.dueAmount !== undefined ? f.dueAmount : (f.status === 'due' ? f.totalFee : 0);
+            const paidAmt = isNaN(Number(f.paidAmount)) ? (f.status === 'paid' ? Number(f.totalFee || 0) : 0) : Number(f.paidAmount);
+            const totalFeeVal = isNaN(Number(f.totalFee)) ? (paidAmt + Number(f.dueAmount || 0)) : Number(f.totalFee);
+            const rawDue = f.dueAmount !== undefined ? f.dueAmount : Math.max(0, totalFeeVal - paidAmt);
             const dueAmt = isNaN(Number(rawDue)) ? 0 : Number(rawDue);
 
             // Skip dummy/zero paid entries that clutter the ledger
@@ -251,49 +262,13 @@ export default function SimpleStudentLedgerTab({
             }
         });
 
-        // 2. Add implicit dues up to all 12 months of the year, with realistic pre-filled dummy paid/due amounts
-        if (baseFee > 0) {
-            let joinMonthIdx = 0; // Default: Baisakh (month index 0)
-            if (s?.createdAt) {
-                try {
-                    const dateObj = new Date(s.createdAt);
-                    if (!isNaN(dateObj.getTime())) {
-                        joinMonthIdx = getBSYearMonthDate(dateObj).month; // 0 to 11
-                    }
-                } catch (e) {
-                    console.error("Error parsing student createdAt date:", e);
-                }
-            }
-
-            for (let i = 0; i <= currentMonthIdx; i++) {
-                if (i < joinMonthIdx) continue; // Skip months prior to student joining
-                const m = MONTHS[i];
-                const key = `${m}_Tuition Fee`;
-                
-                if (!consolidatedMap[key]) {
-                    // Default implicit due values (unpaid/'not done') instead of dummy pre-filled paid months
-                    const isDummyPaid = false; 
-                    consolidatedMap[key] = {
-                        month: m,
-                        status: isDummyPaid ? 'paid' : 'due',
-                        totalFee: baseFee,
-                        dueAmount: isDummyPaid ? 0 : baseFee,
-                        paidAmount: isDummyPaid ? baseFee : 0,
-                        type: 'Tuition Fee',
-                        isImplicit: true,
-                        receiptNo: isDummyPaid ? `SA-REC-2083-${100 + i}` : '-'
-                    };
-                }
-            }
-        }
-
-        // Return sorted rows
+        // Return sorted rows strictly from actual database records
         const rows = Object.values(consolidatedMap);
         return rows.sort((a: any, b: any) => {
             const aIdx = MONTHS.indexOf(a.month);
             const bIdx = MONTHS.indexOf(b.month);
             if (aIdx !== -1 && bIdx !== -1) {
-                if (aIdx === bIdx) return a.isImplicit ? 1 : -1;
+                if (aIdx === bIdx) return 0;
                 return aIdx - bIdx;
             }
             return 0;
@@ -354,7 +329,9 @@ export default function SimpleStudentLedgerTab({
         setSuccessMessage('');
         setSelectedStudent(student);
         const due = getStudentDue(student);
-        setCashReceived(due > 0 ? due.toString() : '');
+        const defaultMonthly = Number(student.monthlyFee || 1000);
+        setCashReceived(due > 0 ? due.toString() : defaultMonthly.toString());
+        setCustomBaseAmount(due > 0 ? due.toString() : defaultMonthly.toString());
         setPaymentCategory('full_due');
         setSelectedMonth(MONTHS[getBSYearMonthDate().month] || MONTHS[0]);
         setAdditionalCharge('');
@@ -377,15 +354,16 @@ export default function SimpleStudentLedgerTab({
     };
 
     const getBaseAmount = () => {
-        const defaultMonthly = Number(selectedStudent?.monthlyFee || 0);
+        const defaultMonthly = Number(selectedStudent?.monthlyFee || 1000);
         const due = getStudentDue(selectedStudent);
         switch(paymentCategory) {
-            case 'full_due': return due;
+            case 'full_due': return due > 0 ? due : defaultMonthly;
             case '1_month': return defaultMonthly;
             case '3_months': return defaultMonthly * 3;
             case '6_months': return defaultMonthly * 6;
             case 'full_year': return defaultMonthly * 12;
-            default: return 0;
+            case 'custom': return Number(customBaseAmount || due || defaultMonthly || 0);
+            default: return due > 0 ? due : defaultMonthly;
         }
     };
     const baseAmount = selectedStudent ? getBaseAmount() : 0;
@@ -797,7 +775,7 @@ export default function SimpleStudentLedgerTab({
 
             for (const row of dueRowsForCalc) {
                 if (waterfallRemainingForMonths <= 0) break;
-                const rowDue = Number(row.dueAmount || row.totalFee);
+                const rowDue = Number(row.dueAmount !== undefined ? row.dueAmount : (row.totalFee || 0));
                 if (rowDue <= 0) continue;
                 
                 const amountToApply = Math.min(rowDue, waterfallRemainingForMonths);
@@ -841,6 +819,10 @@ export default function SimpleStudentLedgerTab({
             const defaultRemarks = remarks || `Fee payment for ${paidMonthsList.length > 0 ? paidMonthsList.join(', ') : 'current month'} (${paymentCategory})`;
 
             // 1. Transaction
+            const currentAuthUser = auth.currentUser;
+            const operatorName = currentAuthUser?.email || currentAuthUser?.displayName || 'Admin Accountant';
+            const operatorUid = currentAuthUser?.uid || 'system';
+
             const txRef = doc(collection(db, 'transactions'));
             batch.set(txRef, {
                 date: bsDate,
@@ -850,7 +832,9 @@ export default function SimpleStudentLedgerTab({
                 class: selectedStudent.class,
                 amount: amountPaidToSchool,
                 method: 'Cash',
-                collectedBy: 'Admin',
+                collectedBy: operatorName,
+                createdBy: operatorName,
+                creatorUid: operatorUid,
                 status: 'SUCCESS',
                 months: paidMonthsList,
                 breakdown: breakdown,
@@ -871,7 +855,7 @@ export default function SimpleStudentLedgerTab({
 
             for (const row of dueRows) {
                 if (remainingCash <= 0) break;
-                const rowDue = Number(row.dueAmount || row.totalFee);
+                const rowDue = Number(row.dueAmount !== undefined ? row.dueAmount : (row.totalFee || 0));
                 if (rowDue <= 0) continue;
 
                 const amountToApply = Math.min(rowDue, remainingCash);
@@ -889,7 +873,7 @@ export default function SimpleStudentLedgerTab({
                     totalFee: row.totalFee || rowDue,
                     paidAmount: (row.paidAmount || 0) + amountToApply,
                     dueAmount: rowDue - amountToApply,
-                    status: (rowDue - amountToApply) <= 0 ? 'paid' : 'due',
+                    status: (rowDue - amountToApply) <= 0 ? 'paid' : (((row.paidAmount || 0) + amountToApply) > 0 ? 'partial' : 'due'),
                     transactionId: txRef.id,
                     receiptNo: receiptNo,
                     ledgerPageNo: handwrittenLedgerNo,
@@ -922,12 +906,14 @@ export default function SimpleStudentLedgerTab({
                  }, { merge: true });
             }
 
-            // 4. Mark associated Remit Bill as paid & write its itemized charges to studentFees
+            // 4. Mark associated Remit Bill as paid / partial & write its itemized charges to studentFees
             if (prefilledBillData && prefilledBillData.id) {
                 const billRef = doc(db, 'remitBills', prefilledBillData.id);
+                const isFullyPaid = amountPaidToSchool >= Number(prefilledBillData.totalAmount || 0);
+                const currentPaid = Number(prefilledBillData.paidAmount || 0);
                 batch.update(billRef, {
-                    status: 'paid',
-                    paidAmount: amountPaidToSchool,
+                    status: isFullyPaid ? 'paid' : 'partial',
+                    paidAmount: currentPaid + amountPaidToSchool,
                     transactionId: txRef.id,
                     paidAt: bsDate
                 });
@@ -1158,6 +1144,10 @@ export default function SimpleStudentLedgerTab({
             }, { merge: true });
 
             // Create tracking audit transaction
+            const currentAuthUser = auth.currentUser;
+            const operatorName = currentAuthUser?.email || currentAuthUser?.displayName || 'Admin Accountant';
+            const operatorUid = currentAuthUser?.uid || 'system';
+
             const txRef = doc(collection(db, 'transactions'));
             batch.set(txRef, {
                 date: bsDate,
@@ -1167,7 +1157,9 @@ export default function SimpleStudentLedgerTab({
                 class: editingLedgerRow.studentClass,
                 amount: overpaidDiff,
                 method: 'Manual Override',
-                collectedBy: 'Admin Accountant',
+                collectedBy: operatorName,
+                createdBy: operatorName,
+                creatorUid: operatorUid,
                 status: 'OVERRIDE_SUCCESS',
                 months: [editingLedgerRow.month],
                 remarks: `Status manually forced to '${overrideStatus}' for ${editingLedgerRow.month} (${editingLedgerRow.type}). Reason: ${overrideReason || 'Correction'}`,
@@ -1573,7 +1565,21 @@ export default function SimpleStudentLedgerTab({
                                         <div className="p-4 bg-gray-50 rounded-xl border border-gray-150 space-y-3.5">
                                             <div className="flex justify-between items-center text-sm font-bold text-gray-700">
                                                 <span>Base Tuition Fee Due:</span>
-                                                <span className="font-mono">NRs. {baseAmount.toLocaleString()}</span>
+                                                {paymentCategory === 'custom' ? (
+                                                    <div className="relative w-36">
+                                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-bold">NRs</span>
+                                                        <input 
+                                                            type="number"
+                                                            min="0"
+                                                            step="any"
+                                                            value={customBaseAmount}
+                                                            onChange={e => setCustomBaseAmount(e.target.value)}
+                                                            className="w-full border-2 border-emerald-300 focus:border-emerald-500 rounded-lg pl-8 pr-2 py-1 text-xs font-black text-emerald-950 font-mono bg-white text-right outline-none"
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <span className="font-mono">NRs. {baseAmount.toLocaleString()}</span>
+                                                )}
                                             </div>
 
                                             {/* Additional Charges Block */}
@@ -1764,6 +1770,11 @@ export default function SimpleStudentLedgerTab({
                                                         </div>
                                                     )}
                                                 </div>
+                                            </div>
+
+                                            {/* Explicit Calculation Display */}
+                                            <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl text-xs font-bold text-emerald-900 font-sans mb-2">
+                                                <span>Calculation: Monthly Tuition Fee = NRs. {Number(selectedStudent?.monthlyFee || 1000).toLocaleString()} × {paymentCategory === '1_month' ? 1 : paymentCategory === '3_months' ? 3 : paymentCategory === '6_months' ? 6 : paymentCategory === 'full_year' ? 12 : paymentCategory === 'full_due' ? 'Outstanding Dues' : 'Custom'} = NRs. {baseAmount.toLocaleString()}</span>
                                             </div>
 
                                             {/* Formula Calculation Row */}

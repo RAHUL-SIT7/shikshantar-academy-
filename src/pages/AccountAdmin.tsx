@@ -11,6 +11,7 @@ import ReportsAnalyticsTab from '../components/fee_management/ReportsAnalyticsTa
 import StudentLedgerDetailTab from '../components/fee_management/StudentLedgerDetailTab';
 import RemitBillsGeneratorTab from '../components/fee_management/RemitBillsGeneratorTab';
 import TransactionHistoryTab from '../components/fee_management/TransactionHistoryTab';
+import LedgerAuditLogTab from '../components/fee_management/LedgerAuditLogTab';
 
 export default function AccountAdmin() {
   const [activeTab, setActiveTab] = useState(() => {
@@ -260,6 +261,7 @@ export default function AccountAdmin() {
      { id: 'simple_ledger', label: 'Cash Collection Counter', roles: ['admin'] },
      { id: 'student_laser', label: 'Student Ledger Details', roles: ['admin'] },
      { id: 'transaction_history', label: 'Daily Register & Undo Log', roles: ['admin'] },
+     { id: 'audit_log', label: 'Ledger Audit Log', roles: ['admin'] },
      { id: 'reports', label: 'Collection Summary', roles: ['admin'] },
   ];
 
@@ -449,6 +451,15 @@ export default function AccountAdmin() {
                             transactionsData={transactionsData} 
                             studentsData={studentsData} 
                             onRefresh={fetchFeeData} 
+                         />
+                      </div>
+                  )}
+
+                  {activeTab === 'audit_log' && (
+                      <div className="mt-4">
+                         <LedgerAuditLogTab 
+                            transactions={transactionsData} 
+                            students={studentsData} 
                          />
                       </div>
                   )}

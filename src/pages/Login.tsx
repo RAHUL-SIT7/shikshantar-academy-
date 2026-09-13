@@ -476,7 +476,7 @@ export default function Login({ setIsAuthenticated }: { setIsAuthenticated: (val
       console.error("Login failed:", err);
       // Show actual error message if possible to help the user debug
       if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || String(err.message).includes('auth/invalid-credential')) {
-         setError('Email or password is incorrect.');
+         setError('Invalid credentials (auth/invalid-credential). Please verify your username/email and password.');
       } else if (err.code === 'auth/network-request-failed' || String(err.message).includes('network-request-failed')) {
          setError('Network connection failed due to browser IndexedDB freeze or tracker-blocking. Please refresh the page, enable third-party cookies, or open the app in a new window to login.');
       } else if (err.code === 'auth/too-many-requests' || String(err.message).includes('too-many-requests')) {

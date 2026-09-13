@@ -19,6 +19,7 @@ export interface Notice {
   readBy?: string[];
   isAdmission?: boolean;
   timestamp?: any;
+  displayDurationDays?: number;
 }
 
 interface NoticeContextType {
@@ -39,7 +40,7 @@ interface NoticeContextType {
 
 const NoticeContext = createContext<NoticeContextType | undefined>(undefined);
 
-const isWithinOneWeek = (notice: Notice): boolean => {
+const isWithinTwoMonths = (notice: Notice): boolean => {
   let createdDate: Date | null = null;
   
   if (notice.timestamp) {
@@ -80,8 +81,11 @@ const isWithinOneWeek = (notice: Notice): boolean => {
   const diffTime = now.getTime() - createdDate.getTime();
   const diffDays = diffTime / (1000 * 60 * 60 * 24);
   
-  // Notice is within 7 days (or published for today/recent)
-  return diffDays <= 7.0;
+  const maxDays = notice.displayDurationDays !== undefined && !isNaN(Number(notice.displayDurationDays))
+    ? Number(notice.displayDurationDays)
+    : 60;
+
+  return diffDays <= maxDays;
 };
 
 export function NoticeProvider({ children }: { children: React.ReactNode }) {
@@ -210,10 +214,10 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
 
     const currentUserId = auth.currentUser?.uid || 'guest';
 
-    // Find the latest unread notice published within the last 7 days
+    // Find the latest unread notice published within the last 2 months (60 days)
     const unreadRecentNotices = notices.filter((notice) => {
-      // 1. Must be published within 7 days
-      if (!isWithinOneWeek(notice)) return false;
+      // 1. Must be published within 2 months
+      if (!isWithinTwoMonths(notice)) return false;
 
       // 2. Must not be dismissed in current session
       const sessionDismissed = sessionStorage.getItem(`dismissed_notice_popup_${notice.id}_${currentUserId}`);

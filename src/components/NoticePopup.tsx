@@ -121,7 +121,7 @@ export default function NoticePopup({
       animate={{ scale: 1, y: 0, opacity: 1 }}
       exit={{ scale: 0.92, y: 20, opacity: 0 }}
       transition={{ type: "spring", stiffness: 360, damping: 28 }}
-      className="relative w-full max-w-2xl rounded-2xl md:rounded-3xl overflow-hidden bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/80 dark:border-slate-800 flex flex-col font-sans max-h-[90vh] text-slate-800 dark:text-slate-100"
+      className="relative w-[95%] sm:w-full max-w-2xl rounded-2xl md:rounded-3xl overflow-hidden bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/80 dark:border-slate-800 flex flex-col font-sans max-h-[92vh] sm:max-h-[88vh] text-slate-800 dark:text-slate-100 mx-auto my-auto"
       style={{ boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35)' }}
     >
       {/* Top Red/Primary Accent Line */}
@@ -245,11 +245,11 @@ export default function NoticePopup({
 
         {/* B. OFFICIAL MEMO MESSAGE BODY */}
         {notice.message && (
-          <div className="space-y-3">
-            <div className="prose prose-sm dark:prose-invert max-w-none text-slate-700 dark:text-slate-200 leading-relaxed text-[14px] sm:text-[15px] p-4 sm:p-5 bg-slate-50/60 dark:bg-slate-950/30 rounded-xl border border-slate-200/70 dark:border-slate-800 text-left font-normal">
+          <div className="space-y-3 w-full max-w-full overflow-hidden">
+            <div className="prose prose-sm dark:prose-invert max-w-none text-slate-700 dark:text-slate-200 leading-relaxed text-[14px] sm:text-[15px] p-4 sm:p-5 bg-slate-50/60 dark:bg-slate-950/30 rounded-xl border border-slate-200/70 dark:border-slate-800 text-left font-normal break-words whitespace-pre-wrap overflow-hidden">
               <div 
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(notice.message) }} 
-                className="notice-html-content space-y-2 [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_th]:bg-[#D92525] [&_th]:text-white [&_th]:p-2 [&_th]:text-xs [&_th]:font-bold [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:p-2 [&_td]:text-xs [&_tr:nth-child(even)]:bg-slate-100/50 dark:[&_tr:nth-child(even)]:bg-slate-900/40"
+                className="notice-html-content space-y-2 break-words whitespace-pre-wrap w-full max-w-full overflow-hidden [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-pre-wrap [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_th]:bg-[#D92525] [&_th]:text-white [&_th]:p-2 [&_th]:text-xs [&_th]:font-bold [&_td]:border [&_td]:border-slate-300 dark:[&_td]:border-slate-700 [&_td]:p-2 [&_td]:text-xs [&_tr:nth-child(even)]:bg-slate-100/50 dark:[&_tr:nth-child(even)]:bg-slate-900/40"
               />
             </div>
           </div>

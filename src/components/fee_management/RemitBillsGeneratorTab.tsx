@@ -202,6 +202,20 @@ export default function RemitBillsGeneratorTab({
   // Action modals states
   const [printingBill, setPrintingBill] = useState<RemitBill | null>(null);
   const [payingBill, setPayingBill] = useState<RemitBill | null>(null);
+
+  // Close payingBill modal on Escape key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && payingBill) {
+        setPayingBill(null);
+        setCashReceived('');
+        setPaymentRemarks('');
+        setIsSignVerified(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [payingBill]);
   const [billToDelete, setBillToDelete] = useState<RemitBill | null>(null);
   const [selectedBillIds, setSelectedBillIds] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -680,9 +694,11 @@ export default function RemitBillsGeneratorTab({
       });
     });
 
-    // Automatically retrieve and include any outstanding arrears (back dues), listing each month/year separately
+    // Automatically retrieve and include any outstanding arrears (back dues), grouped concisely by fee type to prevent table overflow & stamp overlap in Page Layout 2
     if (student.fees && Array.isArray(student.fees)) {
       const currentBilledMonths = getMonthsCovered(periodText);
+      const arrearsMap: Record<string, number> = {};
+
       student.fees.forEach((f: any) => {
         if (f.status === 'due') {
           const isTuitionBeingBilled = includeTuition && f.type === 'Tuition Fee' && currentBilledMonths.includes(f.month);
@@ -698,16 +714,20 @@ export default function RemitBillsGeneratorTab({
           if (!isCurrentlyBilled) {
             const amt = Number(f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0));
             if (amt > 0) {
-              const feeYear = getFeeBSYear(f);
-              items.push({
-                name: `Previous Outstanding Arrears (Back Dues - ${f.type}) - ${f.month} ${feeYear}`,
-                rate: amt,
-                months: 1,
-                total: amt
-              });
+              const feeType = f.type || 'Tuition Fee';
+              arrearsMap[feeType] = (arrearsMap[feeType] || 0) + amt;
             }
           }
         }
+      });
+
+      Object.entries(arrearsMap).forEach(([feeType, totalAmt]) => {
+        items.push({
+          name: `Back Dues (${feeType})`,
+          rate: totalAmt,
+          months: 1,
+          total: totalAmt
+        });
       });
     }
 
@@ -855,7 +875,7 @@ export default function RemitBillsGeneratorTab({
     }
   };
 
-  // Process receipt / pay guardian bill cash deposit
+  // Process receipt / pay guardian bill cash deposit (supports partial payments)
   const handlePayRemitBill = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!payingBill) return;
@@ -864,16 +884,9 @@ export default function RemitBillsGeneratorTab({
     setErrorMsg('');
     setSuccessMsg('');
 
-    // Precalculate what bills are being settled
-    const otherUnpaidRemits = remitBills.filter(
-      b => b.studentId === payingBill.studentId && b.id !== payingBill.id && b.status === 'pending'
-    );
-    const totalBackDue = otherUnpaidRemits.reduce((sum, b) => sum + b.totalAmount, 0);
-    const grandTotal = settleMode === 'all' ? (payingBill.totalAmount + totalBackDue) : payingBill.totalAmount;
-
     const paidCash = Number(cashReceived || 0);
-    if (paidCash < grandTotal) {
-      setErrorMsg(`Guardian payment must cover the entire remit bill amount (NRs. ${grandTotal.toLocaleString()}).`);
+    if (paidCash <= 0) {
+      setErrorMsg('Please enter a valid cash received amount greater than 0.');
       setProcessingPayment(false);
       return;
     }
@@ -883,24 +896,51 @@ export default function RemitBillsGeneratorTab({
       const currentBS = formatBSDate(new Date());
       const sysEmail = localStorage.getItem('userEmail') || 'Cash Counter';
 
-      const billsToSettle = settleMode === 'all' ? [payingBill, ...otherUnpaidRemits] : [payingBill];
+      // Always apply Logic A: gather all unpaid or partial remit bills for this student and sort chronologically (oldest first)
+      const allStudentUnpaidRemits = remitBills.filter(
+        b => b.studentId === payingBill.studentId && (b.status === 'pending' || b.status === 'partial')
+      ).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+
+      // Ensure payingBill is included if not already in the list
+      const billsMap = new Map();
+      allStudentUnpaidRemits.forEach(b => billsMap.set(b.id, b));
+      billsMap.set(payingBill.id, payingBill);
+      
+      const billsToSettle = Array.from(billsMap.values()).sort((a: any, b: any) => (a.createdAt || '').localeCompare(b.createdAt || ''));
       const receiptNoBase = `RCP-${getBSYearMonthDate().year}-${Date.now().toString().slice(-4)}`;
 
+      let remainingCashToApply = paidCash;
+      let totalAppliedToBills = 0;
       let index = 0;
+
       for (const bill of billsToSettle) {
+        if (remainingCashToApply <= 0) break;
+
+        const billTotal = bill.totalAmount;
+        const alreadyPaid = bill.paidAmount || 0;
+        const billDue = Math.max(0, billTotal - alreadyPaid);
+
+        if (billDue <= 0) continue;
+
+        const amountForThisBill = Math.min(billDue, remainingCashToApply);
+        remainingCashToApply -= amountForThisBill;
+        totalAppliedToBills += amountForThisBill;
+
+        const newPaidAmount = alreadyPaid + amountForThisBill;
+        const newStatus = newPaidAmount >= billTotal ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'pending');
         const receiptNo = `${receiptNoBase}-${index + 1}`;
         index++;
 
-        // 1. Update the Remit Bill document to PAID
+        // 1. Update Remit Bill document with partial/full paid status
         const remitDocRef = doc(db, 'remitBills', bill.id);
         batch.update(remitDocRef, {
-          status: 'paid',
-          paidAmount: bill.totalAmount,
+          status: newStatus,
+          paidAmount: newPaidAmount,
           transactionId: receiptNo,
           paidAt: currentBS
         });
 
-        // 2. Create standard transaction receipt in collection('transactions') to decrease cash outstanding & update ledger counter
+        // 2. Create transaction receipt
         const txnRef = doc(collection(db, 'transactions'));
         batch.set(txnRef, {
           id: txnRef.id,
@@ -909,11 +949,11 @@ export default function RemitBillsGeneratorTab({
           studentId: bill.studentId,
           studentName: bill.studentName,
           class: bill.class,
-          amount: bill.totalAmount,
+          amount: amountForThisBill,
           method: 'Cash',
           collectedBy: sysEmail,
           status: 'SUCCESS',
-          remarks: `${bill.id === payingBill.id ? 'Current' : 'Back Due'} Remit Bill Clear - ${bill.billNo} (${bill.billingPeriod}) - ${paymentRemarks || 'Direct Counter Clearance'}`,
+          remarks: `Partial/Full Remit Bill Payment - ${bill.billNo} (${bill.billingPeriod}) - ${paymentRemarks || 'Direct Counter Clearance'}`,
           discount: 0,
           additionalCharge: 0,
           ledgerPageNo: 'RMT-LEDGER',
@@ -922,95 +962,98 @@ export default function RemitBillsGeneratorTab({
           remitBillId: bill.id
         });
 
-         // 3. Register paid student fee records class-wise in `studentFees` to clear standard ledger dues
-         // Stagger months under this period to flag them as paid in the general system
-         let billStartMonth = 'Jestha';
-         for (const m of MONTHS) {
-           if (bill.billingPeriod.includes(m)) {
-             billStartMonth = m;
-             break;
-           }
-         }
+        // 3. Update studentFees proportionally according to amountForThisBill
+        let billStartMonth = 'Jestha';
+        for (const m of MONTHS) {
+          if (bill.billingPeriod.includes(m)) {
+            billStartMonth = m;
+            break;
+          }
+        }
 
-         const startIdx = MONTHS.indexOf(billStartMonth) !== -1 ? MONTHS.indexOf(billStartMonth) : 1;
-         bill.itemizedCharges.forEach((item) => {
-           if (item.name.includes('Arrears') || item.name.includes('Outstanding')) {
-             // Find the student's actual due records from the ledger
-             const targetStudent = students.find(s => s.id === bill.studentId);
-             if (targetStudent && Array.isArray(targetStudent.fees)) {
-               const dueRecords = targetStudent.fees
-                 .filter((f: any) => f.status === 'due')
-                 .sort((a: any, b: any) => {
-                   const monthsOrder = MONTHS;
-                   return monthsOrder.indexOf(a.month) - monthsOrder.indexOf(b.month);
-                 });
+        const startIdx = MONTHS.indexOf(billStartMonth) !== -1 ? MONTHS.indexOf(billStartMonth) : 0;
+        let remFeeToAllocate = amountForThisBill;
 
-               let remainingArrearsToSettle = item.total;
-               dueRecords.forEach((f: any) => {
-                 if (remainingArrearsToSettle <= 0) return;
-                 
-                 const dueAmt = f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0);
-                 const amountToPay = Math.min(dueAmt, remainingArrearsToSettle);
-                 remainingArrearsToSettle -= amountToPay;
+        bill.itemizedCharges.forEach((item) => {
+          if (remFeeToAllocate <= 0) return;
 
-                 // Build the same fee id
-                 const feeId = `${bill.studentId}_${f.month.replace(/\s+/g,'')}_${f.type.replace(/\s+/g,'')}`;
-                 const feeRef = doc(db, 'studentFees', feeId);
-                 batch.set(feeRef, {
-                   paidAmount: (f.paidAmount || 0) + amountToPay,
-                   dueAmount: Math.max(0, dueAmt - amountToPay),
-                   status: (dueAmt - amountToPay) <= 0 ? 'paid' : 'due',
-                   transactionId: txnRef.id,
-                   receiptNo: receiptNo,
-                   paidAt: new Date().toISOString()
-                 }, { merge: true });
-               });
-             }
-             return; // Skip the general monthly loop for arrears
-           }
+          if (item.name.includes('Arrears') || item.name.includes('Outstanding')) {
+            const targetStudent = students.find(s => s.id === bill.studentId);
+            if (targetStudent && Array.isArray(targetStudent.fees)) {
+              const dueRecords = targetStudent.fees
+                .filter((f: any) => f.status === 'due' || f.status === 'partial')
+                .sort((a: any, b: any) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month));
 
-           let fType = 'Other Fee';
-           if (item.name.includes('Tuition')) fType = 'Tuition Fee';
-           else if (item.name.includes('Computer')) fType = 'Computer Fee';
-           else if (item.name.includes('Transport')) fType = 'Transportation Fee';
-           else if (item.name.includes('Academy') || item.name.includes('Sports')) fType = 'Academy Fee';
-           else fType = item.name;
+              dueRecords.forEach((f: any) => {
+                if (remFeeToAllocate <= 0) return;
+                const dueAmt = f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0);
+                const payNow = Math.min(dueAmt, remFeeToAllocate);
+                remFeeToAllocate -= payNow;
 
-           const mult = item.months || 1;
-           for (let i = 0; i < mult; i++) {
-             const monthName = MONTHS[(startIdx + i) % 12];
-             const feeId = `${bill.studentId}_${monthName.replace(/\s+/g,'')}_${fType.replace(/\s+/g,'')}`;
-             const feeRef = doc(db, 'studentFees', feeId);
+                const feeId = `${bill.studentId}_${f.month.replace(/\s+/g,'')}_${f.type.replace(/\s+/g,'')}`;
+                const feeRef = doc(db, 'studentFees', feeId);
+                const newFPaid = (f.paidAmount || 0) + payNow;
+                const newFDue = Math.max(0, dueAmt - payNow);
+                batch.set(feeRef, {
+                  paidAmount: newFPaid,
+                  dueAmount: newFDue,
+                  status: newFDue <= 0 ? 'paid' : 'partial',
+                  transactionId: txnRef.id,
+                  receiptNo: receiptNo,
+                  paidAt: new Date().toISOString()
+                }, { merge: true });
+              });
+            }
+            return;
+          }
 
-             batch.set(feeRef, {
-               studentId: bill.studentId,
-               month: monthName,
-               type: fType,
-               totalFee: item.rate || (item.total / mult),
-               paidAmount: item.rate || (item.total / mult),
-               dueAmount: 0,
-               status: 'paid',
-               transactionId: txnRef.id,
-               receiptNo: receiptNo,
-               paidAt: new Date().toISOString()
-             }, { merge: true });
-           }
-         });
+          let fType = 'Other Fee';
+          if (item.name.includes('Tuition')) fType = 'Tuition Fee';
+          else if (item.name.includes('Computer')) fType = 'Computer Fee';
+          else if (item.name.includes('Transport')) fType = 'Transportation Fee';
+          else if (item.name.includes('Academy') || item.name.includes('Sports')) fType = 'Academy Fee';
+          else fType = item.name;
+
+          const mult = item.months || 1;
+          const ratePerMonth = item.rate || (item.total / mult);
+
+          for (let i = 0; i < mult; i++) {
+            if (remFeeToAllocate <= 0) break;
+            const monthName = MONTHS[(startIdx + i) % 12];
+            const feeId = `${bill.studentId}_${monthName.replace(/\s+/g,'')}_${fType.replace(/\s+/g,'')}`;
+            const feeRef = doc(db, 'studentFees', feeId);
+            const payNow = Math.min(ratePerMonth, remFeeToAllocate);
+            remFeeToAllocate -= payNow;
+
+            batch.set(feeRef, {
+              studentId: bill.studentId,
+              month: monthName,
+              type: fType,
+              totalFee: ratePerMonth,
+              paidAmount: payNow,
+              dueAmount: Math.max(0, ratePerMonth - payNow),
+              status: payNow >= ratePerMonth ? 'paid' : (payNow > 0 ? 'partial' : 'due'),
+              transactionId: txnRef.id,
+              receiptNo: receiptNo,
+              paidAt: new Date().toISOString()
+            }, { merge: true });
+          }
+        });
       }
 
-      // 5. Create Cash Ledger Income entry to update office accounts and daily registers
+      // 4. Create Cash Ledger Income entry for actual amount applied
       const cashLedgerRef = doc(collection(db, 'cash_ledger'));
       batch.set(cashLedgerRef, {
         type: 'Income',
         date: currentBS,
-        amount: grandTotal,
+        amount: totalAppliedToBills,
         category: 'Fee Collection',
-        remarks: `Receipt ${receiptNoBase} for ${payingBill.studentName} (Class ${payingBill.class}) - Remit Bill Clear for ${billsToSettle.length} bill(s) (${paymentRemarks || 'Direct Counter Clearance'})`,
+        remarks: `Receipt ${receiptNoBase} for ${payingBill.studentName} (Class ${payingBill.class}) - Cash Received: NRs. ${paidCash.toLocaleString()} (Applied: NRs. ${totalAppliedToBills.toLocaleString()}) - ${paymentRemarks || 'Direct Counter Clearance'}`,
         timestamp: serverTimestamp()
       });
 
       await batch.commit();
-      setSuccessMsg(`Guardian payment of NRs. ${grandTotal.toLocaleString()} received successfully for ${billsToSettle.length} Bill(s). Ledger updated.`);
+      setSuccessMsg(`Guardian cash of NRs. ${paidCash.toLocaleString()} recorded successfully (Applied NRs. ${totalAppliedToBills.toLocaleString()}). Ledger updated.`);
       setPayingBill(null);
       setCashReceived('');
       setPaymentRemarks('');
@@ -3027,7 +3070,17 @@ export default function RemitBillsGeneratorTab({
         const grandTotal = settleMode === 'all' ? (currentAmount + totalBackDue) : currentAmount;
 
         return createPortal(
-          <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-xs font-sans">
+          <div 
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setPayingBill(null);
+                setCashReceived('');
+                setPaymentRemarks('');
+                setIsSignVerified(false);
+              }
+            }}
+            className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-xs font-sans"
+          >
             <div className="bg-white rounded-3xl w-full max-w-3xl border border-slate-200 overflow-hidden shadow-2xl relative block animate-in zoom-in-95 my-8">
               {/* Header */}
               <div className="bg-gradient-to-r from-[#1B4F72] to-[#2471A3] px-6 py-5 text-white flex items-center justify-between">

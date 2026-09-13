@@ -46,7 +46,8 @@ export default function NoticeBoard() {
     status: 'Published',
     attachmentUrl: '',
     attachmentType: '',
-    attachmentName: ''
+    attachmentName: '',
+    displayDurationDays: 7
   });
   
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -338,14 +339,16 @@ export default function NoticeBoard() {
               status: notice.status,
               attachmentUrl: notice.attachmentUrl || '',
               attachmentType: notice.attachmentType || '',
-              attachmentName: notice.attachmentName || ''
+              attachmentName: notice.attachmentName || '',
+              displayDurationDays: notice.displayDurationDays !== undefined ? notice.displayDurationDays : 7
           });
       } else {
           setEditingId(null);
           setFormData({
               title: '', message: '', date: formatBSDateYMD(new Date()),
               validUntil: '', priority: 'Normal', targets: ['All'], isPinned: false, status: 'Published',
-              attachmentUrl: '', attachmentType: '', attachmentName: ''
+              attachmentUrl: '', attachmentType: '', attachmentName: '',
+              displayDurationDays: 7
           });
       }
       setIsPanelOpen(true);
@@ -437,6 +440,229 @@ export default function NoticeBoard() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
          {/* LEFT COLUMN: FILTER AND CUSTOM LIST (SPAN 8) */}
          <div className="col-span-1 lg:col-span-8 flex flex-col gap-6">
+
+            {/* INLINE CREATE/EDIT NOTICE PANEL (Under Notice Board) */}
+            {isPanelOpen && role === 'admin' && (
+               <motion.div 
+                  initial={{ opacity: 0, y: -15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-2xl shadow-xl border border-blue-200 overflow-hidden flex flex-col mb-6"
+               >
+                  {/* Header */}
+                  <div className="flex justify-between items-center px-6 py-4 bg-blue-50 border-b border-blue-100 shrink-0">
+                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <Megaphone className="w-5 h-5 text-blue-600" />
+                        {editingId ? 'Edit Notice' : 'Create New Notice'}
+                     </h2>
+                     <button onClick={() => setIsPanelOpen(false)} className="p-2 hover:bg-blue-200 rounded-full transition-colors text-gray-600 cursor-pointer">
+                        <X className="w-5 h-5" />
+                     </button>
+                  </div>
+
+                  {/* Form Body */}
+                  <div className="p-6 flex flex-col gap-5 bg-white">
+                     <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Notice Title <span className="text-red-500">*</span></label>
+                        <input 
+                           type="text" 
+                           maxLength={100}
+                           value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})}
+                           placeholder="e.g., Annual Sports Day 2081 Announcement"
+                           className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
+                        />
+                        <div className="text-right text-xs text-gray-400 mt-1">{formData.title.length}/100</div>
+                     </div>
+
+                     <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="flex-1 relative">
+                           <label className="block text-sm font-bold text-gray-700 mb-1">Notice Date (B.S.)</label>
+                           <NepaliDatePicker
+                             value={formData.date || ''}
+                             onChange={(value) => setFormData({...formData, date: value})}
+                             className="w-full block"
+                             inputClassName="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-transparent relative z-10"
+                             options={{ calenderLocale: 'en', valueLocale: 'en' }}
+                           />
+                           {!formData.date && (
+                             <div className="absolute left-4 top-[35px] pointer-events-none text-gray-400 font-bold text-sm tracking-widest z-0 opacity-70">
+                               YYYY - MM - DD
+                             </div>
+                           )}
+                           <Calendar className="w-4 h-4 text-gray-400 absolute right-4 top-[35px] pointer-events-none z-[11]" />
+                        </div>
+                        <div className="flex-1 relative">
+                           <label className="block text-sm font-bold text-gray-700 mb-1">Valid Until (B.S. Optional)</label>
+                           <NepaliDatePicker
+                             value={formData.validUntil || ''}
+                             onChange={(value) => setFormData({...formData, validUntil: value})}
+                             className="w-full block"
+                             inputClassName="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-transparent relative z-10"
+                             options={{ calenderLocale: 'en', valueLocale: 'en' }}
+                           />
+                           {!formData.validUntil && (
+                             <div className="absolute left-4 top-[35px] pointer-events-none text-gray-400 font-bold text-sm tracking-widest z-0 opacity-70">
+                               YYYY - MM - DD
+                             </div>
+                           )}
+                           <Calendar className="w-4 h-4 text-gray-400 absolute right-4 top-[35px] pointer-events-none z-[11]" />
+                        </div>
+                     </div>
+
+                     {/* Popup & Notification Validity Days */}
+                     <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Popup & Notification Validity (Days)</label>
+                        <input 
+                           type="number" 
+                           min="1" 
+                           max="365"
+                           value={formData.displayDurationDays} 
+                           onChange={e => setFormData({...formData, displayDurationDays: Number(e.target.value) || 7})} 
+                           className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Number of days this notice remains active in popups & notification count (Default is 7 days).</p>
+                     </div>
+
+                     {/* Priority & Pins row */}
+                     <div className="flex flex-wrap gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                        <div className="flex-1 min-w-[150px]">
+                            <label className="block text-sm font-bold text-gray-700 mb-2">Priority Level</label>
+                            <div className="flex bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                <button type="button" onClick={() => setFormData({...formData, priority: 'Normal'})} className={`flex-1 py-1.5 text-sm font-bold ${formData.priority === 'Normal' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:opacity-90'}`}>Normal</button>
+                                <button type="button" onClick={() => setFormData({...formData, priority: 'Urgent'})} className={`flex-1 py-1.5 text-sm font-bold ${formData.priority === 'Urgent' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:opacity-90'}`}>Urgent</button>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 w-full sm:w-auto sm:ml-auto">
+                           <input type="checkbox" id="pinnedStatus" checked={formData.isPinned} onChange={e => setFormData({...formData, isPinned: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
+                           <label htmlFor="pinnedStatus" className="text-sm font-bold text-gray-700 flex items-center gap-1 cursor-pointer select-none"><Pin className="w-4 h-4 text-orange-500"/> Pin Notice to Top</label>
+                        </div>
+                     </div>
+
+                     {/* Target Audience */}
+                     <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">Target Audience <span className="text-red-500">*</span></label>
+                        <div className="flex flex-wrap gap-2">
+                           {TARGET_OPTIONS.map(opt => (
+                              <button 
+                                key={opt}
+                                type="button"
+                                onClick={() => {
+                                    let newTargets = [...formData.targets];
+                                    if (opt === 'All') { 
+                                       newTargets = newTargets.filter(t => t === 'Guest User'); 
+                                       newTargets.push('All'); 
+                                    }
+                                    else if (opt === 'Guest User') {
+                                       if (newTargets.includes('Guest User')) {
+                                          newTargets = newTargets.filter(t => t !== 'Guest User');
+                                       } else {
+                                          newTargets.push('Guest User');
+                                       }
+                                    }
+                                    else {
+                                       newTargets = newTargets.filter(t => t !== 'All'); 
+                                       if (newTargets.includes(opt)) newTargets = newTargets.filter(t => t !== opt);
+                                       else newTargets.push(opt);
+                                    }
+                                    if (newTargets.length === 0) newTargets = ['Admin Only'];
+                                    setFormData({...formData, targets: newTargets});
+                                }}
+                                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${formData.targets.includes(opt) ? 'bg-gray-800 text-white border-gray-800 scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
+                              >
+                                 {opt}
+                              </button>
+                           ))}
+                        </div>
+                     </div>
+
+                     {/* Rich Text Area */}
+                     <div className="flex flex-col min-h-[250px]">
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Message Body</label>
+                        <div className="border border-gray-200 rounded-xl overflow-hidden flex flex-col bg-white">
+                           <ReactQuill
+                              theme="snow"
+                              value={formData.message}
+                              onChange={(content) => setFormData({...formData, message: content})}
+                              className="w-full h-[220px] mb-12"
+                              modules={{
+                                 toolbar: [
+                                   ['bold', 'italic', 'underline'],
+                                   [{'list': 'ordered'}, {'list': 'bullet'}, { 'align': [] }],
+                                 ]
+                              }}
+                           />
+                        </div>
+                     </div>
+
+                     {/* Attachment Upload */}
+                     <div className="flex flex-col mt-4">
+                        <label className="block text-sm font-bold text-gray-700 mb-1">
+                           Attachment (Notice Circular Photo / PDF) 
+                           <span className="text-xs text-emerald-600 font-semibold ml-2">⚡ Auto-compressed for instant loading</span>
+                        </label>
+                        {formData.attachmentUrl ? (
+                            <div className="flex items-center justify-between p-3 border border-blue-200 bg-blue-50/80 text-blue-900 rounded-xl text-sm font-medium">
+                               <div className="flex items-center gap-3 truncate">
+                                  {formData.attachmentType === 'image' ? (
+                                     <div className="w-10 h-10 rounded-lg overflow-hidden border border-blue-200 bg-white shrink-0">
+                                        <img src={formData.attachmentUrl} alt="Preview" className="w-full h-full object-cover" />
+                                     </div>
+                                  ) : (
+                                     <div className="p-2.5 bg-red-600 text-white rounded-lg shrink-0">
+                                        <FileText className="w-4 h-4" />
+                                     </div>
+                                  )}
+                                  <div className="truncate">
+                                     <span className="font-bold text-slate-800 truncate block">{formData.attachmentName || 'Attached File'}</span>
+                                     <span className="text-[11px] text-emerald-600 font-bold uppercase">Ready for Pop-up & Notice Board</span>
+                                  </div>
+                               </div>
+                               <button 
+                                  type="button"
+                                  onClick={() => setFormData({...formData, attachmentUrl: '', attachmentType: '', attachmentName: ''})} 
+                                  className="text-slate-400 hover:text-red-600 p-2 bg-white hover:bg-red-50 rounded-lg border border-slate-200 transition-colors cursor-pointer" 
+                                  title="Remove Attachment"
+                               >
+                                  <Trash2 className="w-4 h-4" />
+                               </button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center">
+                               <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer bg-slate-50 hover:bg-blue-50/50 hover:border-blue-300 transition-all ${uploadingAttachment ? 'border-blue-400 bg-blue-50/40 pointer-events-none' : 'border-slate-300'}`}>
+                                  <div className="flex flex-col items-center justify-center py-4 text-slate-600">
+                                     {uploadingAttachment ? (
+                                         <div className="flex flex-col items-center gap-2 font-bold text-sm text-blue-600">
+                                             <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                             <span>{uploadStatus || 'Optimizing & Uploading...'}</span>
+                                             <span className="text-[11px] font-normal text-slate-500">Auto-downscaling high resolution photo</span>
+                                         </div>
+                                     ) : (
+                                         <>
+                                             <Upload className="w-7 h-7 mb-1 text-blue-600" />
+                                             <p className="text-sm font-bold text-slate-700">Click to upload notice photo or PDF</p>
+                                             <p className="text-[11px] text-slate-400 mt-0.5">Supports high-res JPG, PNG, WebP, PDF (instant compression)</p>
+                                         </>
+                                     )}
+                                  </div>
+                                  <input type="file" className="hidden" accept="image/*,application/pdf" onChange={handleAttachmentUpload} disabled={uploadingAttachment} />
+                               </label>
+                            </div>
+                        )}
+                     </div>
+
+                     {/* Footer Buttons */}
+                     <div className="border-t border-gray-100 pt-4 mt-2 flex justify-end gap-3">
+                        {formData.status === 'Draft' || !editingId ? (
+                            <button type="button" onClick={() => handleSaveNotice('Draft')} className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg text-sm transition-colors cursor-pointer">
+                               Save Draft
+                            </button>
+                        ) : null}
+                        <button type="button" onClick={() => handleSaveNotice('Published')} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm shadow-md transition-colors flex items-center gap-2 cursor-pointer">
+                           Publish Notice
+                        </button>
+                     </div>
+                  </div>
+               </motion.div>
+            )}
             
             {/* FILTER BAR SECTION */}
             <motion.div 
@@ -828,209 +1054,6 @@ export default function NoticeBoard() {
          >
             <Plus className="w-6 h-6" />
          </button>
-      )}
-
-      {/* CREATE/EDIT PANEL (Drawer on Desktop, Modal on Mobile) */}
-      {isPanelOpen && role === 'admin' && (
-         <div className="fixed inset-0 z-50 flex justify-end bg-gray-900/40 backdrop-blur-sm animate-in fade-in-0">
-            <div className="bg-white w-full md:w-[600px] h-full shadow-2xl flex flex-col animate-in slide-in-from-right-full duration-300">
-               {/* Header */}
-               <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 shrink-0 text-primary">
-                  <h2 className="text-lg font-bold text-gray-900">{editingId ? 'Edit Notice' : 'Create New Notice'}</h2>
-                  <button onClick={() => setIsPanelOpen(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500">
-                     <X className="w-5 h-5" />
-                  </button>
-               </div>
-
-               {/* Scrollable Form */}
-               <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 custom-scrollbar">
-                  <div>
-                     <label className="block text-sm font-bold text-gray-700 mb-1">Notice Title <span className="text-red-500">*</span></label>
-                     <input 
-                        type="text" 
-                        maxLength={100}
-                        value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})}
-                        placeholder="e.g., Annual Sports Day 2081 Announcement"
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
-                     />
-                     <div className="text-right text-xs text-gray-400 mt-1">{formData.title.length}/100</div>
-                  </div>
-
-                  <div className="flex gap-4">
-                     <div className="flex-1 relative">
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Notice Date (B.S.)</label>
-                        <NepaliDatePicker
-                          value={formData.date || ''}
-                          onChange={(value) => setFormData({...formData, date: value})}
-                          className="w-full block"
-                          inputClassName="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-transparent relative z-10"
-                          options={{ calenderLocale: 'en', valueLocale: 'en' }}
-                        />
-                        {!formData.date && (
-                          <div className="absolute left-4 top-[35px] pointer-events-none text-gray-400 font-bold text-sm tracking-widest z-0 opacity-70">
-                            YYYY - MM - DD
-                          </div>
-                        )}
-                        <Calendar className="w-4 h-4 text-gray-400 absolute right-4 top-[35px] pointer-events-none z-[11]" />
-                     </div>
-                     <div className="flex-1 relative">
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Valid Until (B.S. Optional)</label>
-                        <NepaliDatePicker
-                          value={formData.validUntil || ''}
-                          onChange={(value) => setFormData({...formData, validUntil: value})}
-                          className="w-full block"
-                          inputClassName="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-transparent relative z-10"
-                          options={{ calenderLocale: 'en', valueLocale: 'en' }}
-                        />
-                        {!formData.validUntil && (
-                          <div className="absolute left-4 top-[35px] pointer-events-none text-gray-400 font-bold text-sm tracking-widest z-0 opacity-70">
-                            YYYY - MM - DD
-                          </div>
-                        )}
-                        <Calendar className="w-4 h-4 text-gray-400 absolute right-4 top-[35px] pointer-events-none z-[11]" />
-                     </div>
-                  </div>
-
-                  {/* Priority & Pins row */}
-                  <div className="flex flex-wrap gap-4 p-4 border-primary text-primary rounded-xl border border-gray-100">
-                     <div className="flex-1 min-w-[150px]">
-                         <label className="block text-sm font-bold text-gray-700 mb-2">Priority Level</label>
-                         <div className="flex bg-white rounded-lg border border-gray-200 overflow-hidden">
-                             <button onClick={() => setFormData({...formData, priority: 'Normal'})} className={`flex-1 py-1.5 text-sm font-bold ${formData.priority === 'Normal' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:opacity-90'}`}>Normal</button>
-                             <button onClick={() => setFormData({...formData, priority: 'Urgent'})} className={`flex-1 py-1.5 text-sm font-bold ${formData.priority === 'Urgent' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:opacity-90'}`}>Urgent</button>
-                         </div>
-                     </div>
-                     <div className="flex items-center gap-3 w-full md:w-auto md:ml-auto">
-                        <input type="checkbox" id="pinnedStatus" checked={formData.isPinned} onChange={e => setFormData({...formData, isPinned: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
-                        <label htmlFor="pinnedStatus" className="text-sm font-bold text-gray-700 flex items-center gap-1 cursor-pointer select-none"><Pin className="w-4 h-4 text-orange-500"/> Pin Notice to Top</label>
-                     </div>
-                  </div>
-
-                  {/* Target Audience */}
-                  <div>
-                     <label className="block text-sm font-bold text-gray-700 mb-2">Target Audience <span className="text-red-500">*</span></label>
-                     <div className="flex flex-wrap gap-2">
-                        {TARGET_OPTIONS.map(opt => (
-                           <button 
-                             key={opt}
-                             onClick={() => {
-                                 let newTargets = [...formData.targets];
-                                 if (opt === 'All') { 
-                                    newTargets = newTargets.filter(t => t === 'Guest User'); 
-                                    newTargets.push('All'); 
-                                 }
-                                 else if (opt === 'Guest User') {
-                                    if (newTargets.includes('Guest User')) {
-                                       newTargets = newTargets.filter(t => t !== 'Guest User');
-                                    } else {
-                                       newTargets.push('Guest User');
-                                    }
-                                 }
-                                 else {
-                                    newTargets = newTargets.filter(t => t !== 'All'); 
-                                    if (newTargets.includes(opt)) newTargets = newTargets.filter(t => t !== opt);
-                                    else newTargets.push(opt);
-                                 }
-                                 if (newTargets.length === 0) newTargets = ['Admin Only'];
-                                 setFormData({...formData, targets: newTargets});
-                             }}
-                             className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${formData.targets.includes(opt) ? 'bg-gray-800 text-white border-gray-800 scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
-                           >
-                              {opt}
-                           </button>
-                        ))}
-                     </div>
-                  </div>
-
-                  {/* Rich Text Area */}
-                  <div className="flex flex-col flex-1 min-h-[250px]">
-                     <label className="block text-sm font-bold text-gray-700 mb-1">Message Body</label>
-                     <div className="border border-gray-200 rounded-xl overflow-hidden flex flex-col flex-1 bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
-                        <ReactQuill
-                           theme="snow"
-                           value={formData.message}
-                           onChange={(content) => setFormData({...formData, message: content})}
-                           className="flex-1 w-full h-[300px] mb-12"
-                           modules={{
-                              toolbar: [
-                                ['bold', 'italic', 'underline'],
-                                [{'list': 'ordered'}, {'list': 'bullet'}, { 'align': [] }],
-                              ]
-                           }}
-                        />
-                     </div>
-                  </div>
-
-                  {/* Attachment Upload */}
-                  <div className="flex flex-col">
-                     <label className="block text-sm font-bold text-gray-700 mb-1">
-                        Attachment (Notice Circular Photo / PDF) 
-                        <span className="text-xs text-emerald-600 font-semibold ml-2">⚡ Auto-compressed for instant loading</span>
-                     </label>
-                     {formData.attachmentUrl ? (
-                         <div className="flex items-center justify-between p-3 border border-blue-200 bg-blue-50/80 text-blue-900 rounded-xl text-sm font-medium">
-                            <div className="flex items-center gap-3 truncate">
-                               {formData.attachmentType === 'image' ? (
-                                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-blue-200 bg-white shrink-0">
-                                     <img src={formData.attachmentUrl} alt="Preview" className="w-full h-full object-cover" />
-                                  </div>
-                               ) : (
-                                  <div className="p-2.5 bg-red-600 text-white rounded-lg shrink-0">
-                                     <FileText className="w-4 h-4" />
-                                  </div>
-                               )}
-                               <div className="truncate">
-                                  <span className="font-bold text-slate-800 truncate block">{formData.attachmentName || 'Attached File'}</span>
-                                  <span className="text-[11px] text-emerald-600 font-bold uppercase">Ready for Pop-up & Notice Board</span>
-                               </div>
-                            </div>
-                            <button 
-                               type="button"
-                               onClick={() => setFormData({...formData, attachmentUrl: '', attachmentType: '', attachmentName: ''})} 
-                               className="text-slate-400 hover:text-red-600 p-2 bg-white hover:bg-red-50 rounded-lg border border-slate-200 transition-colors cursor-pointer" 
-                               title="Remove Attachment"
-                            >
-                               <Trash2 className="w-4 h-4" />
-                            </button>
-                         </div>
-                     ) : (
-                         <div className="flex items-center">
-                            <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer bg-slate-50 hover:bg-blue-50/50 hover:border-blue-300 transition-all ${uploadingAttachment ? 'border-blue-400 bg-blue-50/40 pointer-events-none' : 'border-slate-300'}`}>
-                               <div className="flex flex-col items-center justify-center py-4 text-slate-600">
-                                  {uploadingAttachment ? (
-                                      <div className="flex flex-col items-center gap-2 font-bold text-sm text-blue-600">
-                                          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                                          <span>{uploadStatus || 'Optimizing & Uploading...'}</span>
-                                          <span className="text-[11px] font-normal text-slate-500">Auto-downscaling high resolution photo</span>
-                                      </div>
-                                  ) : (
-                                      <>
-                                          <Upload className="w-7 h-7 mb-1 text-blue-600" />
-                                          <p className="text-sm font-bold text-slate-700">Click to upload notice photo or PDF</p>
-                                          <p className="text-[11px] text-slate-400 mt-0.5">Supports high-res JPG, PNG, WebP, PDF (instant compression)</p>
-                                      </>
-                                  )}
-                               </div>
-                               <input type="file" className="hidden" accept="image/*,application/pdf" onChange={handleAttachmentUpload} disabled={uploadingAttachment} />
-                            </label>
-                         </div>
-                     )}
-                  </div>
-               </div>
-
-               {/* Footer */}
-               <div className="border-t border-gray-100 p-4 bg-white shrink-0 flex justify-end gap-3 rounded-b-xl">
-                  {formData.status === 'Draft' || !editingId ? (
-                      <button onClick={() => handleSaveNotice('Draft')} className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg text-sm transition-colors">
-                         Save Draft
-                      </button>
-                  ) : null}
-                  <button onClick={() => handleSaveNotice('Published')} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm shadow-md transition-colors selection:flex items-center gap-2">
-                     Publish Notice
-                  </button>
-               </div>
-            </div>
-         </div>
       )}
 
       {deleteConfirm && (
