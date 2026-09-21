@@ -21,7 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import DOMPurify from 'isomorphic-dompurify';
 import { formatBSDate } from '../lib/nepaliDate';
-import logoImageSrc from '../assets/logo.png';
+const logoImageSrc = "/logo.png";
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 

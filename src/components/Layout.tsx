@@ -12,7 +12,8 @@ import CalculatorWidget from './CalculatorWidget';
 import DOMPurify from 'isomorphic-dompurify';
 import NoticePopup from './NoticePopup';
 import Breadcrumbs from './Breadcrumbs';
-import logoImageSrc from '../assets/logo.png';
+import { safeDispatchEvent } from '../lib/safeEvents';
+const logoImageSrc = "/logo.png";
 
 const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "/logo.png";
@@ -322,12 +323,23 @@ export default function Layout({
   // Merge notices, admissions, web enquiries, and alumni submissions for the bell
   // Only include items that the current user has NOT read.
   const currentUidForFilter = auth.currentUser?.uid || studentId || 'guest';
+  const safeToIsoString = (val: any) => {
+    if (!val) return new Date().toISOString();
+    if (typeof val === 'string') return val;
+    if (typeof val === 'number') return new Date(val).toISOString();
+    if (typeof val === 'object' && val !== null) {
+      if (typeof val.toDate === 'function') return val.toDate().toISOString();
+      if (typeof val.seconds === 'number') return new Date(val.seconds * 1000).toISOString();
+    }
+    return new Date().toISOString();
+  };
+
   const combinedBellItems = [
     ...pendingAdmissions.map(a => ({
       id: a.id,
       title: `Admission Request: ${a.studentName || 'Student'}`,
       priority: 'Urgent',
-      date: a.submittedAt?.toDate?.()?.toISOString() || a.submittedAt || new Date().toISOString(),
+      date: safeToIsoString(a.submittedAt),
       isAdmission: true,
       isEnquiry: false,
       isAlumni: false,
@@ -338,7 +350,7 @@ export default function Layout({
       id: e.id,
       title: `Web Enquiry: ${e.fullName || e.name || 'Anonymous'}`,
       priority: 'Enquiry',
-      date: e.createdAt || new Date().toISOString(),
+      date: safeToIsoString(e.createdAt),
       isAdmission: false,
       isEnquiry: true,
       isAlumni: false,
@@ -349,7 +361,7 @@ export default function Layout({
       id: al.id,
       title: `Alumni Story: ${al.name}`,
       priority: 'Alumni',
-      date: al.createdAt || new Date().toISOString(),
+      date: safeToIsoString(al.createdAt),
       isAdmission: false,
       isEnquiry: false,
       isAlumni: true,
@@ -362,7 +374,7 @@ export default function Layout({
       isEnquiry: false,
       isAlumni: false,
       href: '/notices',
-      date: n.timestamp?.toDate?.()?.toISOString() || new Date().toISOString()
+      date: safeToIsoString(n.timestamp || n.date)
     }))
   ].sort((a, b) => {
     const dateA = typeof a.date === 'string' ? a.date : new Date().toISOString();
@@ -449,8 +461,6 @@ export default function Layout({
     } else if (role === 'teacher') {
       nav.push({ name: 'My Salary', href: '/teacher-salary', icon: Wallet, group: 'My Portal', originalIndex: nav.length });
       nav.push({ name: 'Manage Results', href: '/admin', icon: Upload, group: 'Administration', originalIndex: nav.length });
-    } else if (role === 'bill_generator') {
-      nav.push({ name: 'Fee Management', href: '/account-admin', icon: CreditCard, group: 'Administration', originalIndex: nav.length });
     } else if (role === 'admin') {
       nav = nav.filter(item => item.name !== 'Fees & Scholarships');
       nav.push({ name: 'Manage Admissions', href: '/admin-admissions', icon: User, group: 'Administration', originalIndex: nav.length });
@@ -499,7 +509,7 @@ export default function Layout({
        const newReads = [...localReads, noticeId];
        setLocalReads(newReads);
        localStorage.setItem('localReadNotices', JSON.stringify(newReads));
-       window.dispatchEvent(new Event('localReadsChanged'));
+       safeDispatchEvent('localReadsChanged');
     }
 
     const uid = auth.currentUser?.uid || studentId || 'guest';
@@ -590,7 +600,7 @@ export default function Layout({
 
     setLocalReads([...newReads]);
     localStorage.setItem('localReadNotices', JSON.stringify(newReads));
-    window.dispatchEvent(new Event('localReadsChanged'));
+    safeDispatchEvent('localReadsChanged');
     setIsBellOpen(false); // Always close the dropdown immediately
 
     if (updates.length > 0) {
@@ -869,7 +879,7 @@ export default function Layout({
               <button
                 onClick={() => {
                   setIsMenuOpen(false);
-                  window.dispatchEvent(new Event('openWhatsAppDesk'));
+                  safeDispatchEvent('openWhatsAppDesk');
                 }}
                 className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-lg transition-all active:scale-[0.98] border border-emerald-400/30"
               >
@@ -1101,7 +1111,7 @@ export default function Layout({
 
           <div className={`px-0 pb-24 sm:pb-5 w-full max-w-full min-w-0 flex-1 shrink-0 flex flex-col ${location.pathname === '/' ? 'pt-0' : 'pt-3'}`}>
             <Breadcrumbs userRole={userRole} />
-            <div className="max-w-6xl mx-auto w-full flex-1">
+            <div className="w-full max-w-[1680px] mx-auto flex-1 px-3 sm:px-6 lg:px-8">
               <motion.div
                 key={location.pathname}
                 initial={{ opacity: 0, y: 15, filter: 'blur(4px)' }}

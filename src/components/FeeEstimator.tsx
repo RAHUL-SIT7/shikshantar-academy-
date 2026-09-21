@@ -310,7 +310,7 @@ export const FeeEstimator: React.FC = () => {
                 <option value="none">Self Transit / Walking (Free)</option>
                 {feeData.transportation.map((t) => (
                   <option key={t.id || t.route} value={t.id}>
-                    {t.route} — NRs. {parseNum(t.fee).toLocaleString()}/mo
+                    {t.route} — NRs. {(parseNum(t.fee) || 0).toLocaleString()}/mo
                   </option>
                 ))}
               </select>
@@ -340,7 +340,7 @@ export const FeeEstimator: React.FC = () => {
               <div className="space-y-2.5 text-xs font-medium text-slate-900">
                 <div className="flex justify-between items-center">
                   <span>Standard Monthly Tuition</span>
-                  <span className="font-extrabold">NRs. {grossMonthlyTuition.toLocaleString()}</span>
+                  <span className="font-extrabold">NRs. {(grossMonthlyTuition || 0).toLocaleString()}</span>
                 </div>
 
                 {totalTuitionDiscountPercent > 0 && (
@@ -348,26 +348,26 @@ export const FeeEstimator: React.FC = () => {
                     <span className="font-bold text-slate-950 flex items-center gap-1">
                       <Percent className="w-3.5 h-3.5 text-slate-900" /> Scholarship Discount ({totalTuitionDiscountPercent}%)
                     </span>
-                    <span className="font-black text-emerald-900">-NRs. {monthlyTuitionDiscount.toLocaleString()}</span>
+                    <span className="font-black text-emerald-900">-NRs. {(monthlyTuitionDiscount || 0).toLocaleString()}</span>
                   </div>
                 )}
 
                 <div className="flex justify-between items-center">
                   <span>Net Monthly Tuition</span>
-                  <span className="font-extrabold">NRs. {netMonthlyTuition.toLocaleString()}</span>
+                  <span className="font-extrabold">NRs. {(netMonthlyTuition || 0).toLocaleString()}</span>
                 </div>
 
                 {computerFee > 0 && (
                   <div className="flex justify-between items-center">
                     <span>Computer / Tech Practical Fee</span>
-                    <span className="font-bold">NRs. {computerFee.toLocaleString()}</span>
+                    <span className="font-bold">NRs. {(computerFee || 0).toLocaleString()}</span>
                   </div>
                 )}
 
                 {transportCost > 0 && (
                   <div className="flex justify-between items-center">
                     <span className="truncate max-w-[200px]">Bus Route ({selectedRouteObj?.route})</span>
-                    <span className="font-bold shrink-0">NRs. {transportCost.toLocaleString()}</span>
+                    <span className="font-bold shrink-0">NRs. {(transportCost || 0).toLocaleString()}</span>
                   </div>
                 )}
 
@@ -375,7 +375,7 @@ export const FeeEstimator: React.FC = () => {
                   <span className="font-black uppercase tracking-wider text-xs">Net Monthly Fee</span>
                   <div className="text-right">
                     <span className="text-2xl font-black text-slate-950 block leading-none font-display">
-                      NRs. {totalNetMonthlyFee.toLocaleString()}
+                      NRs. {(totalNetMonthlyFee || 0).toLocaleString()}
                     </span>
                     <span className="text-[10px] font-bold text-slate-800">per month</span>
                   </div>
@@ -385,18 +385,18 @@ export const FeeEstimator: React.FC = () => {
                 <div className="pt-2 border-t border-slate-950/15 space-y-1.5 text-[11px] text-slate-900 font-semibold">
                   <div className="flex justify-between items-center bg-slate-950/10 p-2 rounded-lg border border-slate-950/10">
                     <span>Terminal Exam Fee (Once per 3 mo / 4 terms)</span>
-                    <span className="font-black text-slate-950">NRs. {examFee.toLocaleString()} / exam</span>
+                    <span className="font-black text-slate-950">NRs. {(examFee || 0).toLocaleString()} / exam</span>
                   </div>
 
                   <div className="flex justify-between items-center pt-0.5">
                     <span>Annual Charges (One-Time / Year)</span>
-                    <span className="font-bold">NRs. {annualCharges.toLocaleString()}</span>
+                    <span className="font-bold">NRs. {(annualCharges || 0).toLocaleString()}</span>
                   </div>
 
                   <div className="flex justify-between items-center">
                     <span>One-Time Admission Fee</span>
                     <span className="font-bold">
-                      NRs. {netAdmissionFee.toLocaleString()}
+                      NRs. {(netAdmissionFee || 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -409,7 +409,7 @@ export const FeeEstimator: React.FC = () => {
                     <Coins className="w-4 h-4 text-amber-400" /> Annual Scholarship Savings
                   </div>
                   <p className="text-2xl font-black text-amber-300 font-display">
-                    NRs. {annualSavings.toLocaleString()} <span className="text-xs font-normal text-slate-300">Saved / Year</span>
+                    NRs. {(annualSavings || 0).toLocaleString()} <span className="text-xs font-normal text-slate-300">Saved / Year</span>
                   </p>
                   <p className="text-[10px] text-slate-400 font-medium">
                     Calculated over 12 months including rank and sibling tuition waivers.

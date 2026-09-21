@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { doc, onSnapshot, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { Edit2, Save, X, Phone, Mail, MapPin, Globe, Facebook, Send, CheckCircle2, MessageSquare, Sparkles } from 'lucide-react';
+import { Edit2, Save, X, Phone, Mail, MapPin, Globe, Facebook, Send, CheckCircle2, MessageSquare } from 'lucide-react';
 import { motion } from 'motion/react';
 import { sendEnquiryEmail } from '../lib/emailService';
 

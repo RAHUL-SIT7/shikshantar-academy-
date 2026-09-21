@@ -8,7 +8,7 @@ import { useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import { motion } from 'motion/react';
 import principalImg from '../assets/images/regenerated_image_1780334392921.jpg';
-import logoImageSrc from '../assets/logo.png';
+const logoImageSrc = "/logo.png";
 
 const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "/logo.png";

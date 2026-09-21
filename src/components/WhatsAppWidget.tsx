@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, X, Send, UserCheck, CreditCard } from 'lucide-react';
-import logoImage from '../assets/logo.png';
+const logoImage = "/logo.png";
 
 interface Department {
   name: string;

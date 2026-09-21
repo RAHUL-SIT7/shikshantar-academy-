@@ -153,9 +153,54 @@
         "class": { "type": "string" },
         "billingPeriod": { "type": "string" },
         "totalAmount": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "paid"] }
+        "status": { "type": "string", "enum": ["pending", "paid", "partial", "void", "cancelled"] }
       },
       "required": ["billNo", "studentId", "studentName", "class", "billingPeriod", "totalAmount", "status"]
+    },
+    "BillItem": {
+      "title": "Bill Item",
+      "description": "Itemized monthly fee line item for a student and specific Nepali month.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "class": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "month": { "type": "string" },
+        "monthId": { "type": "string" },
+        "monthIndex": { "type": "number" },
+        "chargeName": { "type": "string" },
+        "rate": { "type": "number" },
+        "amount": { "type": "number" },
+        "remitBillId": { "type": "string" },
+        "billNo": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "pending", "paid", "void", "cancelled"] }
+      },
+      "required": ["studentId", "academicYear", "month", "monthId", "amount", "status"]
+    },
+    "LedgerAuditLog": {
+      "title": "Ledger Audit Log",
+      "description": "Immutable audit trail tracking every transaction modification, edit, refund, undo, deletion, and manual adjustment.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "object" },
+        "timestampStr": { "type": "string" },
+        "date": { "type": "string" },
+        "dateBS": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "receipt": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "actionType": { "type": "string", "enum": ["AMOUNT_MODIFIED", "STATUS_REFUNDED", "PAYMENT_UNDONE", "TRANSACTION_DELETED", "MANUAL_OVERRIDE", "FEE_ADJUSTED", "PAYMENT_ENTRY"] },
+        "previousValue": { "type": "string" },
+        "newValue": { "type": "string" },
+        "reason": { "type": "string" },
+        "adminName": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "adminUid": { "type": "string" }
+      },
+      "required": ["timestampStr", "actionType", "previousValue", "newValue", "reason", "adminName"]
     }
   },
   "firestore": {
@@ -202,6 +247,14 @@
     "/remitBills/{billId}": {
       "schema": "RemitBill",
       "description": "Distributed pre-payment class-wise billing receipts."
+    },
+    "/billItems/{itemId}": {
+      "schema": "BillItem",
+      "description": "Itemized student monthly billing line items."
+    },
+    "/ledger_audit_logs/{logId}": {
+      "schema": "LedgerAuditLog",
+      "description": "Audit records of transaction modifications, previous and new values, reasons, and administrator names."
     }
   }
 }

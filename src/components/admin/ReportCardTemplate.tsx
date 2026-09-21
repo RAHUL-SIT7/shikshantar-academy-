@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react';
 import { formatBSDate } from '../../lib/nepaliDate';
 import signatureImg from '../../assets/signature.svg';
-import logoImage from '../../assets/logo.png';
+const logoImage = "/logo.png";
 
 interface ReportCardProps {
   student: any;

@@ -30,7 +30,7 @@ import NepaliDate from "nepali-date-converter";
 import autoTable from "jspdf-autotable";
 import jsPDF from "jspdf";
 import ModernClockCalendar from "../components/ModernClockCalendar";
-import logoImage from "../assets/logo.png";
+const logoImage = "/logo.png";
 
 const DEFAULT_MONTHS_2083 = [
   {
@@ -861,9 +861,19 @@ const CalendarPage = React.forwardRef<
 });
 
 export default function AcademicCalendar() {
-  const [flipSound] = useState(
-    new Audio("https://actions.google.com/sounds/v1/foley/book_page_turn.ogg"),
-  );
+  const flipSoundRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    try {
+      if (typeof document !== 'undefined') {
+        const audio = document.createElement('audio');
+        audio.src = "https://actions.google.com/sounds/v1/foley/book_page_turn.ogg";
+        flipSoundRef.current = audio;
+      }
+    } catch {
+      // ignore if Audio is not supported
+    }
+  }, []);
+  const flipSound = flipSoundRef.current;
   const bookRef = useRef<any>(null);
   const hasInitiallyTurned = useRef(false);
   const [activeTab, setActiveTab] = useState<"flipbook" | "timeline">(

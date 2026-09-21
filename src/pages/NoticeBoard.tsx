@@ -14,6 +14,7 @@ import DOMPurify from 'isomorphic-dompurify';
 import { NepaliDatePicker } from 'nepali-datepicker-reactjs';
 import 'nepali-datepicker-reactjs/dist/index.css';
 import { useNotices } from '../contexts/NoticeContext';
+import { safeDispatchEvent } from '../lib/safeEvents';
 
 const CLASSES = ['Play Group', 'Nursery', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map(c => `Class ${c}`);
 const TARGET_OPTIONS = ['All', 'Admin Only', 'Students Only', 'Teachers Only', 'Guest User', ...CLASSES];
@@ -231,7 +232,7 @@ export default function NoticeBoard() {
       if (!localReads.includes(id)) {
           setLocalReads(newReads);
           localStorage.setItem('localReadNotices', JSON.stringify(newReads));
-          window.dispatchEvent(new Event('localReadsChanged'));
+          safeDispatchEvent('localReadsChanged');
       }
 
       if (!currentReadBy?.includes(currentUserId) && role !== 'admin') {

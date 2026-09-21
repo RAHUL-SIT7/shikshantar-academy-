@@ -7,9 +7,8 @@ import jsPDF from 'jspdf';
 import { toCanvas } from 'html-to-image';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import * as XLSX from 'xlsx';
 import { ReportCardTemplate } from './ReportCardTemplate';
-import logoImage from '../../assets/logo.png';
+const logoImage = "/logo.png";
 
 export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRole, assignedClasses, teacherProfile }: any) {
   const [filterClass, setFilterClass] = useState('');
@@ -98,8 +97,8 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
      });
 
      withStats.sort((a, b) => {
-         if (a.class !== b.class) return String(a.class).localeCompare(String(b.class));
-         if (a.examType !== b.examType) return String(a.examType).localeCompare(String(b.examType));
+         if (a.class !== b.class) return String(a.class || '').localeCompare(String(b.class || ''));
+         if (a.examType !== b.examType) return String(a.examType || '').localeCompare(String(b.examType || ''));
          return (a.rank || 0) - (b.rank || 0);
      });
 

@@ -91,7 +91,7 @@ export default function ScholarshipTab({ studentsData, onRefresh }: { studentsDa
     const aNum = parseInt(a);
     const bNum = parseInt(b);
     if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
-    return a.localeCompare(b);
+    return String(a || '').localeCompare(String(b || ''));
   });
 
   const handleUpdateScholarship = async () => {

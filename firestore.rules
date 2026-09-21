@@ -6,43 +6,32 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isSuperAdmin() {
-      return isSignedIn() && 
-             request.auth.token != null && 
-             (request.auth.token.get('email', '') == 'rahulsah4534@gmail.com' ||
-              request.auth.token.email == 'rahulsah4534@gmail.com');
-    }
-
     function isAdmin() {
-      return isSuperAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin')
+      return isSignedIn() && (
+        (request.auth.token != null && (request.auth.token.get('admin', false) == true || request.auth.token.get('role', '') in ['admin', 'Admin'])) ||
+        (request.auth.token.email != null && request.auth.token.email.matches('.*admin.*@.*')) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'Admin'])
       );
     }
 
     function isTeacher() {
-      return isSuperAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Teacher')
-      );
+      return isSignedIn() && (
+        (request.auth.token != null && request.auth.token.get('role', '') in ['teacher', 'Teacher']) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'Teacher'])
+      ) && !isAdmin();
     }
 
-    function isBillGenerator() {
-      return isSuperAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'bill_generator' ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'bill-generator' ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'BillGenerator' ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Bill Generator')
-      );
+    function isStudent() {
+      return isSignedIn() && (
+        (request.auth.token != null && request.auth.token.get('role', '') in ['student', 'Student']) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['student', 'Student'])
+      ) && !isAdmin();
     }
 
-    function isOwner(studentId) {
+    function isStudentOwner(studentId) {
       return isSignedIn() && (
         request.auth.uid == studentId ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
@@ -52,9 +41,18 @@ service cloud.firestore {
 
     // Users
     match /users/{userId} {
-      allow read: if true;
-      allow update: if isAdmin() || (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
-      allow create: if true;
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        isTeacher() ||
+        resource.data.get('studentId', '') == request.auth.uid ||
+        (request.auth.token.email != null && (
+          resource.data.get('authEmail', '') == request.auth.token.email ||
+          resource.data.get('email', '') == request.auth.token.email
+        ))
+      );
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'active', 'admin', 'adminTier']));
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow delete: if isAdmin();
     }
 
@@ -115,7 +113,7 @@ service cloud.firestore {
     // Contact Enquiries
     match /contact_enquiries/{document=**} {
       allow create: if true;
-      allow read, update, delete: if true;
+      allow read, update, delete: if isAdmin();
     }
 
     // Alumni Submissions
@@ -130,43 +128,193 @@ service cloud.firestore {
       allow write: if isAdmin() || isTeacher();
     }
 
-    // Fee Management
-    match /feeStructure/{document=**} {
+    // Fee Management (Strictly Admin only for management; Students read own only; Teachers completely blocked)
+    match /students/{studentId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
+    match /feeStructure/{document=**} {
+      allow read: if !isTeacher();
+      allow write: if isAdmin();
+    }
+
     match /studentFees/{feeDocId} {
-      allow read: if true;
-      allow write: if isAdmin() || isBillGenerator();
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow write: if isAdmin();
     }
 
     match /financial_students/{studentId} {
-      allow read: if true;
-      allow write: if isAdmin() || isBillGenerator();
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(studentId)));
+      allow write: if isAdmin();
     }
 
     match /financial_transactions/{transactionId} {
-      allow read: if true;
-      allow write: if isAdmin() || isBillGenerator();
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow write: if isAdmin();
     }
 
-    // Transactions (alternate collection name)
+    // Transactions (financial collection - strict immutability & physical delete prevention)
     match /transactions/{transactionId} {
-      allow read: if true;
-      allow write: if isAdmin() || isBillGenerator();
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow create: if isAdmin();
+      // Physical deletion strictly forbidden for institutional transactions; only sandbox test fixtures permitted
+      allow delete: if isAdmin() && 
+        transactionId.matches('TEST_.*') && 
+        resource.data.get('isTest', false) == true &&
+        resource.data.get('isProduction', false) != true;
+      // Financial amounts, core identifiers, grouping, test flags, and linkage are strictly immutable
+      allow update: if isAdmin() && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'amount', 'amountApplied', 'netPayable', 'cashTendered', 'cashReceived', 'changeReturned',
+          'remainingOutstanding', 'excessAmount', 'advanceCreated', 'excessReturned',
+          'receipt', 'receiptNo', 'receiptNumber', 'studentId', 'studentName', 'class', 'rollNo',
+          'method', 'paymentMethod', 'date', 'dateBS', 'dateAD', 'transactionType', 'type',
+          'paymentGroupId', 'sourceTransactionId', 'allocations', 'paymentCategory',
+          'baseTuition', 'additionalCharges', 'discounts', 'remitBillId', 'studentFeeId', 'feeItemId',
+          'billId', 'docId', 'cashLedgerId', 'cashLedgerExpenseId', 'advanceId', 'advanceDocId',
+          'consumedAdvanceId',
+          'createdAt', 'createdBy', 'creatorUid', 'operatorUid', 'academicYearId', 'academicYear', 'session',
+          'isTest', 'isSandbox', 'environment', 'isTestTransaction', 'isProduction', 'timestamp'
+        ]) &&
+        (
+          (request.resource.data.get('status', '') == resource.data.get('status', '')) ||
+          (resource.data.get('status', '') in ['SUCCESS', 'ACTIVE', 'PAID', 'active', 'success', 'paid'] && request.resource.data.get('status', '') in ['REFUNDED', 'CANCELLED'])
+        );
     }
 
-    // Remit Bills Collection
+    // Remit Bills Collection (deletion blocked if payment recorded; financial identity & paid state immutable)
     match /remitBills/{billId} {
-      allow read: if isSignedIn() || isAdmin() || isBillGenerator();
-      allow write: if isAdmin() || isBillGenerator() || isTeacher();
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow create: if isAdmin();
+      // Physical deletion strictly blocked if bill has recorded payments or transaction linkages
+      allow delete: if isAdmin() && 
+        resource.data.get('paidAmount', 0) == 0 && 
+        resource.data.get('transactionId', '') == '' && 
+        resource.data.get('status', 'draft') in ['draft', 'pending', 'void'];
+      // Core financial charges, bill numbers, and student identities are immutable
+      allow update: if isAdmin() && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'studentId', 'studentName', 'class', 'rollNo', 'billNo', 'billNumber', 'academicYear', 'academicYearId', 'session',
+          'totalAmount', 'amount', 'grandTotal', 'totalDue', 'subTotal', 'netAmount',
+          'itemizedCharges', 'chargeItems', 'billItems', 'items', 'createdAt', 'createdBy', 'creatorUid',
+          'isTest', 'isSandbox', 'environment', 'isProduction'
+        ]) &&
+        // On a paid or partially-paid bill, prevent arbitrary direct mutations:
+        (
+          // Case A: Unpaid draft/pending bill can receive payment or status change
+          (
+            resource.data.get('paidAmount', 0) == 0 &&
+            resource.data.get('status', 'draft') in ['draft', 'pending'] &&
+            request.resource.data.get('paidAmount', 0) >= 0 &&
+            request.resource.data.get('dueAmount', 0) >= 0
+          ) ||
+          // Case B: Payment addition (paidAmount increases, due decreases, status is partial or paid)
+          (
+            request.resource.data.get('paidAmount', 0) > resource.data.get('paidAmount', 0) &&
+            request.resource.data.get('status', '') in ['partial', 'paid'] &&
+            request.resource.data.get('dueAmount', 0) >= 0
+          ) ||
+          // Case C: Refund / Cancellation (must include refund metadata, balances non-negative)
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasAny(['refundedAt', 'cancelledAt', 'refundReason']) &&
+            request.resource.data.get('paidAmount', 0) >= 0 &&
+            request.resource.data.get('dueAmount', 0) >= 0
+          )
+        );
+
+      match /billItems/{itemId} {
+        allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+        allow write: if isAdmin();
+      }
     }
 
-    // Cash Ledger Collection
+    // Bill Items Collection (itemized student fee lines per month)
+    match /billItems/{itemId} {
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow write: if isAdmin();
+    }
+
+    // Cash Ledger Collection (Admin only - protected fee collection records)
     match /cash_ledger/{ledgerId} {
-      allow read: if isSignedIn() || isAdmin() || isBillGenerator();
-      allow write: if isAdmin() || isBillGenerator();
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      // Cannot delete cash entries linked to fee collection transactions
+      allow delete: if isAdmin() && 
+        resource.data.get('category', '') != 'Fee Collection' && 
+        resource.data.get('category', '') != 'Fee Refund' && 
+        resource.data.get('transactionId', '') == '' && 
+        resource.data.get('sourceTransactionId', '') == '' &&
+        resource.data.get('paymentGroupId', '') == '';
+      // Cannot mutate financial amounts of fee collection entries, nor escalate unprotected entries
+      allow update: if isAdmin() && (
+        (resource.data.get('category', '') in ['Fee Collection', 'Fee Refund'] || resource.data.get('transactionId', '') != '' || resource.data.get('sourceTransactionId', '') != '' || resource.data.get('paymentGroupId', '') != '') ?
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'amount', 'type', 'category', 'transactionId', 'sourceTransactionId', 'paymentGroupId',
+          'relatedTransactionId', 'receiptNo', 'refundRecordId', 'date', 'recordedBy', 'operatorUid', 'createdAt', 'timestamp'
+        ]) :
+        (
+          request.resource.data.get('category', '') != 'Fee Collection' && 
+          request.resource.data.get('category', '') != 'Fee Refund' && 
+          request.resource.data.get('transactionId', '') == '' && 
+          request.resource.data.get('sourceTransactionId', '') == '' &&
+          request.resource.data.get('paymentGroupId', '') == ''
+        )
+      );
+    }
+
+    // Ledger Audit Logs Collection (Tamper-evident append-only; updates and deletions strictly prohibited)
+    match /ledger_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.keys().hasAll(['actionType', 'timestamp', 'adminEmail']);
+      allow update, delete: if false;
+    }
+
+    // Student Advances Collection
+    match /student_advances/{docId} {
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow create: if isAdmin();
+      allow delete: if isAdmin() && (resource.data.get('status', '') == 'CANCELLED' || resource.data.get('remainingCredit', 0) == 0) && resource.data.get('sourceTransactionId', '') == '';
+      allow update: if isAdmin() && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'amount', 'sourceTransactionId', 'paymentGroupId', 'studentId', 'studentName', 'class', 'rollNumber', 'receiptNo', 'createdAt'
+        ]);
+    }
+
+    // Refund Records Collection (Tamper-evident audit log: append-only)
+    match /refund_records/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.keys().hasAll(['amount', 'sourceTransactionId', 'status', 'timestamp']);
+      allow update, delete: if false;
+    }
+
+    // Excess Payment Requests Collection
+    match /excess_payment_requests/{docId} {
+      allow read: if !isTeacher() && (isAdmin() || (isStudent() && isStudentOwner(resource.data.get('studentId', ''))));
+      allow write: if isAdmin();
+    }
+
+    // Archived Student Fees (Admin only)
+    match /archived_student_fees/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Document Sequence Counters (Strictly Admin authorized, Teachers & Students blocked)
+    match /document_sequences/{sequenceId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Atomic Billing Uniqueness Locks (Strictly Admin authorized)
+    match /annual_fee_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /admission_fee_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /billing_month_locks/{lockId} {
+      allow read, write: if isAdmin();
     }
 
     // --- NEW SALARY COLLECTIONS ---

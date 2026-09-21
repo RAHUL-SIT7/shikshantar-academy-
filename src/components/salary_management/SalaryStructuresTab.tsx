@@ -150,7 +150,7 @@ export default function SalaryStructuresTab({ teachers, structures }: { teachers
                                   <p className="text-[10px] text-gray-400 font-medium">Incentives: {s.incentiveUnits} Units × NRs. {s.unitRate || 1500}/unit</p>
                                )}
                             </div>
-                            <p className="font-black text-emerald-600">Total: NRs. {total.toLocaleString()}</p>
+                            <p className="font-black text-emerald-600">Total: NRs. {(total || 0).toLocaleString()}</p>
                          </div>
                       );
                    })}

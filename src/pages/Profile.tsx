@@ -5,6 +5,7 @@ import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useNavigate } from 'react-router-dom';
+import { formatRemitBillItems } from '../lib/remitBillUtils';
 import AdminProfileView from './AdminProfileView';
 
 export default function Profile() {
@@ -521,14 +522,14 @@ export default function Profile() {
                      {/* Itemized breakdown */}
                      <div className="space-y-2">
                        <p className="text-[11px] font-black text-slate-500 uppercase">Itemized Fee Charges:</p>
-                       <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
-                         {bill.itemizedCharges?.map((item: any, idx: number) => (
-                           <div key={idx} className="flex justify-between items-center px-4 py-2.5 text-xs">
-                             <span className="font-bold text-slate-700">{item.name}</span>
-                             <span className="font-mono font-bold text-slate-900">NRs. {Number(item.total || item.rate || 0).toLocaleString()}</span>
-                           </div>
-                         ))}
-                       </div>
+                        <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+                          {formatRemitBillItems(bill.itemizedCharges || []).map((item: any, idx: number) => (
+                            <div key={idx} className="flex justify-between items-center px-4 py-2.5 text-xs">
+                              <span className="font-bold text-slate-700">{item.name}</span>
+                              <span className="font-mono font-bold text-slate-900">{item.totalStr}</span>
+                            </div>
+                          ))}
+                        </div>
                      </div>
 
                      {/* Summary financials */}

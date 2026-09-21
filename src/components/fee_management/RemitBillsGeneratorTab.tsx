@@ -1,15 +1,73 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { auth, db, handleFirestoreError, OperationType } from '../../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, writeBatch, serverTimestamp, onSnapshot, query, where, getDoc, setDoc, getDocs, deleteField } from 'firebase/firestore';
-import { Search, Loader2, Plus, X, FileText, CheckCircle2, AlertCircle, Trash2, Printer, Clock, Banknote, Check } from 'lucide-react';
+import { 
+  Search, 
+  Loader2, 
+  Plus, 
+  X, 
+  FileText, 
+  CheckCircle2, 
+  AlertCircle, 
+  Trash2, 
+  Printer, 
+  Clock, 
+  Banknote, 
+  Check, 
+  RotateCcw, 
+  Calendar, 
+  ShieldAlert, 
+  ShieldCheck, 
+  RefreshCw, 
+  AlertTriangle, 
+  Ban,
+  CalendarRange,
+  Users,
+  XCircle,
+  ArrowRight,
+  Wallet
+} from 'lucide-react';
 import { formatBSDate, getBSYearMonthDate } from '../../lib/nepaliDate';
-import logoImage from '../../assets/logo.png';
+import { formatRemitBillItems } from '../../lib/remitBillUtils';
+const logoImage = "/logo.png";
+import {
+  NEPALI_MONTH_SEQUENCE,
+  normalizeNepaliMonth,
+  getNepaliMonthIndex,
+  calculateNepaliBillingPeriod,
+  extractCoveredMonthsFromBill,
+  getStudentYearCoverage,
+  analyzePeriodCoverage,
+  getBillingCoverage,
+  BillingCoverageResult,
+  calculateBillingGenerationPlan,
+  BillingGenerationPlan,
+  SingleChargeItemPlan,
+  StudentBillingPlan,
+  hasAnnualFeeBeenBilled,
+  NepaliMonthIdMapping,
+  mapDurationToNepaliMonthIds
+} from '../../lib/nepaliBillingCoverage';
+import {
+  verifyRequestedMonthsInFirestore,
+  attachBillItemsToBatch,
+  FirestoreBillingVerificationResult,
+  BillItem
+} from '../../lib/firestoreBillVerification';
+import { generateSingleStudentBillTransactionally } from '../../lib/atomicBillingTransactionEngine';
+import { sanitizeForFirestore, validateRemitBillPayload } from '../../lib/firestoreSanitize';
+import { allocateBatchDocumentNumbers, allocateNextDocumentNumber } from '../../lib/documentNumberingEngine';
+import AcademicYearBillingMatrix from './AcademicYearBillingMatrix';
+import BillingCoveragePreview from './BillingCoveragePreview';
+import VoidRemitBillModal from './VoidRemitBillModal';
+import AuthorizedOverrideModal from './AuthorizedOverrideModal';
+import { BillingCoverageReconciliationModal } from './BillingCoverageReconciliationModal';
 
-const MONTHS = ['Baisakh', 'Jestha', 'Asar', 'Shrawan', 'Bhadra', 'Ashwin', 'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'];
+const MONTHS = ['Baisakh', 'Jestha', 'Ashadh', 'Shrawan', 'Bhadra', 'Ashwin', 'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'];
 
 interface StudentChargeItem {
   name: string;
@@ -27,15 +85,23 @@ interface RemitBill {
   class: string;
   billingPeriod: string;
   periodMonths: number;
+  coveredMonths?: string[];
+  academicYear?: string;
   itemizedCharges: StudentChargeItem[];
+  billItems?: BillItem[];
   totalAmount: number;
-  status: 'pending' | 'paid';
+  status: 'pending' | 'paid' | 'partial' | 'void' | 'cancelled';
   createdAt: string;
   createdBy: string;
   paidAmount?: number;
   transactionId?: string;
   paidAt?: string;
   guardianName?: string;
+  voidReason?: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  reissuedFromBillNo?: string;
+  reissuedToBillNo?: string;
 }
 
 function getMonthsCovered(billingPeriod: string): string[] {
@@ -101,6 +167,25 @@ function matchesMonthFilter(billingPeriod: string, startF: string, endF: string)
   return billStart === startF && billEnd === endF;
 }
 
+// Strict digit-only keyboard interception helper
+const handleDigitsOnlyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  // Allow control keys: Backspace, Tab, Enter, Escape, ArrowLeft, ArrowRight, Delete, Home, End
+  const allowedKeys = ['Backspace', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'Delete', 'Home', 'End'];
+  if (allowedKeys.includes(e.key)) return;
+  
+  // Allow keyboard shortcuts (Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X, Cmd+A, etc.)
+  if ((e.ctrlKey || e.metaKey) && ['a', 'c', 'v', 'x', 'z'].includes(e.key.toLowerCase())) return;
+  
+  // Only allow digits 0-9 (prevent 'e', 'E', '+', '-', '.', and any letter/symbol)
+  if (!/^[0-9]$/.test(e.key)) {
+    e.preventDefault();
+  }
+};
+
+const sanitizeDigitsOnly = (val: string): string => {
+  return val.replace(/\D/g, '');
+};
+
 export default function RemitBillsGeneratorTab({ 
   students, 
   onRefresh, 
@@ -110,9 +195,16 @@ export default function RemitBillsGeneratorTab({
   onRefresh: () => void; 
   onCollectGuardianCash?: (prefill: any) => void;
 }) {
-  const [activeSubTab, setActiveSubTab] = useState<'list' | 'generate'>('list');
+  const [activeSubTab, setActiveSubTab] = useState<'generate' | 'list' | 'matrix'>('generate');
   const [remitBills, setRemitBills] = useState<RemitBill[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Void and Reissue state
+  const [voidingBill, setVoidingBill] = useState<RemitBill | null>(null);
+  const [reissueContext, setReissueContext] = useState<{ fromBillNo: string; studentName: string } | null>(null);
+  const [boundaryWarning, setBoundaryWarning] = useState<string | null>(null);
+  const [showReconciliationModal, setShowReconciliationModal] = useState(false);
+  const [reconcileStudentId, setReconcileStudentId] = useState<string>('');
 
   // Generator form states
   const [selectedClass, setSelectedClass] = useState('');
@@ -144,6 +236,75 @@ export default function RemitBillsGeneratorTab({
       setEditingScholarshipDesc('');
     }
   }, [selectedStudentId, selectedClass, students]);
+
+  // Dynamic logged-in Administrator / Accountant identity
+  const [adminName, setAdminName] = useState<string>('Rahul Sah (Accountant)');
+
+  const formatIssuedBy = (name?: string): string => {
+    if (!name || name.trim() === '' || name.toLowerCase() === 'counter desk' || name.toLowerCase() === 'administrator') {
+      return adminName || 'Rahul Sah (Accountant)';
+    }
+    const trimmed = name.trim();
+    // If it already contains a parenthesized title like "(Accountant)" or "(Admin)", keep it
+    if (/\([A-Za-z\s]+\)$/.test(trimmed)) {
+      return trimmed;
+    }
+    // Clean up casing and append (Accountant) as standard desk designation
+    if (trimmed.toLowerCase() === 'rahul sah' || trimmed.toLowerCase() === 'rahul') {
+      return 'Rahul Sah (Accountant)';
+    }
+    const capitalized = trimmed
+      .split(' ')
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
+      .join(' ');
+    return `${capitalized} (Accountant)`;
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setAdminName('Rahul Sah (Accountant)');
+        return;
+      }
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const uData = userDoc.data();
+          const rawName = uData.fullName || uData.name || user.displayName || '';
+          const designation = uData.designation || uData.position || (uData.role === 'admin' ? 'Accountant' : (uData.role ? uData.role.charAt(0).toUpperCase() + uData.role.slice(1) : 'Accountant'));
+          
+          if (rawName && rawName.trim() && rawName !== 'User') {
+            const cleanName = rawName
+              .trim()
+              .split(' ')
+              .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
+              .join(' ');
+            setAdminName(`${cleanName} (${designation})`);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch user doc for adminName:', e);
+      }
+      
+      let baseName = '';
+      if (user.displayName && user.displayName.trim()) {
+        baseName = user.displayName.trim();
+      } else if (user.email) {
+        const username = user.email.split('@')[0];
+        baseName = username
+          .replace(/[0-9._-]+/g, ' ')
+          .trim()
+          .split(' ')
+          .filter(Boolean)
+          .map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
+          .join(' ');
+      }
+      if (!baseName) baseName = 'Rahul Sah';
+      setAdminName(`${baseName} (Accountant)`);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleSaveStudentScholarship = async () => {
     if (!selectedStudentId) return;
@@ -225,9 +386,21 @@ export default function RemitBillsGeneratorTab({
   const [cashReceived, setCashReceived] = useState('');
   const [paymentRemarks, setPaymentRemarks] = useState('');
   const [isSignVerified, setIsSignVerified] = useState(false);
+  const [paymentPreset, setPaymentPreset] = useState<'full' | 'one_month' | 'custom'>('full');
+  const [excessDecision, setExcessDecision] = useState<'ADVANCE' | 'RETURN'>('ADVANCE');
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [forceGenerate, setForceGenerate] = useState(false);
+
+  // Exception and student exclusion management for bulk bill generation
+  const [excludedStudentIds, setExcludedStudentIds] = useState<string[]>([]);
+  const [showExceptionManager, setShowExceptionManager] = useState(false);
+
+  // Reset student exclusions whenever selected class changes
+  useEffect(() => {
+    setExcludedStudentIds([]);
+  }, [selectedClass]);
 
   const [feeStructure, setFeeStructure] = useState<any>(null);
 
@@ -360,25 +533,6 @@ export default function RemitBillsGeneratorTab({
         return;
       }
 
-      // Proactively create/re-sync admin document if it is the special administrator email
-      if (user.email === 'rahulsah4534@gmail.com') {
-        try {
-          const adminDocRef = doc(db, 'users', user.uid);
-          const snap = await getDoc(adminDocRef);
-          if (!snap.exists() || snap.data().role !== 'admin' || snap.data().status !== 'active') {
-            await setDoc(adminDocRef, {
-              role: 'admin',
-              email: 'rahulsah4534@gmail.com',
-              fullName: 'Rahul Sah',
-              status: 'active'
-            }, { merge: true });
-            console.log('Successfully initialized Firestore admin document.');
-          }
-        } catch (e) {
-          console.warn('Could not proactively initialize or verify admin user document:', e);
-        }
-      }
-
       // Read role from state or local storage if authenticated
       let role = user ? localStorage.getItem('userRole') : 'guest';
       
@@ -394,7 +548,7 @@ export default function RemitBillsGeneratorTab({
         }
       }
 
-      const isAuthorized = user.email === 'rahulsah4534@gmail.com' || role === 'admin' || role === 'bill_generator' || role === 'teacher';
+      const isAuthorized = role === 'admin';
 
       if (!isAuthorized) {
         setRemitBills([]);
@@ -409,7 +563,7 @@ export default function RemitBillsGeneratorTab({
           list.push({ id: docSnap.id, ...docSnap.data() } as RemitBill);
         });
         // Sort by creation or serial descending
-        list.sort((a,b) => b.billNo.localeCompare(a.billNo));
+        list.sort((a,b) => String(b?.billNo || '').localeCompare(String(a?.billNo || '')));
         setRemitBills(list);
         setLoading(false);
       }, (error) => {
@@ -424,14 +578,206 @@ export default function RemitBillsGeneratorTab({
     };
   }, []);
 
-  // Update billing period description based on selections
+  // Current Nepali academic year
+  const currentAcademicYear = feeStructure?.academicYear || getBSYearMonthDate().year.toString() || '2083';
+
+  // Automatically clear error notices whenever generator parameters are modified
   useEffect(() => {
-    if (startMonth && endMonth) {
-      setPeriodText(`${startMonth} to ${endMonth} (${periodMonths} Month${periodMonths > 1 ? 's' : ''})`);
-    } else {
-      setPeriodText('');
+    setErrorMsg('');
+  }, [
+    selectedClass,
+    selectedStudentId,
+    generationMode,
+    startMonth,
+    periodMonths,
+    currentAcademicYear,
+    includeTuition,
+    includeTransport,
+    includeComputer,
+    includeAcademy,
+    includeAnnual,
+    includeAdmission,
+    includeExam,
+    academyFeeRate,
+    customChargesList,
+    excludedStudentIds
+  ]);
+
+  // Target period calculation adhering strictly to Nepali calendar sequence & boundaries
+  const periodCalc = useMemo(() => {
+    return calculateNepaliBillingPeriod(startMonth, periodMonths);
+  }, [startMonth, periodMonths]);
+
+  // Target students for generation
+  const targetStudentsForGen = useMemo(() => {
+    if (!selectedClass) return [];
+    const classSts = students.filter(s => (s.class || '').toLowerCase() === selectedClass.toLowerCase());
+    if (generationMode === 'student' && selectedStudentId) {
+      const one = classSts.find(s => s.id === selectedStudentId);
+      return one ? [one] : [];
     }
-  }, [startMonth, endMonth, periodMonths]);
+    return classSts;
+  }, [selectedClass, generationMode, selectedStudentId, students]);
+
+  // AUTHORITATIVE SINGLE BILLING GENERATION PLAN ENGINE
+  const billingPlan = useMemo<BillingGenerationPlan>(() => {
+    return calculateBillingGenerationPlan({
+      students,
+      academicYearId: currentAcademicYear,
+      targetClass: selectedClass,
+      generationMode,
+      selectedStudentId,
+      startMonth,
+      durationMonths: periodMonths,
+      remitBills,
+      studentFees: [], // Only verified active bills/billItems block duplicate charges
+      excludedStudentIds,
+      feeSettings: feeStructure,
+      selectedFeeCategories: {
+        includeTuition,
+        includeTransport,
+        includeComputer,
+        includeAcademy,
+        includeAnnual,
+        includeAdmission,
+        includeExam,
+        academyFeeRate,
+        customCharges: customChargesList
+      }
+    });
+  }, [
+    students,
+    currentAcademicYear,
+    selectedClass,
+    generationMode,
+    selectedStudentId,
+    startMonth,
+    periodMonths,
+    remitBills,
+    excludedStudentIds,
+    feeStructure,
+    includeTuition,
+    includeTransport,
+    includeComputer,
+    includeAcademy,
+    includeAnnual,
+    includeAdmission,
+    includeExam,
+    academyFeeRate,
+    customChargesList
+  ]);
+
+  // Backward compatible references mapped to single authoritative engine
+  const pupilCoverageList = billingPlan.studentPlans;
+  const coverageStats = {
+    total: billingPlan.totalSelectedStudents,
+    readyFull: billingPlan.completelyUnbilledStudentsCount,
+    wisePartial: billingPlan.partiallyCoveredStudentsCount,
+    alreadyBilled: billingPlan.fullyCoveredStudentsCount,
+    manuallyExcluded: billingPlan.manuallyExcludedStudentsCount,
+    billableStudentsCount: billingPlan.billableStudentsCount,
+    allAlreadyBilled: billingPlan.totalSelectedStudents > 0 && billingPlan.fullyCoveredStudentsCount === billingPlan.totalSelectedStudents
+  };
+  const universalCoverage = {
+    overallStatus: billingPlan.overallStatus,
+    summaryMessage: billingPlan.summaryMessage,
+    unbilledStudentsCount: billingPlan.completelyUnbilledStudentsCount,
+    partiallyCoveredStudentsCount: billingPlan.partiallyCoveredStudentsCount,
+    fullyCoveredStudentsCount: billingPlan.fullyCoveredStudentsCount,
+    eligibleChargesCount: billingPlan.totalNewChargeItemsCount
+  };
+  const coverageAnalysis = {
+    totalTargetStudents: billingPlan.totalSelectedStudents,
+    monthBreakdown: billingPlan.monthBreakdown
+  };
+
+  // State for Authorized Administrative Override
+  const [showAuthorizedOverrideModal, setShowAuthorizedOverrideModal] = useState(false);
+  const [authorizedOverrideInfo, setAuthorizedOverrideInfo] = useState<{ reason: string; passcode: string } | null>(null);
+
+  // Step 1 of Multi-Step Verification: Map the requested duration (e.g. 3 months starting Baisakh) to specific Nepali month IDs
+  const mappedNepaliMonthIds = useMemo(() => {
+    if (!startMonth) return [];
+    return mapDurationToNepaliMonthIds(startMonth, periodMonths, currentAcademicYear);
+  }, [startMonth, periodMonths, currentAcademicYear]);
+
+  // Step 2 of Multi-Step Verification: Firestore 'billItems' verification state
+  const [firestoreVerification, setFirestoreVerification] = useState<FirestoreBillingVerificationResult | null>(null);
+  const [verifyingFirestore, setVerifyingFirestore] = useState(false);
+  const [showConflictDetails, setShowConflictDetails] = useState(false);
+
+  // Trigger manual on-demand re-verification in Firestore
+  const triggerFirestoreVerification = async () => {
+    if (!startMonth || targetStudentsForGen.length === 0) {
+      setFirestoreVerification(null);
+      return;
+    }
+    setVerifyingFirestore(true);
+    try {
+      const result = await verifyRequestedMonthsInFirestore(
+        db,
+        targetStudentsForGen,
+        startMonth,
+        periodMonths,
+        currentAcademicYear
+      );
+      setFirestoreVerification(result);
+    } catch (err) {
+      console.warn('Manual Firestore billing verification error:', err);
+    } finally {
+      setVerifyingFirestore(false);
+    }
+  };
+
+  // Automated background query of Firestore to check for existing 'billItems'
+  useEffect(() => {
+    if (!startMonth || targetStudentsForGen.length === 0) {
+      setFirestoreVerification(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setVerifyingFirestore(true);
+      try {
+        const result = await verifyRequestedMonthsInFirestore(
+          db,
+          targetStudentsForGen,
+          startMonth,
+          periodMonths,
+          currentAcademicYear
+        );
+        if (!isCancelled) {
+          setFirestoreVerification(result);
+        }
+      } catch (err) {
+        console.warn('Background Firestore billing verification error:', err);
+      } finally {
+        if (!isCancelled) {
+          setVerifyingFirestore(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [startMonth, periodMonths, targetStudentsForGen, currentAcademicYear, remitBills]);
+
+  // Update billing period description and boundary warnings when inputs or billingPlan changes
+  useEffect(() => {
+    if (startMonth) {
+      setEndMonth(periodCalc.endMonth);
+      setBoundaryWarning(periodCalc.validationMessage || null);
+      // Synchronize periodText directly from BillingGenerationPlan's canonical billable heading
+      setPeriodText(billingPlan.effectiveBillHeadingPeriodTag || periodCalc.periodText);
+    } else {
+      setEndMonth('');
+      setPeriodText('');
+      setBoundaryWarning(null);
+    }
+  }, [startMonth, periodMonths, billingPlan.effectiveBillHeadingPeriodTag, periodCalc.endMonth, periodCalc.validationMessage, periodCalc.periodText]);
 
   // Reset selected bill IDs on any filter or sub-tab change to keep state synchronized
   useEffect(() => {
@@ -461,25 +807,22 @@ export default function RemitBillsGeneratorTab({
   // Handle month period changes to change default end month helper
   const handlePeriodMonthsChange = (months: number) => {
     setPeriodMonths(months);
-    if (!startMonth) return;
-    const startIdx = MONTHS.indexOf(startMonth);
-    if (startIdx !== -1) {
-      const endIdx = (startIdx + months - 1) % 12;
-      setEndMonth(MONTHS[endIdx]);
-    }
   };
 
   const handleStartMonthChange = (m: string) => {
     setStartMonth(m);
     if (!m) {
       setEndMonth('');
-      return;
+      setPeriodText('');
+      setBoundaryWarning(null);
     }
-    const startIdx = MONTHS.indexOf(m);
-    if (startIdx !== -1) {
-      const endIdx = (startIdx + periodMonths - 1) % 12;
-      setEndMonth(MONTHS[endIdx]);
-    }
+  };
+
+  const handleAutoAdjustUnbilledMonths = (unbilledMonths: string[]) => {
+    if (!unbilledMonths || unbilledMonths.length === 0) return;
+    const first = unbilledMonths[0];
+    setStartMonth(first);
+    handlePeriodMonthsChange(unbilledMonths.length);
   };
 
   const addCustomCharge = () => {
@@ -551,9 +894,16 @@ export default function RemitBillsGeneratorTab({
   };
 
   // Preview / Calculate dynamic items for a single student profile
-  const computeStudentCharges = (student: any): StudentChargeItem[] => {
+  const computeStudentCharges = (student: any, unbilledMonthsOverride?: string[]): StudentChargeItem[] => {
     const items: StudentChargeItem[] = [];
     const classFees = getClassFees(student.class || selectedClass);
+    
+    // Determine effective billing months
+    const effectiveMonths = unbilledMonthsOverride && unbilledMonthsOverride.length > 0
+      ? unbilledMonthsOverride
+      : (periodCalc.targetMonths.length > 0 ? periodCalc.targetMonths : [startMonth || 'Baisakh']);
+    
+    const effectiveCount = effectiveMonths.length;
     
     if (includeTuition) {
       // Use standard tuition rate from fee structure settings
@@ -561,8 +911,8 @@ export default function RemitBillsGeneratorTab({
       items.push({
         name: 'Monthly Tuition Fee',
         rate,
-        months: periodMonths,
-        total: rate * periodMonths
+        months: effectiveCount,
+        total: rate * effectiveCount
       });
     }
 
@@ -574,8 +924,8 @@ export default function RemitBillsGeneratorTab({
           items.push({
             name: 'Transportation Charges',
             rate,
-            months: transportMultiplier,
-            total: rate * transportMultiplier
+            months: effectiveCount,
+            total: rate * effectiveCount
           });
         }
       }
@@ -588,8 +938,8 @@ export default function RemitBillsGeneratorTab({
         items.push({
           name: 'Computer Facility Fee',
           rate,
-          months: computerMultiplier,
-          total: rate * computerMultiplier
+          months: effectiveCount,
+          total: rate * effectiveCount
         });
       }
     }
@@ -599,8 +949,8 @@ export default function RemitBillsGeneratorTab({
       items.push({
         name: 'Academy / Sports Activities Fee',
         rate,
-        months: periodMonths,
-        total: rate * periodMonths
+        months: effectiveCount,
+        total: rate * effectiveCount
       });
     }
 
@@ -609,36 +959,19 @@ export default function RemitBillsGeneratorTab({
       items.push({
         name: `Scholarship Deduction (${student.scholarshipDescription || 'General'})`,
         rate: -rate,
-        months: periodMonths,
-        total: -rate * periodMonths
+        months: effectiveCount,
+        total: -rate * effectiveCount
       });
     }
 
     if (includeAnnual && classFees.annual > 0) {
-      const currentYear = feeStructure?.academicYear || getBSYearMonthDate().year.toString() || '2083';
-
-      // 1. Check if the student has already been charged an Annual Fee in any previously generated remit bills for this year
-      const hasBeenChargedInRemit = remitBills.some(b => {
-        if (b.studentId !== student.id) return false;
-        const billYear = b.createdAt ? b.createdAt.split('-')[0] : currentYear;
-        if (billYear !== currentYear) return false;
-        return b.itemizedCharges.some(item => item.name === 'Annual Fee' || item.name.includes('Annual Fee'));
-      });
-
-      // 2. Check if they have a paid or due record for 'Annual Fee' in their standard fees list for this year
-      const hasBeenPaidInFees = student.fees && Array.isArray(student.fees) && student.fees.some((f: any) => {
-        if (f.type !== 'Annual Fee') return false;
-        const feeYear = getFeeBSYear(f);
-        if (feeYear !== currentYear) return false;
-        return f.status === 'paid' || f.status === 'due' || Number(f.paidAmount || 0) > 0;
-      });
-
-      // Only add the Annual Fee charge if they have not already been charged or paid it for this year
-      if (!hasBeenChargedInRemit && !hasBeenPaidInFees) {
+      // Check if student has already been charged an Annual Fee in this academic year
+      const annualCheck = hasAnnualFeeBeenBilled(student.id, currentAcademicYear, remitBills, student.fees);
+      if (!annualCheck.billed) {
         items.push({
           name: 'Annual Fee',
           rate: classFees.annual,
-          months: 12,
+          months: 1,
           total: classFees.annual
         });
       }
@@ -647,15 +980,14 @@ export default function RemitBillsGeneratorTab({
     if (includeAdmission && classFees.admission > 0) {
       const currentYear = feeStructure?.academicYear || getBSYearMonthDate().year.toString() || '2083';
 
-      // 1. Check if the student has already been charged an Admission Fee in any previously generated remit bills for this year
+      // Check if the student has already been charged an Admission Fee in any non-void remit bills for this year
       const hasBeenChargedInRemit = remitBills.some(b => {
-        if (b.studentId !== student.id) return false;
-        const billYear = b.createdAt ? b.createdAt.split('-')[0] : currentYear;
+        if (b.studentId !== student.id || b.status === 'void' || b.status === 'cancelled') return false;
+        const billYear = b.academicYear || (b.createdAt ? b.createdAt.split('-')[0] : currentYear);
         if (billYear !== currentYear) return false;
         return b.itemizedCharges.some(item => item.name === 'Admission Fee' || item.name.includes('Admission Fee'));
       });
 
-      // 2. Check if they have a paid or due record for 'Admission Fee' in their standard fees list for this year
       const hasBeenPaidInFees = student.fees && Array.isArray(student.fees) && student.fees.some((f: any) => {
         if (f.type !== 'Admission Fee') return false;
         const feeYear = getFeeBSYear(f);
@@ -663,7 +995,6 @@ export default function RemitBillsGeneratorTab({
         return f.status === 'paid' || f.status === 'due' || Number(f.paidAmount || 0) > 0;
       });
 
-      // Only add the Admission Fee charge if they have not already been charged or paid it for this year
       if (!hasBeenChargedInRemit && !hasBeenPaidInFees) {
         items.push({
           name: 'Admission Fee',
@@ -685,7 +1016,7 @@ export default function RemitBillsGeneratorTab({
 
     customChargesList.forEach(c => {
       const rate = Number(c.amount || 0);
-      const monthsMultiplier = c.isMonthly ? periodMonths : 1;
+      const monthsMultiplier = c.isMonthly ? effectiveCount : 1;
       items.push({
         name: c.name,
         rate,
@@ -694,10 +1025,10 @@ export default function RemitBillsGeneratorTab({
       });
     });
 
-    // Automatically retrieve and include any outstanding arrears (back dues), grouped concisely by fee type to prevent table overflow & stamp overlap in Page Layout 2
+    // Automatically retrieve and include any outstanding arrears (back dues) as a single consolidated "Back Dues" entry
     if (student.fees && Array.isArray(student.fees)) {
-      const currentBilledMonths = getMonthsCovered(periodText);
-      const arrearsMap: Record<string, number> = {};
+      const currentBilledMonths = effectiveMonths;
+      let totalBackDues = 0;
 
       student.fees.forEach((f: any) => {
         if (f.status === 'due') {
@@ -714,21 +1045,20 @@ export default function RemitBillsGeneratorTab({
           if (!isCurrentlyBilled) {
             const amt = Number(f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0));
             if (amt > 0) {
-              const feeType = f.type || 'Tuition Fee';
-              arrearsMap[feeType] = (arrearsMap[feeType] || 0) + amt;
+              totalBackDues += amt;
             }
           }
         }
       });
 
-      Object.entries(arrearsMap).forEach(([feeType, totalAmt]) => {
+      if (totalBackDues > 0) {
         items.push({
-          name: `Back Dues (${feeType})`,
-          rate: totalAmt,
-          months: 1,
-          total: totalAmt
+          name: 'Back Dues',
+          rate: 0,
+          months: 0,
+          total: totalBackDues
         });
-      });
+      }
     }
 
     return items;
@@ -738,7 +1068,7 @@ export default function RemitBillsGeneratorTab({
     return items.reduce((sum, item) => sum + item.total, 0);
   };
 
-  // Generate Remit Bill(s)
+  // Generate Remit Bill(s) with Month Coverage Integrity & Duplicate Prevention
   const handleGenerateBills = async () => {
     setGenerating(true);
     setErrorMsg('');
@@ -763,109 +1093,226 @@ export default function RemitBillsGeneratorTab({
       const found = students.find(s => s.id === selectedStudentId);
       if (found) selectedStudents = [found];
     } else {
-      selectedStudents = targetClassStudents;
+      // Exclude students manually unselected/excluded by the accountant
+      selectedStudents = targetClassStudents.filter(s => !excludedStudentIds.includes(s.id));
     }
 
     if (selectedStudents.length === 0) {
-      setErrorMsg('No students found for generation.');
+      setErrorMsg('No students selected for generation. Please verify class selection or student exclusions.');
       setGenerating(false);
       return;
+    }
+
+    // MULTI-STEP VERIFICATION PROCESS:
+    // Step 1: Map the requested duration (e.g. 3 months starting Baisakh) to specific Nepali month IDs
+    const mappedNepaliMonthIds = mapDurationToNepaliMonthIds(startMonth, periodMonths, currentAcademicYear);
+
+    // Step 2: Query Firestore directly to check for existing 'billItems' for each student for these specific months
+    setVerifyingFirestore(true);
+    let firestoreCheck: FirestoreBillingVerificationResult | null = null;
+    try {
+      firestoreCheck = await verifyRequestedMonthsInFirestore(
+        db,
+        selectedStudents,
+        startMonth,
+        periodMonths,
+        currentAcademicYear
+      );
+      setFirestoreVerification(firestoreCheck);
+    } catch (checkErr: any) {
+      console.warn('Firestore billItems verification warning:', checkErr);
+      // Non-blocking warning: proceed with exception-based resolution
+    } finally {
+      setVerifyingFirestore(false);
+    }
+
+    // Single student check: if single student selected and 100% already billed, inform user clearly unless forceGenerate
+    if (generationMode === 'student' && !forceGenerate) {
+      const singleStudent = selectedStudents[0];
+      const cov = getStudentYearCoverage(singleStudent.id, currentAcademicYear, remitBills, singleStudent.fees);
+      const unbilled = periodCalc.targetMonths.filter(m => {
+        const st = cov[m]?.status;
+        return st === 'NOT_GENERATED' || st === 'VOID' || st === 'CANCELLED';
+      });
+      if (unbilled.length === 0) {
+        setErrorMsg(
+          `All requested months (${periodCalc.targetMonths.join(', ')}) have already been billed for ${singleStudent.fullName || singleStudent.name}. Unpaid bills remain active dues in the ledger. To reissue or fix errors, use "Void & Reissue" from the bill list or check "Force / Allow Supplementary Bill Generation" below.`
+        );
+        setGenerating(false);
+        return;
+      }
     }
 
     try {
       const batch = writeBatch(db);
       const currentBS = formatBSDate(new Date());
-      const sysEmail = localStorage.getItem('userEmail') || 'System';
+      const creatorName = formatIssuedBy(adminName);
       
       let createdCount = 0;
-      let startSerial = Date.now().toString().slice(-4);
+      let skippedCount = 0;
+      let partialExceptedCount = 0;
       let lastGeneratedBillPayload: any = null;
 
-      selectedStudents.forEach((student, index) => {
-        const itemizedCharges = computeStudentCharges(student);
-        const totalAmount = calculateTotal(itemizedCharges);
+      // 1. Pre-calculate all eligible billing plans to determine exact batch size for sequential atomic number allocation
+      interface ValidPreparedPlan {
+        studentPlan: StudentBillingPlan;
+        student: any;
+        unbilledForStudent: string[];
+        itemizedCharges: StudentChargeItem[];
+        totalAmount: number;
+      }
 
-        if (totalAmount <= 0) return; // Skip zero billings
+      const validPreparedPlans: ValidPreparedPlan[] = [];
 
-        const billRef = doc(collection(db, 'remitBills'));
-        const docSerial = `RMT-${getBSYearMonthDate().year}-${startSerial}${index}`;
+      billingPlan.studentPlans.forEach((studentPlan) => {
+        const student = studentPlan.student;
+        if (studentPlan.isExcluded) return;
 
-        const billPayload: RemitBill = {
-          id: billRef.id,
-          billNo: docSerial,
-          studentId: student.id,
-          studentName: student.name || student.fullName,
-          studentRoll: student.rollNumber || student.studentId || '',
-          class: student.class,
-          billingPeriod: periodText,
-          periodMonths: periodMonths,
+        let unbilledForStudent = studentPlan.billableMonths;
+        let itemizedCharges: StudentChargeItem[] = [];
+        let totalAmount = 0;
+
+        if (forceGenerate) {
+          unbilledForStudent = periodCalc.targetMonths;
+          itemizedCharges = computeStudentCharges(student, unbilledForStudent);
+          totalAmount = calculateTotal(itemizedCharges);
+        } else {
+          if (!studentPlan.isBillable || studentPlan.newChargeItems.length === 0 || studentPlan.totalNewAmount <= 0) {
+            skippedCount++;
+            return;
+          }
+
+          if (studentPlan.billableMonthsCount < periodCalc.targetMonths.length) {
+            partialExceptedCount++;
+          }
+
+          const monthlyGroups = new Map<string, { rate: number; count: number; name: string }>();
+
+          studentPlan.newChargeItems.forEach(ci => {
+            if (ci.frequency === 'MONTHLY') {
+              const key = ci.feeHeadName;
+              if (!monthlyGroups.has(key)) {
+                monthlyGroups.set(key, { rate: ci.rate, count: 0, name: ci.feeHeadName });
+              }
+              monthlyGroups.get(key)!.count += 1;
+            } else {
+              itemizedCharges.push({
+                name: ci.feeHeadName,
+                rate: ci.rate,
+                months: 1,
+                total: ci.finalAmount
+              });
+            }
+          });
+
+          monthlyGroups.forEach(grp => {
+            itemizedCharges.push({
+              name: grp.name,
+              rate: grp.rate,
+              months: grp.count,
+              total: grp.rate * grp.count
+            });
+          });
+
+          if (student.scholarshipStatus === 'Provided' && Number(student.scholarshipAmount || 0) > 0 && studentPlan.billableMonthsCount > 0) {
+            const schRate = Number(student.scholarshipAmount);
+            const schTot = -schRate * studentPlan.billableMonthsCount;
+            itemizedCharges.push({
+              name: `Scholarship Deduction (${student.scholarshipDescription || student.scholarshipCategory || 'General'})`,
+              rate: -schRate,
+              months: studentPlan.billableMonthsCount,
+              total: schTot
+            });
+          }
+
+          totalAmount = calculateTotal(itemizedCharges);
+        }
+
+        if (totalAmount <= 0 || unbilledForStudent.length === 0) {
+          skippedCount++;
+          return;
+        }
+
+        validPreparedPlans.push({
+          studentPlan,
+          student,
+          unbilledForStudent,
           itemizedCharges,
-          totalAmount,
-          status: 'pending',
-          createdAt: currentBS,
-          createdBy: sysEmail,
-          guardianName: student.guardianName
-        };
-
-         batch.set(billRef, billPayload);
-        createdCount++;
-
-        // Automatically update individual student's standard ledger in `studentFees` with the generated bill amounts
-        let billStartMonth = startMonth || 'Baisakh';
-        const startIdx = MONTHS.indexOf(billStartMonth) !== -1 ? MONTHS.indexOf(billStartMonth) : 0;
-
-        itemizedCharges.forEach((item) => {
-          if (item.name.includes('Arrears') || item.name.includes('Outstanding')) {
-            return; // Skip arrears since they are already in studentFees
-          }
-
-          let fType = 'Other Fee';
-          if (item.name.includes('Tuition')) fType = 'Tuition Fee';
-          else if (item.name.includes('Computer')) fType = 'Computer Fee';
-          else if (item.name.includes('Transport')) fType = 'Transportation Fee';
-          else if (item.name.includes('Academy') || item.name.includes('Sports')) fType = 'Academy Fee';
-          else fType = item.name;
-
-          const mult = item.months || 1;
-          for (let i = 0; i < mult; i++) {
-            const monthName = MONTHS[(startIdx + i) % 12];
-            const feeId = `${student.id}_${monthName.replace(/\s+/g,'')}_${fType.replace(/\s+/g,'')}`;
-            const feeRef = doc(db, 'studentFees', feeId);
-
-            batch.set(feeRef, {
-              studentId: student.id,
-              month: monthName,
-              type: fType,
-              totalFee: item.rate || (item.total / mult),
-              paidAmount: 0,
-              dueAmount: item.rate || (item.total / mult),
-              status: 'due',
-              remitBillId: billRef.id,
-              createdAt: new Date().toISOString()
-            }, { merge: true });
-          }
+          totalAmount
         });
-
-        lastGeneratedBillPayload = {
-          id: billRef.id,
-          studentId: student.id,
-          amount: totalAmount,
-          billId: docSerial,
-          billingPeriod: periodText,
-          itemizedCharges
-        };
       });
 
+      if (validPreparedPlans.length === 0) {
+        setErrorMsg('No eligible unbilled charges found for the selected student(s) and period.');
+        setGenerating(false);
+        return;
+      }
+
+      // Execute atomic transactional bill generation for each prepared student plan
+      const billingOptions = {
+        db,
+        academicYear: currentAcademicYear,
+        creatorName,
+        reissueContext: reissueContext || undefined
+      };
+
+      for (const plan of validPreparedPlans) {
+        const { student, unbilledForStudent, itemizedCharges, totalAmount } = plan;
+        
+        try {
+          const result = await generateSingleStudentBillTransactionally(billingOptions, {
+            student,
+            unbilledForStudent,
+            mappedNepaliMonthIds,
+            itemizedCharges,
+            totalAmount
+          });
+
+          if (result.success && !result.skipped && result.billId) {
+            createdCount++;
+            lastGeneratedBillPayload = {
+              id: result.billId,
+              studentId: result.studentId,
+              amount: result.totalAmount,
+              billId: result.billNo || result.billId,
+              billingPeriod: result.coveredMonths.length === 1
+                ? `${result.coveredMonths[0]} (1 Month)`
+                : `${result.coveredMonths[0]} to ${result.coveredMonths[result.coveredMonths.length - 1]} (${result.coveredMonths.length} Months)`,
+              itemizedCharges: result.itemizedCharges
+            };
+          } else if (result.skipped) {
+            skippedCount++;
+          }
+        } catch (studentTxErr: any) {
+          console.error(`Error in atomic billing transaction for student ${student.name || student.fullName}:`, studentTxErr);
+          throw studentTxErr;
+        }
+      }
+
       if (createdCount > 0) {
-        await batch.commit();
-        setSuccessMsg(`Successfully generated ${createdCount} Remit Bill(s) for Class ${selectedClass}!`);
-        // Reset custom lists & subtab
+        let notice = `Successfully generated ${createdCount} Remit Bill(s) for Class ${selectedClass}!`;
+        if (partialExceptedCount > 0) {
+          notice += ` Wisely excepted previously billed months for ${partialExceptedCount} student(s).`;
+        }
+        if (skippedCount > 0) {
+          notice += ` Auto-skipped ${skippedCount} student(s) who were already 100% billed for this duration.`;
+        }
+        setSuccessMsg(notice);
+        // Reset custom lists, reissueContext & subtab
         setCustomChargesList([]);
+        setReissueContext(null);
+        setExcludedStudentIds([]);
         setFilterClass(selectedClass);
         setActiveSubTab('list');
         onRefresh();
       } else {
-        setErrorMsg('No bills were created. Check if charges compile to positive values.');
+        if (skippedCount > 0) {
+          setErrorMsg(
+            `No new bills generated: All ${skippedCount} student(s) already have active bills covering ${periodCalc.targetMonths.join(', ')}. Unpaid bills are active dues. To generate duplicate supplementary bills, check "Force / Allow Supplementary Bill Generation".`
+          );
+        } else {
+          setErrorMsg('No bills were created. Please verify student fee rates.');
+        }
       }
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, 'remitBills');
@@ -875,7 +1322,7 @@ export default function RemitBillsGeneratorTab({
     }
   };
 
-  // Process receipt / pay guardian bill cash deposit (supports partial payments)
+  // Process receipt / pay guardian bill cash deposit with sequential month-by-month full clearance first
   const handlePayRemitBill = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!payingBill) return;
@@ -896,22 +1343,24 @@ export default function RemitBillsGeneratorTab({
       const currentBS = formatBSDate(new Date());
       const sysEmail = localStorage.getItem('userEmail') || 'Cash Counter';
 
-      // Always apply Logic A: gather all unpaid or partial remit bills for this student and sort chronologically (oldest first)
+      // Gather all unpaid or partial remit bills for this student sorted chronologically (oldest first)
       const allStudentUnpaidRemits = remitBills.filter(
         b => b.studentId === payingBill.studentId && (b.status === 'pending' || b.status === 'partial')
       ).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
 
-      // Ensure payingBill is included if not already in the list
+      // Ensure payingBill is included
       const billsMap = new Map();
       allStudentUnpaidRemits.forEach(b => billsMap.set(b.id, b));
       billsMap.set(payingBill.id, payingBill);
       
       const billsToSettle = Array.from(billsMap.values()).sort((a: any, b: any) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-      const receiptNoBase = `RCP-${getBSYearMonthDate().year}-${Date.now().toString().slice(-4)}`;
+      const allocatedReceiptNo = await allocateNextDocumentNumber('RCP', payingBill?.academicYear || currentAcademicYear);
+      const paymentGroupId = `PAY_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
       let remainingCashToApply = paidCash;
       let totalAppliedToBills = 0;
       let index = 0;
+      let primaryTxnId = '';
 
       for (const bill of billsToSettle) {
         if (remainingCashToApply <= 0) break;
@@ -928,24 +1377,30 @@ export default function RemitBillsGeneratorTab({
 
         const newPaidAmount = alreadyPaid + amountForThisBill;
         const newStatus = newPaidAmount >= billTotal ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'pending');
-        const receiptNo = `${receiptNoBase}-${index + 1}`;
+        const receiptNo = index === 0 ? allocatedReceiptNo : `${allocatedReceiptNo}-${index + 1}`;
         index++;
 
         // 1. Update Remit Bill document with partial/full paid status
         const remitDocRef = doc(db, 'remitBills', bill.id);
-        batch.update(remitDocRef, {
+        batch.update(remitDocRef, sanitizeForFirestore({
           status: newStatus,
           paidAmount: newPaidAmount,
           transactionId: receiptNo,
-          paidAt: currentBS
-        });
+          paymentGroupId: paymentGroupId,
+          paidAt: currentBS,
+          updatedAt: serverTimestamp()
+        }));
 
         // 2. Create transaction receipt
         const txnRef = doc(collection(db, 'transactions'));
-        batch.set(txnRef, {
+        if (!primaryTxnId) {
+          primaryTxnId = txnRef.id;
+        }
+        batch.set(txnRef, sanitizeForFirestore({
           id: txnRef.id,
           date: currentBS,
           receipt: receiptNo,
+          receiptNo: receiptNo,
           studentId: bill.studentId,
           studentName: bill.studentName,
           class: bill.class,
@@ -953,107 +1408,214 @@ export default function RemitBillsGeneratorTab({
           method: 'Cash',
           collectedBy: sysEmail,
           status: 'SUCCESS',
-          remarks: `Partial/Full Remit Bill Payment - ${bill.billNo} (${bill.billingPeriod}) - ${paymentRemarks || 'Direct Counter Clearance'}`,
+          paymentGroupId: paymentGroupId,
+          sourceTransactionId: txnRef.id,
+          transactionType: 'FEE_PAYMENT',
+          remarks: `Remit Bill Clearance - ${bill.billNo} (${bill.billingPeriod}) - Cash Received NRs. ${paidCash.toLocaleString()}${newStatus === 'partial' ? ' (Partial Month Clearance)' : ''} - ${paymentRemarks || 'Direct Counter Clearance'}`,
           discount: 0,
           additionalCharge: 0,
           ledgerPageNo: 'RMT-LEDGER',
           isHandwrittenMode: false,
           timestamp: serverTimestamp(),
           remitBillId: bill.id
-        });
+        }));
 
-        // 3. Update studentFees proportionally according to amountForThisBill
-        let billStartMonth = 'Jestha';
-        for (const m of MONTHS) {
-          if (bill.billingPeriod.includes(m)) {
-            billStartMonth = m;
-            break;
+        // 3. Human-like Sequential Month-by-Month Clearance:
+        // Identify the exact covered months for this bill
+        const monthsList = (bill.coveredMonths && bill.coveredMonths.length > 0)
+          ? bill.coveredMonths
+          : extractCoveredMonthsFromBill(bill);
+
+        // Separate back dues / arrears from regular monthly charges
+        const arrearsItem = bill.itemizedCharges.find(it => 
+          it.name.includes('Arrears') || it.name.includes('Outstanding') || it.name.includes('Back Dues')
+        );
+        const monthlyItems = bill.itemizedCharges.filter(it => 
+          !it.name.includes('Arrears') && !it.name.includes('Outstanding') && !it.name.includes('Back Dues')
+        );
+
+        let cashForBillItems = amountForThisBill;
+
+        // Step 3a: Clear back dues first if present
+        if (arrearsItem && cashForBillItems > 0) {
+          const arrearsDue = Number(arrearsItem.total || 0);
+          const payArrears = Math.min(arrearsDue, cashForBillItems);
+          cashForBillItems -= payArrears;
+
+          const targetStudent = students.find(s => s.id === bill.studentId);
+          if (targetStudent && Array.isArray(targetStudent.fees)) {
+            const dueRecords = targetStudent.fees
+              .filter((f: any) => f.status === 'due' || f.status === 'partial')
+              .sort((a: any, b: any) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month));
+
+            let remArrearsPay = payArrears;
+            dueRecords.forEach((f: any) => {
+              if (remArrearsPay <= 0) return;
+              const dueAmt = f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0);
+              const payNow = Math.min(dueAmt, remArrearsPay);
+              remArrearsPay -= payNow;
+
+              const feeId = `${bill.studentId}_${f.month.replace(/\s+/g,'')}_${f.type.replace(/\s+/g,'')}`;
+              const feeRef = doc(db, 'studentFees', feeId);
+              const newFPaid = (f.paidAmount || 0) + payNow;
+              const newFDue = Math.max(0, dueAmt - payNow);
+              batch.set(feeRef, sanitizeForFirestore({
+                paidAmount: newFPaid,
+                dueAmount: newFDue,
+                status: newFDue <= 0 ? 'paid' : 'partial',
+                transactionId: txnRef.id,
+                receiptNo: receiptNo,
+                paidAt: new Date().toISOString()
+              }), { merge: true });
+            });
           }
         }
 
-        const startIdx = MONTHS.indexOf(billStartMonth) !== -1 ? MONTHS.indexOf(billStartMonth) : 0;
-        let remFeeToAllocate = amountForThisBill;
+        // Step 3b: Clear Month 1 in full, then Month 2 in full, then Month 3...
+        // For each covered month, calculate all charges belonging to that month
+        const totalMonths = Math.max(1, monthsList.length);
 
-        bill.itemizedCharges.forEach((item) => {
-          if (remFeeToAllocate <= 0) return;
+        monthsList.forEach((monthName, monthIdx) => {
+          if (cashForBillItems <= 0) return;
 
-          if (item.name.includes('Arrears') || item.name.includes('Outstanding')) {
-            const targetStudent = students.find(s => s.id === bill.studentId);
-            if (targetStudent && Array.isArray(targetStudent.fees)) {
-              const dueRecords = targetStudent.fees
-                .filter((f: any) => f.status === 'due' || f.status === 'partial')
-                .sort((a: any, b: any) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month));
+          // Process each monthly item for this month
+          monthlyItems.forEach((item) => {
+            if (cashForBillItems <= 0) return;
 
-              dueRecords.forEach((f: any) => {
-                if (remFeeToAllocate <= 0) return;
-                const dueAmt = f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0);
-                const payNow = Math.min(dueAmt, remFeeToAllocate);
-                remFeeToAllocate -= payNow;
+            let fType = 'Other Fee';
+            if (item.name.includes('Tuition')) fType = 'Tuition Fee';
+            else if (item.name.includes('Computer')) fType = 'Computer Fee';
+            else if (item.name.includes('Transport')) fType = 'Transportation Fee';
+            else if (item.name.includes('Academy') || item.name.includes('Sports')) fType = 'Academy Fee';
+            else if (item.name.includes('Annual')) fType = 'Annual Fee';
+            else if (item.name.includes('Admission')) fType = 'Admission Fee';
+            else if (item.name.includes('Exam')) fType = 'Terminal Exam Fee';
+            else fType = item.name;
 
-                const feeId = `${bill.studentId}_${f.month.replace(/\s+/g,'')}_${f.type.replace(/\s+/g,'')}`;
-                const feeRef = doc(db, 'studentFees', feeId);
-                const newFPaid = (f.paidAmount || 0) + payNow;
-                const newFDue = Math.max(0, dueAmt - payNow);
-                batch.set(feeRef, {
-                  paidAmount: newFPaid,
-                  dueAmount: newFDue,
-                  status: newFDue <= 0 ? 'paid' : 'partial',
-                  transactionId: txnRef.id,
-                  receiptNo: receiptNo,
-                  paidAt: new Date().toISOString()
-                }, { merge: true });
-              });
+            // Determine rate for this specific month
+            const isOneTime = fType === 'Annual Fee' || fType === 'Admission Fee';
+            if (isOneTime && monthIdx > 0) {
+              return; // One-time fees belong to Month 1
             }
-            return;
-          }
 
-          let fType = 'Other Fee';
-          if (item.name.includes('Tuition')) fType = 'Tuition Fee';
-          else if (item.name.includes('Computer')) fType = 'Computer Fee';
-          else if (item.name.includes('Transport')) fType = 'Transportation Fee';
-          else if (item.name.includes('Academy') || item.name.includes('Sports')) fType = 'Academy Fee';
-          else fType = item.name;
+            const itemMonthlyRate = isOneTime
+              ? Number(item.total || item.rate || 0)
+              : Number(item.rate || (item.total / totalMonths));
 
-          const mult = item.months || 1;
-          const ratePerMonth = item.rate || (item.total / mult);
+            const feeId = isOneTime
+              ? `${bill.studentId}_${bill.academicYear || currentAcademicYear}_${fType.replace(/\s+/g,'')}`
+              : `${bill.studentId}_${monthName.replace(/\s+/g,'')}_${fType.replace(/\s+/g,'')}`;
 
-          for (let i = 0; i < mult; i++) {
-            if (remFeeToAllocate <= 0) break;
-            const monthName = MONTHS[(startIdx + i) % 12];
-            const feeId = `${bill.studentId}_${monthName.replace(/\s+/g,'')}_${fType.replace(/\s+/g,'')}`;
             const feeRef = doc(db, 'studentFees', feeId);
-            const payNow = Math.min(ratePerMonth, remFeeToAllocate);
-            remFeeToAllocate -= payNow;
+            const payThisItem = Math.min(itemMonthlyRate, cashForBillItems);
+            cashForBillItems -= payThisItem;
 
-            batch.set(feeRef, {
+            batch.set(feeRef, sanitizeForFirestore({
               studentId: bill.studentId,
               month: monthName,
+              academicYear: bill.academicYear || currentAcademicYear,
               type: fType,
-              totalFee: ratePerMonth,
-              paidAmount: payNow,
-              dueAmount: Math.max(0, ratePerMonth - payNow),
-              status: payNow >= ratePerMonth ? 'paid' : (payNow > 0 ? 'partial' : 'due'),
+              totalFee: itemMonthlyRate,
+              paidAmount: payThisItem,
+              dueAmount: Math.max(0, itemMonthlyRate - payThisItem),
+              status: payThisItem >= itemMonthlyRate ? 'paid' : (payThisItem > 0 ? 'partial' : 'due'),
               transactionId: txnRef.id,
               receiptNo: receiptNo,
               paidAt: new Date().toISOString()
-            }, { merge: true });
-          }
+            }), { merge: true });
+          });
         });
       }
 
-      // 4. Create Cash Ledger Income entry for actual amount applied
+      // Step 4: Handle Excess Cash Tendered (Overpayment) or Pure Advance Deposit
+      const excessCash = remainingCashToApply;
+      let advanceNote = '';
+      if (excessCash > 0) {
+        if (excessDecision === 'ADVANCE') {
+          // If no bills were settled (pure advance deposit), create an explicit ADVANCE_DEPOSIT transaction document
+          if (!primaryTxnId) {
+            const advTxnRef = doc(collection(db, 'transactions'));
+            primaryTxnId = advTxnRef.id;
+            batch.set(advTxnRef, sanitizeForFirestore({
+              id: advTxnRef.id,
+              date: currentBS,
+              receipt: allocatedReceiptNo,
+              receiptNo: allocatedReceiptNo,
+              studentId: payingBill.studentId,
+              studentName: payingBill.studentName,
+              class: payingBill.class,
+              rollNo: payingBill.studentRoll || '-',
+              amount: 0,
+              cashReceived: paidCash,
+              cashTendered: paidCash,
+              advanceCreated: excessCash,
+              amountApplied: 0,
+              method: 'Cash',
+              collectedBy: sysEmail,
+              status: 'SUCCESS',
+              type: 'Income',
+              paymentCategory: 'ADVANCE_DEPOSIT',
+              transactionType: 'ADVANCE_DEPOSIT',
+              paymentGroupId: paymentGroupId,
+              sourceTransactionId: advTxnRef.id,
+              remarks: `Pure Advance Deposit - Receipt ${allocatedReceiptNo} for ${payingBill.studentName} (Class ${payingBill.class}) - Cash Received NRs. ${paidCash.toLocaleString()} - ${paymentRemarks || 'Counter Advance Credit'}`,
+              timestamp: serverTimestamp()
+            }));
+          }
+
+          // Credit excess to student_advances and update student's advanceBalance
+          const advRef = doc(collection(db, 'student_advances'));
+          const studentDocRef = doc(db, 'users', payingBill.studentId);
+          const studentObj = students.find(s => s.id === payingBill.studentId);
+          const currentAdv = Number(studentObj?.advanceBalance || 0);
+
+          batch.set(advRef, sanitizeForFirestore({
+            id: advRef.id,
+            studentId: payingBill.studentId,
+            studentName: payingBill.studentName,
+            class: payingBill.class,
+            rollNumber: payingBill.studentRoll || '-',
+            amount: excessCash,
+            remainingCredit: excessCash,
+            sourceTransactionId: primaryTxnId,
+            paymentGroupId: paymentGroupId,
+            receiptNo: `${allocatedReceiptNo}-ADV`,
+            status: 'ACTIVE',
+            accountantName: formatIssuedBy(adminName),
+            accountantRemarks: `Excess cash overpayment from Remit Bill ${payingBill.billNo} credited to advance account`,
+            dateBS: currentBS,
+            createdAt: serverTimestamp()
+          }));
+
+          batch.update(studentDocRef, sanitizeForFirestore({
+            advanceBalance: currentAdv + excessCash,
+            updatedAt: serverTimestamp()
+          }));
+
+          advanceNote = ` Excess NRs. ${excessCash.toLocaleString()} credited to student advance balance.`;
+        } else {
+          advanceNote = ` Excess change of NRs. ${excessCash.toLocaleString()} returned to guardian.`;
+        }
+      }
+
+      // 5. Create Cash Ledger Income entry with exact transaction document ID and paymentGroupId
       const cashLedgerRef = doc(collection(db, 'cash_ledger'));
-      batch.set(cashLedgerRef, {
+      batch.set(cashLedgerRef, sanitizeForFirestore({
         type: 'Income',
         date: currentBS,
-        amount: totalAppliedToBills,
+        amount: totalAppliedToBills + (excessDecision === 'ADVANCE' ? excessCash : 0),
         category: 'Fee Collection',
-        remarks: `Receipt ${receiptNoBase} for ${payingBill.studentName} (Class ${payingBill.class}) - Cash Received: NRs. ${paidCash.toLocaleString()} (Applied: NRs. ${totalAppliedToBills.toLocaleString()}) - ${paymentRemarks || 'Direct Counter Clearance'}`,
+        transactionId: primaryTxnId,
+        sourceTransactionId: primaryTxnId,
+        paymentGroupId: paymentGroupId,
+        relatedTransactionId: allocatedReceiptNo,
+        receiptNo: allocatedReceiptNo,
+        remarks: `Receipt ${allocatedReceiptNo} for ${payingBill.studentName} (Class ${payingBill.class}) - Cash Received: NRs. ${paidCash.toLocaleString()} (Applied: NRs. ${totalAppliedToBills.toLocaleString()})${advanceNote} - ${paymentRemarks || 'Direct Counter Clearance'}`,
         timestamp: serverTimestamp()
-      });
+      }));
 
       await batch.commit();
-      setSuccessMsg(`Guardian cash of NRs. ${paidCash.toLocaleString()} recorded successfully (Applied NRs. ${totalAppliedToBills.toLocaleString()}). Ledger updated.`);
+      setSuccessMsg(`Guardian cash of NRs. ${paidCash.toLocaleString()} recorded successfully! (Applied NRs. ${totalAppliedToBills.toLocaleString()}).${advanceNote} Ledger updated.`);
       setPayingBill(null);
       setCashReceived('');
       setPaymentRemarks('');
@@ -1070,55 +1632,35 @@ export default function RemitBillsGeneratorTab({
   const confirmDeleteBill = async () => {
     if (!billToDelete) return;
     try {
+      if (billToDelete.transactionId || (billToDelete.paidAmount && billToDelete.paidAmount > 0) || billToDelete.status === 'paid' || billToDelete.status === 'partial') {
+        setErrorMsg('Financial Integrity Protection: Cannot physically delete a Remit Bill that has recorded payments or transactions. Please use the official Refund or Void Bill workflow to maintain complete institutional accounting compliance.');
+        setBillToDelete(null);
+        return;
+      }
+
       const batch = writeBatch(db);
       batch.delete(doc(db, 'remitBills', billToDelete.id));
 
-      if (billToDelete.transactionId) {
-        // 1. Query and delete associated transactions in transactions collection
-        const txQuery = query(collection(db, 'transactions'), where('receipt', '==', billToDelete.transactionId));
-        const txSnap = await getDocs(txQuery);
-        txSnap.forEach(d => {
+      // Pending/unpaid draft bill: clean up associated generated studentFees records
+      const feeQuery = query(collection(db, 'studentFees'), where('remitBillId', '==', billToDelete.id));
+      const feeSnap = await getDocs(feeQuery);
+      feeSnap.forEach(d => {
+        batch.delete(d.ref);
+      });
+
+      // Also clean up any unbilled billItems draft records
+      try {
+        const itemQuery = query(collection(db, 'billItems'), where('remitBillId', '==', billToDelete.id));
+        const itemSnap = await getDocs(itemQuery);
+        itemSnap.forEach(d => {
           batch.delete(d.ref);
         });
-
-        // 2. Query and delete associated cash ledger entries
-        const cashQuery = query(collection(db, 'cash_ledger'));
-        const cashSnap = await getDocs(cashQuery);
-        cashSnap.forEach(d => {
-          const data = d.data();
-          if (data.remarks && data.remarks.includes(billToDelete.transactionId)) {
-            batch.delete(d.ref);
-          }
-        });
-
-        // 3. Revert studentFees status back to due
-        const feeQuery = query(collection(db, 'studentFees'), where('transactionId', '==', billToDelete.transactionId));
-        const feeSnap = await getDocs(feeQuery);
-        feeSnap.forEach(d => {
-          const fData = d.data();
-          batch.update(d.ref, {
-            status: 'due',
-            paidAmount: 0,
-            dueAmount: fData.totalFee || 0,
-            paidAt: deleteField(),
-            receiptNo: deleteField(),
-            transactionId: deleteField(),
-            paymentMethod: deleteField(),
-            collectorId: deleteField(),
-            collectorName: deleteField()
-          });
-        });
-      } else {
-        // Pending bill! Clean up associated studentFees records
-        const feeQuery = query(collection(db, 'studentFees'), where('remitBillId', '==', billToDelete.id));
-        const feeSnap = await getDocs(feeQuery);
-        feeSnap.forEach(d => {
-          batch.delete(d.ref);
-        });
+      } catch (err) {
+        // ignore if billItems not present
       }
 
       await batch.commit();
-      setSuccessMsg('Remit Bill deleted successfully, and associated transaction history cleared.');
+      setSuccessMsg('Draft/Pending Remit Bill deleted successfully.');
       onRefresh();
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'remitBills');
@@ -1134,59 +1676,40 @@ export default function RemitBillsGeneratorTab({
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      const batch = writeBatch(db);
       const billsToDeleteObj = remitBills.filter(b => selectedBillIds.includes(b.id));
 
+      // Check if any selected bill has payments/transactions
+      const paidBills = billsToDeleteObj.filter(b => b.transactionId || (b.paidAmount && b.paidAmount > 0) || b.status === 'paid' || b.status === 'partial');
+      if (paidBills.length > 0) {
+        setErrorMsg(`Financial Integrity Protection: ${paidBills.length} selected bill(s) have recorded payments or transactions and cannot be deleted. Please use the Refund or Void workflow.`);
+        setBulkDeleting(false);
+        setShowBulkDeleteConfirm(false);
+        return;
+      }
+
+      const batch = writeBatch(db);
       for (const bill of billsToDeleteObj) {
         batch.delete(doc(db, 'remitBills', bill.id));
 
-        if (bill.transactionId) {
-          // 1. Query and delete associated transactions in transactions collection
-          const txQuery = query(collection(db, 'transactions'), where('receipt', '==', bill.transactionId));
-          const txSnap = await getDocs(txQuery);
-          txSnap.forEach(d => {
+        const feeQuery = query(collection(db, 'studentFees'), where('remitBillId', '==', bill.id));
+        const feeSnap = await getDocs(feeQuery);
+        feeSnap.forEach(d => {
+          batch.delete(d.ref);
+        });
+
+        try {
+          const itemQuery = query(collection(db, 'billItems'), where('remitBillId', '==', bill.id));
+          const itemSnap = await getDocs(itemQuery);
+          itemSnap.forEach(d => {
             batch.delete(d.ref);
           });
-
-          // 2. Query and delete associated cash ledger entries
-          const cashQuery = query(collection(db, 'cash_ledger'));
-          const cashSnap = await getDocs(cashQuery);
-          cashSnap.forEach(d => {
-            const data = d.data();
-            if (data.remarks && data.remarks.includes(bill.transactionId)) {
-              batch.delete(d.ref);
-            }
-          });
-
-          // 3. Revert studentFees status back to due
-          const feeQuery = query(collection(db, 'studentFees'), where('transactionId', '==', bill.transactionId));
-          const feeSnap = await getDocs(feeQuery);
-          feeSnap.forEach(d => {
-            const fData = d.data();
-            batch.update(d.ref, {
-              status: 'due',
-              paidAmount: 0,
-              dueAmount: fData.totalFee || 0,
-              paidAt: deleteField(),
-              receiptNo: deleteField(),
-              transactionId: deleteField(),
-              paymentMethod: deleteField(),
-              collectorId: deleteField(),
-              collectorName: deleteField()
-            });
-          });
-        } else {
-          // Pending bill! Clean up associated studentFees records
-          const feeQuery = query(collection(db, 'studentFees'), where('remitBillId', '==', bill.id));
-          const feeSnap = await getDocs(feeQuery);
-          feeSnap.forEach(d => {
-            batch.delete(d.ref);
-          });
+        } catch (err) {
+          // ignore
         }
       }
 
       await batch.commit();
-      setSuccessMsg(`Successfully deleted ${billsToDeleteObj.length} Remit Bill(s) and cleared associated transaction histories.`);
+      setSuccessMsg(`Successfully deleted ${billsToDeleteObj.length} Draft/Pending Remit Bill(s).`);
       setSelectedBillIds([]);
       onRefresh();
     } catch (err: any) {
@@ -1210,13 +1733,18 @@ export default function RemitBillsGeneratorTab({
         pdf.addImage(logoBase64, 'PNG', 15, 10, 16, 16);
         // Draw centered watermark background
         pdf.saveGraphicsState();
-        // @ts-ignore
-        if (typeof pdf.GState === 'function') {
-          // @ts-ignore
-          const gState = new pdf.GState({ opacity: 0.04 });
-          pdf.setGState(gState);
-          pdf.addImage(logoBase64, 'PNG', pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80);
+        const GStateClass = (jsPDF as any).GState || (pdf as any).GState;
+        if (GStateClass) {
+          try {
+            const gState = new GStateClass({ opacity: 0.04 });
+            if (typeof pdf.setGState === 'function') {
+              pdf.setGState(gState);
+            }
+          } catch {
+            // Ignore if GState is non-constructible
+          }
         }
+        pdf.addImage(logoBase64, 'PNG', pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80);
         pdf.restoreGraphicsState();
       } catch (err) {
         console.error("Error drawing logo/watermark in PDF:", err);
@@ -1318,12 +1846,13 @@ export default function RemitBillsGeneratorTab({
     }
 
     // --- ITEMS TABLE ---
-    const tableRows = bill.itemizedCharges.map((item, idx) => [
-      String(idx + 1),
+    const formattedCharges = formatRemitBillItems(bill.itemizedCharges);
+    const tableRows = formattedCharges.map((item) => [
+      String(item.sn),
       item.name,
-      `NRs. ${item.rate.toLocaleString()}`,
-      `${item.months} Month${item.months > 1 ? 's' : ''}`,
-      `NRs. ${item.total.toLocaleString()}`
+      item.rateStr,
+      item.durationStr,
+      item.totalStr
     ]);
 
     autoTable(pdf, {
@@ -1431,7 +1960,7 @@ export default function RemitBillsGeneratorTab({
     pdf.setFontSize(7.5);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(71, 85, 105);
-    pdf.text(`Issued by: ${bill.createdBy || 'Counter Desk'}`, 15, footerY + 12);
+    pdf.text(`Issued by: ${formatIssuedBy(bill.createdBy)}`, 15, footerY + 12);
     pdf.text('Authorized Signature: _______________________', pageWidth - 15, footerY + 12, { align: 'right' });
   };
 
@@ -1446,13 +1975,18 @@ export default function RemitBillsGeneratorTab({
         pdf.addImage(logoBase64, 'PNG', 15, offsetY + 4, 9, 9);
         // Draw centered watermark background in half-page layout
         pdf.saveGraphicsState();
-        // @ts-ignore
-        if (typeof pdf.GState === 'function') {
-          // @ts-ignore
-          const gState = new pdf.GState({ opacity: 0.04 });
-          pdf.setGState(gState);
-          pdf.addImage(logoBase64, 'PNG', pageWidth / 2 - 22.5, offsetY + 74.25 - 22.5, 45, 45);
+        const GStateClass = (jsPDF as any).GState || (pdf as any).GState;
+        if (GStateClass) {
+          try {
+            const gState = new GStateClass({ opacity: 0.04 });
+            if (typeof pdf.setGState === 'function') {
+              pdf.setGState(gState);
+            }
+          } catch {
+            // Ignore if GState is non-constructible
+          }
         }
+        pdf.addImage(logoBase64, 'PNG', pageWidth / 2 - 22.5, offsetY + 74.25 - 22.5, 45, 45);
         pdf.restoreGraphicsState();
       } catch (err) {
         console.error("Error drawing logo/watermark in half-page PDF:", err);
@@ -1551,12 +2085,13 @@ export default function RemitBillsGeneratorTab({
     const tableStartY = offsetY + 38;
 
     // --- ITEMS TABLE ---
-    const tableRows = bill.itemizedCharges.map((item, idx) => [
-      String(idx + 1),
+    const formattedCharges = formatRemitBillItems(bill.itemizedCharges);
+    const tableRows = formattedCharges.map((item) => [
+      String(item.sn),
       item.name,
-      `NRs. ${item.rate.toLocaleString()}`,
-      `${item.months} M`,
-      `NRs. ${item.total.toLocaleString()}`
+      item.rateStr,
+      item.durationShortStr,
+      item.totalStr
     ]);
 
     autoTable(pdf, {
@@ -1661,7 +2196,7 @@ export default function RemitBillsGeneratorTab({
     pdf.setFontSize(6.5);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(71, 85, 105);
-    pdf.text(`Issued by: ${bill.createdBy || 'Counter Desk'}`, 15, footerY + 10.5);
+    pdf.text(`Issued by: ${formatIssuedBy(bill.createdBy)}`, 15, footerY + 10.5);
     pdf.text('Authorized Signature: _______________________', pageWidth - 15, footerY + 10.5, { align: 'right' });
   };
 
@@ -1685,13 +2220,14 @@ export default function RemitBillsGeneratorTab({
           : (studentObj?.motherName && studentObj.motherName.trim() !== '' ? studentObj.motherName : 'Unknown')));
 
     let itemRows = '';
-    bill.itemizedCharges.forEach(item => {
+    const formattedCharges = formatRemitBillItems(bill.itemizedCharges);
+    formattedCharges.forEach(item => {
       itemRows += `
         <tr>
           <td style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #1f2937; font-weight: bold;">${item.name}</td>
-          <td class="text-right font-mono" style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #4b5563;">NRs. ${item.rate.toLocaleString()}</td>
-          <td class="text-center" style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #1f2937; font-weight: bold;">${item.months}</td>
-          <td class="text-right font-mono" style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #1f2937; font-weight: bold;">NRs. ${item.total.toLocaleString()}</td>
+          <td class="text-right font-mono" style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #4b5563;">${item.rateStr}</td>
+          <td class="text-center" style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #1f2937; font-weight: bold;">${item.durationStr}</td>
+          <td class="text-right font-mono" style="padding: 10px; border-bottom: 1px solid #f3f4f6; color: #1f2937; font-weight: bold;">${item.totalStr}</td>
         </tr>
       `;
     });
@@ -1796,7 +2332,7 @@ export default function RemitBillsGeneratorTab({
           <!-- Grand Total display -->
           <div class="grand-total">
             <span style="font-size: 11px; text-transform: uppercase; font-weight: 800; color: #374151;">Gross Total Outstanding Payable</span>
-            <span class="font-mono" style="font-size: 16px; font-weight: 900;">NRs. ${bill.totalAmount.toLocaleString()}</span>
+            <span class="font-mono" style="font-size: 16px; font-weight: 900;">NRs. ${(bill?.totalAmount || 0).toLocaleString()}</span>
           </div>
 
           <!-- Instructions -->
@@ -1816,7 +2352,7 @@ export default function RemitBillsGeneratorTab({
               <div class="signature-title">Parent / Depositor</div>
             </div>
             <div class="signature-area">
-              <div style="font-size: 10px; color: #4b5563; font-weight: bold; margin-bottom: 3px;">Issued by: ${bill.createdBy}</div>
+              <div style="font-size: 10px; color: #4b5563; font-weight: bold; margin-bottom: 3px;">Issued by: ${formatIssuedBy(bill.createdBy)}</div>
               <div class="signature-line"></div>
               <div class="signature-title">Cashier / Bill Generator</div>
             </div>
@@ -1881,9 +2417,12 @@ export default function RemitBillsGeneratorTab({
     if (!matchesMonthFilter(b.billingPeriod, filterStartMonth, filterEndMonth)) return false;
     if (searchTerm.trim() !== '') {
       const s = searchTerm.toLowerCase();
-      const matchName = b.studentName.toLowerCase().includes(s);
-      const matchNo = b.billNo.toLowerCase().includes(s);
-      return matchName || matchNo;
+      const matchName = (b.studentName || '').toLowerCase().includes(s);
+      const matchNo = (b.billNo || '').toLowerCase().includes(s);
+      const matchRoll = (b.studentRoll || '').toLowerCase().includes(s);
+      const matchId = (b.studentId || '').toLowerCase().includes(s);
+      const matchTx = (b.transactionId || '').toLowerCase().includes(s);
+      return matchName || matchNo || matchRoll || matchId || matchTx;
     }
     return true;
   });
@@ -1945,7 +2484,7 @@ export default function RemitBillsGeneratorTab({
         <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-center justify-between">
           <div>
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Remitted Bills</span>
-            <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">NRs. {statsTotalGenerated.toLocaleString()}</h3>
+            <h3 className="text-2xl font-black text-slate-800 tracking-tight mt-1">NRs. {(statsTotalGenerated || 0).toLocaleString()}</h3>
             <p className="text-[10px] text-slate-500 font-medium mt-0.5">{remitBills.length} Bills Distributed</p>
           </div>
           <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
@@ -1956,7 +2495,7 @@ export default function RemitBillsGeneratorTab({
         <div className="bg-amber-50 border border-amber-100/50 rounded-2xl p-5 shadow-sm flex items-center justify-between">
           <div>
             <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Draft Outstanding (Guardians)</span>
-            <h3 className="text-2xl font-black text-amber-700 tracking-tight mt-1">NRs. {statsPending.toLocaleString()}</h3>
+            <h3 className="text-2xl font-black text-amber-700 tracking-tight mt-1">NRs. {(statsPending || 0).toLocaleString()}</h3>
             <p className="text-[10px] text-amber-600/80 font-medium mt-0.5">{remitBills.filter(b => b.status === 'pending').length} Dues Distributed</p>
           </div>
           <div className="w-10 h-10 rounded-full bg-amber-100/70 flex items-center justify-center text-amber-500">
@@ -1967,7 +2506,7 @@ export default function RemitBillsGeneratorTab({
         <div className="bg-emerald-50 border border-emerald-100/50 rounded-2xl p-5 shadow-sm flex items-center justify-between">
           <div>
             <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Cash counter Settled (Recieved)</span>
-            <h3 className="text-2xl font-black text-emerald-700 tracking-tight mt-1">NRs. {statsPaid.toLocaleString()}</h3>
+            <h3 className="text-2xl font-black text-emerald-700 tracking-tight mt-1">NRs. {(statsPaid || 0).toLocaleString()}</h3>
             <p className="text-[10px] text-emerald-600/80 font-medium mt-0.5">{remitBills.filter(b => b.status === 'paid').length} Bills Cleared</p>
           </div>
           <div className="w-10 h-10 rounded-full bg-emerald-100/70 flex items-center justify-center text-emerald-500">
@@ -1995,7 +2534,19 @@ export default function RemitBillsGeneratorTab({
       </div>
 
       {/* Section Navigation tabs */}
-      <div className="flex border-b border-slate-200">
+      <div className="flex flex-wrap border-b border-slate-200">
+        <button
+          onClick={() => {
+            setActiveSubTab('generate');
+          }}
+          className={`px-5 py-3 text-xs font-bold uppercase tracking-widest border-b-2 transition-all cursor-pointer ${
+            activeSubTab === 'generate'
+              ? 'border-[#1B4F72] text-[#1B4F72]'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          + Generate Remit Bills
+        </button>
         <button
           onClick={() => setActiveSubTab('list')}
           className={`px-5 py-3 text-xs font-bold uppercase tracking-widest border-b-2 transition-all cursor-pointer ${
@@ -2007,16 +2558,30 @@ export default function RemitBillsGeneratorTab({
           Manage Distributed Bills ({filteredBills.length})
         </button>
         <button
-          onClick={() => {
-            setActiveSubTab('generate');
-          }}
-          className={`px-5 py-3 text-xs font-bold uppercase tracking-widest border-b-2 transition-all cursor-pointer ${
-            activeSubTab === 'generate'
+          onClick={() => setActiveSubTab('matrix')}
+          className={`px-5 py-3 text-xs font-bold uppercase tracking-widest border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+            activeSubTab === 'matrix'
               ? 'border-[#1B4F72] text-[#1B4F72]'
               : 'border-transparent text-slate-400 hover:text-slate-600'
           }`}
         >
-          + Generate Remit Bills Class-wise
+          <CalendarRange className="w-4 h-4 text-blue-600" />
+          <span>12-Month Academic Matrix</span>
+          <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-black">
+            {currentAcademicYear} BS
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const sid = selectedStudentId || (students[0]?.id || '');
+            setReconcileStudentId(sid);
+            setShowReconciliationModal(true);
+          }}
+          className="ml-auto my-auto px-3.5 py-1.5 text-xs font-bold rounded-xl text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition flex items-center gap-1.5 cursor-pointer"
+        >
+          <FileText className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Reconciliation Diagnostics</span>
         </button>
       </div>
 
@@ -2127,8 +2692,10 @@ export default function RemitBillsGeneratorTab({
                   className="px-4 py-2.5 text-xs bg-white border border-slate-200 rounded-xl outline-none text-slate-700 font-bold focus:border-[#1B4F72] shadow-2xs"
                 >
                   <option value="all">All Statuses</option>
-                  <option value="pending">Pending (Dues)</option>
+                  <option value="pending">Distributed (Dues)</option>
                   <option value="paid">Deposited (Cleared)</option>
+                  <option value="partial">Partially Paid</option>
+                  <option value="void">VOID (Released)</option>
                 </select>
 
                 {selectedBillIds.length > 0 && (
@@ -2264,8 +2831,14 @@ export default function RemitBillsGeneratorTab({
                           />
                         </td>
                         <td className="py-4 px-6">
-                          <span className="font-mono font-black text-[#1B4F72] block">{bill.billNo}</span>
-                          <span className="text-[10px] text-slate-400">{bill.createdAt} (BS)</span>
+                          <span className={`font-mono font-black ${bill.status === 'void' ? 'line-through text-slate-400' : 'text-[#1B4F72]'} block`}>{bill.billNo}</span>
+                          <span className="text-[10px] text-slate-400">{typeof bill.createdAt === 'object' && bill.createdAt !== null ? (bill.createdAt.seconds ? formatBSDate(new Date(bill.createdAt.seconds * 1000)) : 'N/A') : String(bill.createdAt || 'N/A')} (BS)</span>
+                          {bill.reissuedFromBillNo && (
+                            <span className="text-[9px] text-blue-600 font-bold block mt-0.5">Reissued from #{bill.reissuedFromBillNo}</span>
+                          )}
+                          {bill.reissuedToBillNo && (
+                            <span className="text-[9px] text-purple-600 font-bold block mt-0.5">Reissued as #{bill.reissuedToBillNo}</span>
+                          )}
                         </td>
                         <td className="py-4 px-6">
                           <h4 className="font-bold text-slate-800 text-xs uppercase">{bill.studentName}</h4>
@@ -2275,12 +2848,23 @@ export default function RemitBillsGeneratorTab({
                           <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">{bill.billingPeriod}</span>
                         </td>
                         <td className="py-4 px-6 text-right font-black text-slate-900 text-xs">
-                          NRs. {bill.totalAmount.toLocaleString()}
+                          NRs. {(bill?.totalAmount || 0).toLocaleString()}
                         </td>
                         <td className="py-4 px-6 text-center">
                           {bill.status === 'paid' ? (
                             <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-100 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
                               <Check className="w-2.5 h-2.5" /> Deposited
+                            </span>
+                          ) : bill.status === 'partial' ? (
+                            <span className="bg-blue-50 text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
+                              Partially Paid
+                            </span>
+                          ) : bill.status === 'void' || bill.status === 'cancelled' ? (
+                            <span 
+                              className="bg-rose-50 text-rose-700 border border-rose-200 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider line-through cursor-help"
+                              title={`VOIDED: ${bill.voidReason || 'Clerical correction'} (${bill.voidedAt || ''})`}
+                            >
+                              VOID
                             </span>
                           ) : (
                             <span className="bg-amber-50 text-amber-700 border border-amber-100 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
@@ -2320,6 +2904,18 @@ export default function RemitBillsGeneratorTab({
                             </button>
                           )}
 
+                          {bill.status !== 'void' && bill.status !== 'cancelled' && (
+                            <button
+                              type="button"
+                              onClick={() => setVoidingBill(bill)}
+                              className="px-2.5 py-1.5 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-lg transition-all inline-flex items-center gap-1 cursor-pointer font-bold text-[10px] uppercase shadow-2xs"
+                              title="Void or Reissue this bill (releases covered months for re-billing)"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              Void / Reissue
+                            </button>
+                          )}
+
                           <button
                             onClick={() => setBillToDelete(bill)}
                             className="p-2 text-red-500 hover:bg-red-50 hover:text-red-700 rounded-lg transition-all cursor-pointer"
@@ -2340,11 +2936,45 @@ export default function RemitBillsGeneratorTab({
 
       {/* Subtab 2: Config and Generate Classwise */}
       {activeSubTab === 'generate' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Config form card */}
-          <div className="lg:col-span-7 bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-6">
+        <div className="space-y-6">
+          {/* Billing Coverage Preview: 12 Nepali Months Matrix for selected class */}
+          <BillingCoveragePreview
+            selectedClass={selectedClass}
+            classes={classes}
+            onSelectClass={cls => {
+              setSelectedClass(cls);
+              setSelectedStudentId('');
+            }}
+            academicYear={currentAcademicYear}
+            students={students}
+            remitBills={remitBills}
+            selectedStudentId={generationMode === 'student' ? selectedStudentId : undefined}
+            generationMode={generationMode}
+            currentSelectedMonths={periodCalc.targetMonths}
+            onSelectMonth={m => handleStartMonthChange(m)}
+          />
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Config form card */}
+            <div className="lg:col-span-7 bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-6">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">Configure Charges Breakdown</h3>
             
+            {reissueContext && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-900 p-3.5 rounded-2xl text-xs font-bold flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-blue-600" />
+                  <span>Reissuing replacement for voided bill #{reissueContext.fromBillNo} ({reissueContext.studentName})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReissueContext(null)}
+                  className="text-blue-600 hover:text-blue-800 text-[10px] uppercase font-black cursor-pointer hover:underline"
+                >
+                  Cancel Reissue
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Target Class</label>
@@ -2484,10 +3114,25 @@ export default function RemitBillsGeneratorTab({
 
             {/* Time period options */}
             <div className="space-y-3 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-              <label className="text-[10px] font-black text-[#1B4F72] uppercase tracking-widest block">Standard Billing Duration</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-[#1B4F72] uppercase tracking-widest block">Standard Billing Duration</label>
+                <span className="text-[10px] font-mono font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
+                  Nepali Academic Year: {currentAcademicYear} BS
+                </span>
+              </div>
+
+              {boundaryWarning && (
+                <div className="bg-amber-50 border border-amber-300 text-amber-900 p-3 rounded-xl text-xs font-semibold flex items-start gap-2 shadow-2xs animate-in fade-in">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">Academic Year Boundary:</span>
+                    <span className="text-[11px] text-amber-800">{boundaryWarning}</span>
+                  </div>
+                </div>
+              )}
               
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[1, 2, 3, 6, 12].map(m => (
+                {[1, 3, 6, 12].map(m => (
                   <button
                     type="button"
                     key={m}
@@ -2519,7 +3164,7 @@ export default function RemitBillsGeneratorTab({
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Ending Month (Computer Calculated)</span>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Ending Month</span>
                   <input
                     type="text"
                     disabled
@@ -2529,6 +3174,24 @@ export default function RemitBillsGeneratorTab({
                   />
                 </div>
               </div>
+
+              {/* Requested Period vs Actual Billable Period breakdown */}
+              {startMonth && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-0.5">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Requested Period</span>
+                    <span className="text-xs font-bold text-slate-700 block">
+                      {billingPlan.requestedPeriodArrowText || `${startMonth} → ${endMonth} (${periodMonths} Months)`}
+                    </span>
+                  </div>
+                  <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-2.5 space-y-0.5">
+                    <span className="text-[9px] font-black text-amber-700 uppercase tracking-widest block">Actual Billable Period</span>
+                    <span className="text-xs font-black text-amber-900 block">
+                      {billingPlan.actualBillablePeriodArrowText || billingPlan.effectiveBillHeadingPeriodTag}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-2">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Bill Heading Period Tag</span>
@@ -2540,6 +3203,367 @@ export default function RemitBillsGeneratorTab({
                   className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl font-bold text-slate-700 mt-1 outline-none focus:border-[#1B4F72]"
                 />
               </div>
+
+              {/* Real-time Month-Level Billing Coverage Preview */}
+              {startMonth && periodCalc.targetMonths.length > 0 && (
+                <div className="mt-3 bg-white border border-slate-200 rounded-2xl p-3.5 space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-700 tracking-wider">
+                      Requested Period Coverage ({periodCalc.targetMonths.length} Months)
+                    </span>
+                    <span className="text-[10px] font-semibold text-slate-500">
+                      Target: {generationMode === 'student' ? '1 Student' : `${classStudents.length} Students`}
+                    </span>
+                  </div>
+
+                  {/* Period breakdown: Requested, Already Billed, New Billable */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-bold">Requested:</span>
+                      <span className="font-extrabold text-slate-800">
+                        {billingPlan.requestedPeriodArrowText || `${startMonth} → ${endMonth} (${periodCalc.targetMonths.length} Months)`}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-bold">Already Billed:</span>
+                      <span className={`font-extrabold ${billingPlan.alreadyBilledMonths.length > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
+                        {billingPlan.alreadyBilledMonths.length > 0 ? billingPlan.alreadyBilledMonths.join(', ') : 'None'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-bold">New Billable:</span>
+                      <span className={`font-extrabold ${billingPlan.billableMonths.length > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {billingPlan.billableMonths.length > 0
+                          ? `${billingPlan.billableMonths.join(', ')} (${billingPlan.billableMonths.length} Month${billingPlan.billableMonths.length > 1 ? 's' : ''})`
+                          : 'No New Billable Months'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {coverageAnalysis.monthBreakdown.map(mb => {
+                      const isAllBilled = mb.status === 'ALL_BILLED';
+                      const isSomeBilled = mb.status === 'SOME_BILLED';
+                      return (
+                        <div
+                          key={mb.monthId || mb.monthName}
+                          className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-2 ${
+                            isAllBilled
+                              ? 'bg-rose-50 border-rose-200 text-rose-800 font-bold'
+                              : isSomeBilled
+                              ? 'bg-amber-50 border-amber-200 text-amber-800 font-bold'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold'
+                          }`}
+                        >
+                          <span className="font-black">{mb.monthName}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/80 border border-current/20 font-semibold">
+                            {isAllBilled
+                              ? `Billed (${mb.billedCount}/${coverageAnalysis.totalTargetStudents})`
+                              : isSomeBilled
+                              ? `Partial (${mb.billedCount}/${coverageAnalysis.totalTargetStudents})`
+                              : `Unbilled (0/${coverageAnalysis.totalTargetStudents})`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Authoritative Universal Billing Engine Banner */}
+                  <div className={`p-4 rounded-2xl border text-xs space-y-3 animate-in fade-in ${
+                    universalCoverage.overallStatus === 'NOTHING_NEW_TO_GENERATE'
+                      ? 'bg-rose-50/80 border-rose-200 text-rose-950'
+                      : universalCoverage.overallStatus === 'READY_TO_GENERATE_MISSING'
+                      ? 'bg-blue-50/80 border-blue-200 text-blue-950'
+                      : 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        {universalCoverage.overallStatus === 'NOTHING_NEW_TO_GENERATE' ? (
+                          <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                        ) : (
+                          <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black block text-xs uppercase tracking-wide">
+                              {universalCoverage.overallStatus === 'NOTHING_NEW_TO_GENERATE'
+                                ? '🔴 Nothing New to Generate'
+                                : universalCoverage.overallStatus === 'READY_TO_GENERATE_MISSING'
+                                ? '🟢 Ready to Generate Missing Charges'
+                                : '🟢 Ready to Generate Standard Remit Bills'}
+                            </span>
+                            <span className="bg-white/90 border border-current/20 text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
+                              Duplicate-Safe Billing Engine
+                            </span>
+                          </div>
+                          <p className="text-[11px] font-medium leading-relaxed mt-1 opacity-90">
+                            {universalCoverage.summaryMessage}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowExceptionManager(!showExceptionManager)}
+                        className="px-3 py-1.5 bg-white border border-current/30 rounded-xl text-[10px] font-black uppercase tracking-wider transition cursor-pointer shrink-0 shadow-2xs hover:bg-white/80"
+                      >
+                        {showExceptionManager ? 'Hide Pupil List' : `Review Pupils (${coverageStats.billableStudentsCount} Billable)`}
+                      </button>
+                    </div>
+
+                    {/* Coverage statistics pills */}
+                    <div className="flex flex-wrap gap-2 pt-1 border-t border-current/10 text-[10px] font-bold">
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-100/90 text-emerald-900 border border-emerald-300">
+                        ✓ {universalCoverage.unbilledStudentsCount} Fully Unbilled
+                      </span>
+                      {universalCoverage.partiallyCoveredStudentsCount > 0 && (
+                        <span className="px-2.5 py-1 rounded-lg bg-blue-100/90 text-blue-900 border border-blue-300">
+                          ⚡ {universalCoverage.partiallyCoveredStudentsCount} Partial (Smart Missing Charges)
+                        </span>
+                      )}
+                      {universalCoverage.fullyCoveredStudentsCount > 0 && (
+                        <span className="px-2.5 py-1 rounded-lg bg-rose-100/90 text-rose-900 border border-rose-300">
+                          ⏸ {universalCoverage.fullyCoveredStudentsCount} Already 100% Covered (Zero Duplicate)
+                        </span>
+                      )}
+                      {excludedStudentIds.length > 0 && (
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 border border-slate-300">
+                          ✕ {excludedStudentIds.length} Manually Excluded
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Pupil-by-Pupil Review Drawer */}
+                    {showExceptionManager && (
+                      <div className="mt-3 bg-white rounded-xl border border-slate-200 p-3 space-y-2 max-h-60 overflow-y-auto divide-y divide-slate-100 shadow-inner">
+                        <div className="flex items-center justify-between pb-1.5 text-[10px] font-black uppercase text-slate-500">
+                          <span>Pupil Name & Roll</span>
+                          <span>Coverage Status & Action</span>
+                        </div>
+                        {pupilCoverageList.map((pupil, idx) => {
+                          const isExcluded = excludedStudentIds.includes(pupil.studentId);
+                          return (
+                            <div key={pupil.studentId || `pupil-${idx}`} className="pt-2 pb-1.5 flex items-center justify-between text-xs">
+                              <div>
+                                <span className="font-black text-slate-800 block text-xs">{pupil.studentName}</span>
+                                <span className="text-[10px] text-slate-400 font-semibold">Roll: {pupil.studentRoll || 'N/A'} • Class {pupil.class}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-right">
+                                  {pupil.isCompletelyUnbilled ? (
+                                    <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                                      Will bill all {pupil.unbilledMonths?.length || 0}M (NRs. {(pupil.totalNewAmount ?? 0).toLocaleString()})
+                                    </span>
+                                  ) : pupil.isPartiallyCovered ? (
+                                    <span className="text-[9px] font-black text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                      Bills missing {pupil.unbilledMonths?.join(', ') || ''} (NRs. {(pupil.totalNewAmount ?? 0).toLocaleString()})
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                                      Already 100% billed
+                                    </span>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExcludedStudentIds(prev => 
+                                      isExcluded ? prev.filter(id => id !== pupil.studentId) : [...prev, pupil.studentId]
+                                    );
+                                  }}
+                                  className={`text-[9px] font-black px-2 py-1 rounded-md border transition cursor-pointer ${
+                                    isExcluded
+                                      ? 'bg-rose-600 text-white border-rose-700'
+                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                                  }`}
+                                >
+                                  {isExcluded ? 'Excluded' : 'Exclude'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Advanced Billing Actions Box */}
+                    {universalCoverage.overallStatus === 'NOTHING_NEW_TO_GENERATE' && (
+                      <div className="mt-3 bg-white/95 rounded-xl border border-rose-200 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase text-slate-700 tracking-wider">
+                            Advanced Billing Actions
+                          </span>
+                          <span className="text-[10px] font-bold text-rose-600">
+                            Safe Accounting Workflows
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFilterClass(selectedClass);
+                              setActiveSubTab('list');
+                            }}
+                            className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-center text-xs font-bold text-slate-800 transition cursor-pointer"
+                          >
+                            <FileText className="w-3.5 h-3.5 mx-auto mb-1 text-slate-600" />
+                            View Existing Bills
+                          </button>
+                          
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // Find bill for selected pupil or class
+                              const candidateBill = remitBills.find(b => 
+                                (generationMode === 'student' ? b.studentId === selectedStudentId : (b.class || '').toLowerCase() === selectedClass.toLowerCase()) &&
+                                (b.status === 'pending' || b.status === 'partial')
+                              );
+                              if (candidateBill) {
+                                setVoidingBill(candidateBill);
+                              } else {
+                                setActiveSubTab('list');
+                              }
+                            }}
+                            className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-center text-xs font-bold text-amber-800 transition cursor-pointer"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 mx-auto mb-1 text-amber-600" />
+                            Void & Reissue
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // Focus miscellaneous charge section
+                              const input = document.querySelector('input[placeholder*="Terminal Exam Fee"]') as HTMLInputElement;
+                              if (input) input.focus();
+                            }}
+                            className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-center text-xs font-bold text-blue-800 transition cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5 mx-auto mb-1 text-blue-600" />
+                            Add Supplementary Fee
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowAuthorizedOverrideModal(true)}
+                            className="p-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-center text-xs font-bold text-rose-800 transition cursor-pointer"
+                          >
+                            <ShieldAlert className="w-3.5 h-3.5 mx-auto mb-1 text-rose-600" />
+                            Authorized Override
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 1 & 2 Verification Details */}
+              {startMonth && (
+                <div className="mt-3 bg-white border border-slate-200 rounded-2xl p-4 space-y-3.5 shadow-2xs">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-[#1B4F72]" />
+                      <span className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                        Multi-Step Duplicate Prevention Verification
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => triggerFirestoreVerification()}
+                      disabled={verifyingFirestore || targetStudentsForGen.length === 0}
+                      className="text-[10px] font-bold text-[#1B4F72] hover:text-[#133c57] flex items-center gap-1 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                    >
+                      {verifyingFirestore ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                      {verifyingFirestore ? 'Querying Firestore...' : 'Re-verify in Firestore'}
+                    </button>
+                  </div>
+
+                  {/* Step 1: Mapping to Nepali Month IDs */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
+                        <span className="w-4 h-4 rounded-full bg-[#1B4F72] text-white flex items-center justify-center text-[9px] font-black">1</span>
+                        Mapped Nepali Month IDs ({mappedNepaliMonthIds.length} Months)
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-400">
+                        Session {currentAcademicYear} BS
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mappedNepaliMonthIds.map(m => (
+                        <div
+                          key={m.monthId}
+                          className="px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200 shadow-2xs flex items-center gap-2 text-xs font-bold text-slate-700"
+                        >
+                          <span className="w-5 h-5 rounded-lg bg-blue-100 text-blue-800 text-[10px] font-black flex items-center justify-center">
+                            {m.code}
+                          </span>
+                          <span className="text-slate-900 font-extrabold">{m.monthName}</span>
+                          <span className="text-[10px] font-mono text-slate-500 font-normal">
+                            ({m.monthId})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Step 2: Firestore Verification Status */}
+                  <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider flex items-center gap-1.5">
+                        <span className="w-4 h-4 rounded-full bg-[#1B4F72] text-white flex items-center justify-center text-[9px] font-black">2</span>
+                        Firestore Record Cross-Check
+                      </span>
+                      {verifyingFirestore && (
+                        <span className="text-[10px] text-blue-600 font-bold flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Checking Firestore...
+                        </span>
+                      )}
+                    </div>
+
+                    {universalCoverage.overallStatus === 'NOTHING_NEW_TO_GENERATE' ? (
+                      <div className="bg-rose-50 border border-rose-300 rounded-xl p-3 space-y-2 text-xs text-rose-900 animate-in fade-in">
+                        <div className="flex items-start gap-2">
+                          <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <span className="font-black text-rose-950 block">
+                              Active Billing Records Detected in Firestore ({universalCoverage.fullyCoveredStudentsCount} student{universalCoverage.fullyCoveredStudentsCount > 1 ? 's' : ''})
+                            </span>
+                            <p className="text-[11px] text-rose-800 leading-relaxed font-medium">
+                              All requested months ({billingPlan.requestedMonths.join(', ')}) already have active remit bills. Duplicate generation is locked.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : universalCoverage.overallStatus === 'READY_TO_GENERATE_MISSING' ? (
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-2.5 flex items-center justify-between text-xs text-blue-950 animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                          <span className="font-bold text-[11px]">
+                            Missing charge items identified. System will generate bills only for unbilled months.
+                          </span>
+                        </div>
+                        <span className="text-[10px] bg-blue-600 text-white font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Ready for Missing
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs text-emerald-900 animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="font-bold text-[11px]">
+                            Firestore Verified: No existing bills found for requested period ({billingPlan.requestedMonths.join(', ')}).
+                          </span>
+                        </div>
+                        <span className="text-[10px] bg-emerald-600 text-white font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Safe to Generate
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Invariant calculations selections */}
@@ -2556,7 +3580,7 @@ export default function RemitBillsGeneratorTab({
                   />
                   <div>
                     <span className="text-xs font-bold text-slate-700">Monthly Tuition Cost</span>
-                    <p className="text-[10px] text-slate-400 font-medium">Loads standard monthly rate (multiplied by {periodMonths} months)</p>
+                    <p className="text-[10px] text-slate-400 font-medium">Loads standard monthly rate (multiplied by {billingPlan.sandboxPreview.actualBillableMonthsCount} unbilled month{billingPlan.sandboxPreview.actualBillableMonthsCount > 1 ? 's' : ''})</p>
                   </div>
                 </label>
 
@@ -2570,23 +3594,9 @@ export default function RemitBillsGeneratorTab({
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-700">Transportation Costs</span>
-                      <p className="text-[10px] text-slate-400 font-medium">Included only for students with transport assigned</p>
+                      <p className="text-[10px] text-slate-400 font-medium">Auto-calculated per unbilled month ({billingPlan.sandboxPreview.actualBillableMonthsCount}x) for enrolled pupils</p>
                     </div>
                   </label>
-                  {includeTransport && (
-                    <div className="flex items-center gap-2 pl-7 pt-1 animate-in slide-in-from-top-1">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Multiplier (Months):</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="12"
-                        value={transportMultiplier}
-                        onChange={e => setTransportMultiplier(Number(e.target.value) || 1)}
-                        className="w-16 px-2 py-1 text-xs border border-slate-200 rounded bg-white outline-none font-bold text-center"
-                      />
-                      <span className="text-[10px] text-slate-400 font-medium">Default is {periodMonths} (Change manually if needed)</span>
-                    </div>
-                  )}
                 </div>
 
                 <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl space-y-2">
@@ -2599,23 +3609,9 @@ export default function RemitBillsGeneratorTab({
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-700">Computer Labs Cost</span>
-                      <p className="text-[10px] text-slate-400 font-medium">Applied class-wise or custom-pupil rate</p>
+                      <p className="text-[10px] text-slate-400 font-medium">Auto-calculated per unbilled month ({billingPlan.sandboxPreview.actualBillableMonthsCount}x) for applicable classes</p>
                     </div>
                   </label>
-                  {includeComputer && (
-                    <div className="flex items-center gap-2 pl-7 pt-1 animate-in slide-in-from-top-1">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Multiplier (Months):</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="12"
-                        value={computerMultiplier}
-                        onChange={e => setComputerMultiplier(Number(e.target.value) || 1)}
-                        className="w-16 px-2 py-1 text-xs border border-slate-200 rounded bg-white outline-none font-bold text-center"
-                      />
-                      <span className="text-[10px] text-slate-400 font-medium">Default is {periodMonths} (Change manually if needed)</span>
-                    </div>
-                  )}
                 </div>
 
                 <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl space-y-2">
@@ -2724,9 +3720,12 @@ export default function RemitBillsGeneratorTab({
                 <div className="w-32 space-y-1">
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Amount NRs.</span>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={newCustomChargeAmount}
-                    onChange={e => setNewCustomChargeAmount(e.target.value)}
+                    onKeyDown={handleDigitsOnlyKeyDown}
+                    onChange={e => setNewCustomChargeAmount(sanitizeDigitsOnly(e.target.value))}
                     placeholder="500"
                     className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none font-medium"
                   />
@@ -2750,15 +3749,39 @@ export default function RemitBillsGeneratorTab({
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+              {authorizedOverrideInfo && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-900 rounded-xl text-xs font-bold border border-amber-300">
+                  <ShieldAlert className="w-4 h-4 text-amber-700" />
+                  <span>Override Active: {authorizedOverrideInfo.reason}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAuthorizedOverrideInfo(null)}
+                    className="ml-1 text-amber-700 hover:text-amber-950 font-black cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
-                disabled={generating || (generationMode === 'student' && !selectedStudentId)}
+                disabled={
+                  generating || 
+                  verifyingFirestore ||
+                  (generationMode === 'student' && !selectedStudentId) || 
+                  (!authorizedOverrideInfo && !billingPlan.isGenerationAllowed)
+                }
                 onClick={handleGenerateBills}
                 className="px-6 py-3 rounded-xl bg-[#1B4F72] hover:bg-[#133c57] text-white font-bold text-xs uppercase tracking-wider transition-all disabled:opacity-50 active:scale-[0.98] cursor-pointer inline-flex items-center gap-1.5 shadow-md shadow-slate-200"
               >
-                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {generating ? 'Issuing Drafts...' : `Generate & Distribute Remit Bills (${generationMode === 'student' ? '1 Student' : `${classStudents.length} Students`})`}
+                {generating || verifyingFirestore ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {generating
+                  ? 'Issuing Drafts...'
+                  : verifyingFirestore
+                  ? 'Verifying in Firestore...'
+                  : authorizedOverrideInfo
+                  ? `Authorized Override: Issue Bills (${targetStudentsForGen.length} Students)`
+                  : billingPlan.buttonLabel}
               </button>
             </div>
           </div>
@@ -2772,10 +3795,10 @@ export default function RemitBillsGeneratorTab({
             <div className="relative z-10 space-y-4">
               <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-black uppercase text-emerald-400 tracking-widest leading-none">Standard Sandbox Pre-Calculated Draft</h4>
+                  <h4 className="text-xs font-black uppercase text-emerald-400 tracking-widest leading-none">PREVIEW ONLY — NO FINANCIAL RECORD CREATED</h4>
                   <p className="text-[10px] text-slate-400 font-medium mt-1">Live simulation for Class {selectedClass} rate</p>
                 </div>
-                <span className="text-[9px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-black uppercase tracking-wider">REMIT PREVIEW</span>
+                <span className="text-[9px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-black uppercase tracking-wider">SANDBOX SIMULATION</span>
               </div>
 
               {/* Sample Calculation Sheet representation */}
@@ -2783,11 +3806,13 @@ export default function RemitBillsGeneratorTab({
                 <div className="flex justify-between items-center bg-slate-800/40 p-3 rounded-2xl border border-slate-800">
                   <div>
                     <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Example student rate</span>
-                    <span className="text-xs font-bold text-slate-200 uppercase">{generationMode === 'student' && selectedStudentId ? classStudents.find(s => s.id === selectedStudentId)?.fullName || 'Selected Student' : 'Standard Pupil of Class ' + selectedClass}</span>
+                    <span className="text-xs font-bold text-slate-200 uppercase">{billingPlan.sandboxPreview.studentName}</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Months Block</span>
-                    <span className="text-xs font-black text-amber-400 tracking-wider font-mono">{periodMonths} Months</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block tracking-wider">Billable Period</span>
+                    <span className="text-xs font-black text-amber-400 tracking-wider font-mono">
+                      {billingPlan.sandboxPreview.actualBillablePeriodText}
+                    </span>
                   </div>
                 </div>
 
@@ -2795,69 +3820,18 @@ export default function RemitBillsGeneratorTab({
                 <div className="space-y-2">
                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Charges Breakdown list</span>
                   <div className="divide-y divide-slate-800 text-xs">
-                    {/* Tuition row */}
-                    {includeTuition && (
-                      <div className="py-2 flex justify-between">
-                        <span className="text-slate-300">Monthly Tuition Fee ({periodMonths}x)</span>
-                        <span className="font-mono text-slate-200">NRs. {(preview.tuition * periodMonths).toLocaleString()}</span>
+                    {billingPlan.sandboxPreview.items.length === 0 ? (
+                      <div className="py-4 text-center text-slate-500 text-xs italic">
+                        No charges to apply for this period.
                       </div>
+                    ) : (
+                      billingPlan.sandboxPreview.items.map((item, idx) => (
+                        <div key={idx} className={`py-2 flex justify-between ${item.isDeduction ? 'text-purple-300' : 'text-slate-300'}`}>
+                          <span>{item.name}</span>
+                          <span className="font-mono">{item.isDeduction ? '-' : ''}NRs. {(item.total ?? item.amount ?? 0).toLocaleString()}</span>
+                        </div>
+                      ))
                     )}
-                    {/* Transport row */}
-                    {includeTransport && preview.transport > 0 && (
-                      <div className="py-2 flex justify-between text-slate-400">
-                        <span>Transport Cost ({transportMultiplier}x)</span>
-                        <span className="font-mono text-slate-300">NRs. {(preview.transport * transportMultiplier).toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Computer Labs */}
-                    {includeComputer && preview.computer > 0 && (
-                      <div className="py-2 flex justify-between text-slate-400">
-                        <span>Computer Lab Charges ({computerMultiplier}x)</span>
-                        <span className="font-mono text-slate-300">NRs. {(preview.computer * computerMultiplier).toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Academy development */}
-                    {includeAcademy && (
-                      <div className="py-2 flex justify-between text-slate-400">
-                        <span>Academy & Sports Activities ({periodMonths}x)</span>
-                        <span className="font-mono text-slate-300">NRs. {(Number(academyFeeRate || 0) * periodMonths).toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Annual Fee row */}
-                    {includeAnnual && preview.annual > 0 && (
-                      <div className="py-2 flex justify-between text-slate-400">
-                        <span>Annual Fee</span>
-                        <span className="font-mono text-slate-300">NRs. {preview.annual.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Admission Fee row */}
-                    {includeAdmission && preview.admission > 0 && (
-                      <div className="py-2 flex justify-between text-slate-400">
-                        <span>Admission Fee</span>
-                        <span className="font-mono text-slate-300">NRs. {preview.admission.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Exam Fee row */}
-                    {includeExam && preview.exam > 0 && (
-                      <div className="py-2 flex justify-between text-slate-400">
-                        <span>Terminal Exam Fee</span>
-                        <span className="font-mono text-slate-300">NRs. {preview.exam.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Scholarship Row */}
-                    {preview.scholarship > 0 && (
-                      <div className="py-2 flex justify-between text-purple-300">
-                        <span>Scholarship Deduction ({preview.scholarshipDesc || 'General'}) ({periodMonths}x)</span>
-                        <span className="font-mono">NRs. -{(preview.scholarship * periodMonths).toLocaleString()}</span>
-                      </div>
-                    )}
-                    {/* Miscellenaous */}
-                    {customChargesList.map(c => (
-                       <div key={c.id} className="py-2 flex justify-between text-slate-400">
-                         <span>{c.name} {c.isMonthly ? `(${periodMonths}x)` : '(Flat)'}</span>
-                         <span className="font-mono text-slate-300">NRs. {(Number(c.amount || 0) * (c.isMonthly ? periodMonths : 1)).toLocaleString()}</span>
-                       </div>
-                    ))}
                   </div>
                 </div>
               </div>
@@ -2868,17 +3842,7 @@ export default function RemitBillsGeneratorTab({
               <div className="flex justify-between items-center">
                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Total cost shown to Guardian</span>
                 <span className="text-xl font-mono font-black text-emerald-400">
-                  NRs. {(
-                    (includeTuition ? preview.tuition * periodMonths : 0) +
-                    (includeTransport && preview.transport > 0 ? preview.transport * transportMultiplier : 0) +
-                    (includeComputer && preview.computer > 0 ? preview.computer * computerMultiplier : 0) +
-                    (includeAcademy ? Number(academyFeeRate || 0) * periodMonths : 0) +
-                    (includeAnnual ? preview.annual : 0) +
-                    (includeAdmission ? preview.admission : 0) +
-                    (includeExam ? preview.exam : 0) +
-                    customChargesList.reduce((acc, c) => acc + (Number(c.amount || 0) * (c.isMonthly ? periodMonths : 1)), 0) -
-                    (preview.scholarship * periodMonths)
-                  ).toLocaleString()}
+                  NRs. {(billingPlan.sandboxPreview?.totalAmount ?? 0).toLocaleString()}
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 leading-normal">
@@ -2887,6 +3851,29 @@ export default function RemitBillsGeneratorTab({
             </div>
           </div>
         </div>
+      </div>
+      )}
+
+      {/* Subtab 3: 12-Month Academic Matrix */}
+      {activeSubTab === 'matrix' && (
+        <AcademicYearBillingMatrix
+          students={students}
+          remitBills={remitBills}
+          classes={classes}
+          selectedClass={selectedClass || classes[0] || '1'}
+          onSelectClass={cls => setSelectedClass(cls)}
+          academicYear={currentAcademicYear}
+          onQuickGenerateMonth={(cls, month) => {
+            setSelectedClass(cls);
+            setGenerationMode('class');
+            setSelectedStudentId('');
+            setStartMonth(month);
+            handlePeriodMonthsChange(1);
+            setActiveSubTab('generate');
+          }}
+          onViewBillDetails={bill => setPrintingBill(bill)}
+          onOpenVoidModal={bill => setVoidingBill(bill)}
+        />
       )}
 
       {/* MODAL 1: Realistic Print-Friendly Bill view */}
@@ -2951,7 +3938,7 @@ export default function RemitBillsGeneratorTab({
                 </div>
                 <div className="text-right">
                   <h3 className="text-base font-mono font-black text-[#1B4F72] leading-none uppercase">{printingBill.billNo}</h3>
-                  <p className="text-[10px] text-slate-400 mt-1">Issue Date: {printingBill.createdAt} (BS)</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Issue Date: {typeof printingBill.createdAt === 'object' && printingBill.createdAt !== null ? (printingBill.createdAt.seconds ? formatBSDate(new Date(printingBill.createdAt.seconds * 1000)) : 'N/A') : String(printingBill.createdAt || 'N/A')} (BS)</p>
                   <p className="text-[10px] text-slate-400">Due Date: Within 15 Days</p>
                 </div>
               </div>
@@ -3000,17 +3987,17 @@ export default function RemitBillsGeneratorTab({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 font-medium">
-                    {printingBill.itemizedCharges.map((item, index) => (
+                    {formatRemitBillItems(printingBill.itemizedCharges).map((item, index) => (
                       <tr key={index}>
                         <td className="py-2.5 font-bold text-slate-700">{item.name}</td>
-                        <td className="py-2.5 text-right font-mono text-slate-500">NRs. {item.rate.toLocaleString()}</td>
-                        <td className="py-2.5 text-center font-bold text-slate-600">{item.months}</td>
-                        <td className="py-2.5 text-right font-mono font-bold text-slate-800 pr-2">NRs. {item.total.toLocaleString()}</td>
+                        <td className="py-2.5 text-right font-mono text-slate-500">{item.rateStr}</td>
+                        <td className="py-2.5 text-center font-bold text-slate-600">{item.durationStr}</td>
+                        <td className="py-2.5 text-right font-mono font-bold text-slate-800 pr-2">{item.totalStr}</td>
                       </tr>
                     ))}
                     <tr className="font-black bg-slate-50/50 border-t border-slate-200">
                       <td colSpan={3} className="py-3 px-3 uppercase tracking-wider text-[10px] text-slate-500">Gross Total Outstanding Payable</td>
-                      <td className="py-3 text-right font-mono text-[#1B4F72] text-sm pr-2">NRs. {printingBill.totalAmount.toLocaleString()}</td>
+                      <td className="py-3 text-right font-mono text-[#1B4F72] text-sm pr-2">NRs. {(printingBill?.totalAmount || 0).toLocaleString()}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -3039,7 +4026,7 @@ export default function RemitBillsGeneratorTab({
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest pl-2">Parent / Depositer signature</span>
                   </div>
                   <div className="text-right">
-                    <span className="font-mono text-[9px] text-[#1B4F72] block pb-0.5 font-bold">Issued by: {printingBill.createdBy}</span>
+                    <span className="font-mono text-[9px] text-[#1B4F72] block pb-0.5 font-bold">Issued by: {formatIssuedBy(printingBill.createdBy)}</span>
                     <div className="w-36 border-b border-dashed border-slate-400 mt-6 pb-1 ml-auto"></div>
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest pr-2">Cashier / Bill Generator</span>
                   </div>
@@ -3141,17 +4128,17 @@ export default function RemitBillsGeneratorTab({
 
                     {/* Cost Breakdown Lines */}
                     <div className="space-y-1.5 pt-1.5">
-                      {payingBill.itemizedCharges.map((c, i) => (
+                      {formatRemitBillItems(payingBill.itemizedCharges).map((c, i) => (
                         <div key={i} className="flex justify-between text-xs text-slate-600 font-medium">
-                          <span className="text-slate-500">{c.name} ({c.months}M):</span>
-                          <span className="font-bold text-slate-700">NRs. {c.total.toLocaleString()}</span>
+                          <span className="text-slate-500">{c.name}{c.months > 0 ? ` (${c.months}M)` : ''}:</span>
+                          <span className="font-bold text-slate-700">{c.totalStr}</span>
                         </div>
                       ))}
                     </div>
 
                     <div className="border-t border-indigo-100 pt-2 flex justify-between items-center text-xs font-black">
                       <span className="text-indigo-600 uppercase tracking-wider">Current Amount:</span>
-                      <span className="text-indigo-800 text-sm font-mono">NRs. {currentAmount.toLocaleString()}</span>
+                      <span className="text-indigo-800 text-sm font-mono">NRs. {(currentAmount || 0).toLocaleString()}</span>
                     </div>
                   </div>
 
@@ -3180,13 +4167,13 @@ export default function RemitBillsGeneratorTab({
                                 <span className="font-mono text-amber-700 font-black block text-[10px]">{b.billNo}</span>
                                 <span className="text-[9px] text-slate-400">{b.billingPeriod} ({b.periodMonths} M)</span>
                               </div>
-                              <span className="font-mono text-slate-850 font-black">NRs. {b.totalAmount.toLocaleString()}</span>
+                              <span className="font-mono text-slate-850 font-black">NRs. {(b?.totalAmount || 0).toLocaleString()}</span>
                             </div>
                           ))}
                         </div>
                         <div className="flex justify-between items-center pt-1 text-xs font-black">
                           <span className="text-amber-700 uppercase tracking-wider">Total Back Due:</span>
-                          <span className="text-amber-800 font-mono">NRs. {totalBackDue.toLocaleString()}</span>
+                          <span className="text-amber-800 font-mono">NRs. {(totalBackDue || 0).toLocaleString()}</span>
                         </div>
                       </div>
                     ) : (
@@ -3230,21 +4217,56 @@ export default function RemitBillsGeneratorTab({
                     <div className="bg-white p-4 border border-slate-205 rounded-xl space-y-2 shadow-2xs font-bold text-xs text-slate-650">
                       <div className="flex justify-between">
                         <span>Current Remittance Fee:</span>
-                        <span className="font-mono text-slate-850">NRs. {currentAmount.toLocaleString()}</span>
+                        <span className="font-mono text-slate-850">NRs. {(currentAmount || 0).toLocaleString()}</span>
                       </div>
 
                       {totalBackDue > 0 && (
                         <div className="flex justify-between text-amber-700">
                           <span>Historical Back Due:</span>
                           <span className="font-mono">
-                            {settleMode === 'all' ? `+ NRs. ${totalBackDue.toLocaleString()}` : `NRs. ${totalBackDue.toLocaleString()} (Skipped)`}
+                            {settleMode === 'all' ? `+ NRs. ${(totalBackDue || 0).toLocaleString()}` : `NRs. ${(totalBackDue || 0).toLocaleString()} (Skipped)`}
                           </span>
                         </div>
                       )}
 
                       <div className="border-t border-slate-200 pt-2.5 flex justify-between items-center font-black text-sm">
                         <span className="text-[#1B4F72] uppercase tracking-wide">TOTAL DUE:</span>
-                        <span className="font-mono text-[#1B4F72] text-base">NRs. {grandTotal.toLocaleString()}</span>
+                        <span className="font-mono text-[#1B4F72] text-base">NRs. {(grandTotal || 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    {/* Quick Payment Presets */}
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1 block">Quick Pay Amount</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setCashReceived(String(grandTotal))}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] font-black uppercase transition cursor-pointer"
+                        >
+                          Full: NRs. {(grandTotal || 0).toLocaleString()}
+                        </button>
+                        {(payingBill.periodMonths || 1) > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const oneMonthAmt = Math.round(currentAmount / (payingBill.periodMonths || 1));
+                              setCashReceived(String(oneMonthAmt));
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-800 text-[10px] font-black uppercase transition cursor-pointer"
+                          >
+                            1 Month: NRs. {Math.round(currentAmount / (payingBill.periodMonths || 1)).toLocaleString()}
+                          </button>
+                        )}
+                        {totalBackDue > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCashReceived(String(currentAmount))}
+                            className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-black uppercase transition cursor-pointer"
+                          >
+                            Current Only: NRs. {(currentAmount || 0).toLocaleString()}
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -3254,24 +4276,115 @@ export default function RemitBillsGeneratorTab({
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-xs text-slate-400 font-mono">NRs.</span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           required
                           placeholder="Enter physical cash"
                           value={cashReceived}
-                          onChange={e => setCashReceived(e.target.value)}
+                          onKeyDown={handleDigitsOnlyKeyDown}
+                          onChange={e => setCashReceived(sanitizeDigitsOnly(e.target.value))}
                           className="w-full pl-12 pr-4 py-3 border border-slate-300 rounded-xl outline-none focus:ring-4 focus:ring-emerald-500/15 focus:border-[#1B4F72] text-[#1B4F72] font-black text-center text-[15px]"
                         />
                       </div>
-                      {Number(cashReceived || 0) < grandTotal ? (
-                        <p className="text-[10px] text-red-500 font-bold pl-1 mt-1 animate-pulse">
-                          ⚠️ Received is less than NRs. {grandTotal.toLocaleString()}
-                        </p>
-                      ) : (
-                        <div className="flex justify-between items-center text-[11px] font-semibold text-emerald-700 bg-emerald-50 p-2 border border-emerald-100 rounded-lg mt-1.5 animate-in fade-in">
-                          <span>Change / Refund back:</span>
-                          <span className="font-mono font-black">NRs. {Math.max(0, Number(cashReceived || 0) - grandTotal).toLocaleString()}</span>
-                        </div>
-                      )}
+
+                      {/* Live Allocation & Month Clearance Preview */}
+                      {Number(cashReceived || 0) > 0 && (() => {
+                        const paidNum = Number(cashReceived || 0);
+                        const isPartial = paidNum < grandTotal;
+                        const isOverpaid = paidNum > grandTotal;
+                        const excess = paidNum - grandTotal;
+                        const coveredMonths = payingBill.coveredMonths || extractCoveredMonthsFromBill(payingBill);
+                        const monthCount = Math.max(1, coveredMonths.length);
+                        const approxPerMonth = currentAmount / monthCount;
+
+                        let runningCash = paidNum;
+                        // Deduct back due if all mode
+                        if (settleMode === 'all' && totalBackDue > 0) {
+                          runningCash = Math.max(0, runningCash - totalBackDue);
+                        }
+
+                        return (
+                          <div className="space-y-2 mt-2 p-3 bg-slate-100/70 border border-slate-200 rounded-xl text-xs">
+                            <div className="flex items-center justify-between font-black text-[10px] uppercase">
+                              <span className="text-slate-600">Month-Wise Clearance Preview</span>
+                              <span className={isPartial ? 'text-amber-700' : 'text-emerald-700'}>
+                                {isPartial ? 'Partial Clearance' : 'Full Clearance'}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5">
+                              {coveredMonths.map((m, idx) => {
+                                const monthNeeded = approxPerMonth;
+                                const monthPaid = Math.min(monthNeeded, Math.max(0, runningCash));
+                                runningCash -= monthPaid;
+                                const isFull = monthPaid >= monthNeeded;
+                                const isPart = monthPaid > 0 && monthPaid < monthNeeded;
+
+                                return (
+                                  <div
+                                    key={m}
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 ${
+                                      isFull
+                                        ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                                        : isPart
+                                        ? 'bg-blue-100 border-blue-300 text-blue-800'
+                                        : 'bg-amber-50 border-amber-200 text-amber-700'
+                                    }`}
+                                  >
+                                    <span>{m}</span>
+                                    <span>
+                                      {isFull ? '✓ Full' : isPart ? `NRs. ${Math.round(monthPaid)}` : 'Due'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {isPartial && (
+                              <p className="text-[10px] text-amber-800 font-semibold mt-1">
+                                Remaining Due Balance: <strong>NRs. {((grandTotal - paidNum) || 0).toLocaleString()}</strong>
+                              </p>
+                            )}
+
+                            {isOverpaid && (
+                              <div className="space-y-2 pt-1 border-t border-slate-200 mt-1">
+                                <div className="flex justify-between items-center text-[10px] font-bold text-emerald-800">
+                                  <span>Excess Tendered:</span>
+                                  <span className="font-mono font-black text-xs">+ NRs. {(excess || 0).toLocaleString()}</span>
+                                </div>
+                                <div className="space-y-1">
+                                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Handle Excess Cash:</span>
+                                  <div className="grid grid-cols-2 gap-1 text-[10px] font-black uppercase">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExcessDecision('ADVANCE')}
+                                      className={`py-1 px-2 rounded-md border text-center transition cursor-pointer ${
+                                        excessDecision === 'ADVANCE'
+                                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                      }`}
+                                    >
+                                      Save as Advance
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setExcessDecision('RETURN')}
+                                      className={`py-1 px-2 rounded-md border text-center transition cursor-pointer ${
+                                        excessDecision === 'RETURN'
+                                          ? 'bg-slate-800 text-white border-slate-900 shadow-2xs'
+                                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                      }`}
+                                    >
+                                      Return Change
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Remarks */}
@@ -3281,7 +4394,7 @@ export default function RemitBillsGeneratorTab({
                         type="text"
                         value={paymentRemarks}
                         onChange={e => setPaymentRemarks(e.target.value)}
-                        placeholder="e.g. Paid by father with cash"
+                        placeholder="e.g. Paid by father with physical cash"
                         className="w-full px-3.5 py-2 border border-slate-200 bg-white rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-[#1B4F72]"
                       />
                     </div>
@@ -3317,11 +4430,13 @@ export default function RemitBillsGeneratorTab({
                     </button>
                     <button
                       type="submit"
-                      disabled={processingPayment || !isSignVerified || Number(cashReceived || 0) < grandTotal}
+                      disabled={processingPayment || !isSignVerified || Number(cashReceived || 0) <= 0}
                       className="px-5 py-2.5 bg-[#1B4F72] hover:bg-[#143d59] text-white disabled:bg-slate-300 disabled:text-slate-500 rounded-xl font-bold inline-flex items-center gap-1.5 shadow-md cursor-pointer text-xs uppercase tracking-wide transition-all"
                     >
                       {processingPayment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                      Settle Receipt
+                      {Number(cashReceived || 0) >= grandTotal
+                        ? 'Settle Receipt & Clear Bill'
+                        : `Record Partial Payment (NRs. ${Number(cashReceived || 0).toLocaleString()})`}
                     </button>
                   </div>
                 </form>
@@ -3404,6 +4519,70 @@ export default function RemitBillsGeneratorTab({
           </div>
         </div>,
         document.body
+      )}
+
+      {/* Void and Reissue Modal */}
+      {voidingBill && (
+        <VoidRemitBillModal
+          bill={voidingBill}
+          operatorName={formatIssuedBy(adminName)}
+          onClose={() => setVoidingBill(null)}
+          onSuccess={(voidedBillId, shouldReissue) => {
+            const b = voidingBill;
+            setVoidingBill(null);
+            if (shouldReissue && b) {
+              setSelectedClass(b.class);
+              setGenerationMode('student');
+              setSelectedStudentId(b.studentId);
+              const months = extractCoveredMonthsFromBill(b);
+              const firstM = months[0] || 'Baisakh';
+              setStartMonth(firstM);
+              handlePeriodMonthsChange(months.length || 1);
+              setReissueContext({
+                fromBillNo: b.billNo,
+                studentName: b.studentName
+              });
+              setActiveSubTab('generate');
+              setSuccessMsg(`Bill #${b.billNo} marked as VOID. Ready to reissue replacement bill for ${b.studentName}.`);
+            } else {
+              setSuccessMsg(`Bill #${voidedBillId} marked as VOID. Covered months are released for re-billing.`);
+            }
+            onRefresh();
+          }}
+        />
+      )}
+      {/* Authorized Override Modal */}
+      {showAuthorizedOverrideModal && (
+        <AuthorizedOverrideModal
+          isOpen={showAuthorizedOverrideModal}
+          onClose={() => setShowAuthorizedOverrideModal(false)}
+          onConfirm={(reason, passcode) => {
+            setAuthorizedOverrideInfo({ reason, passcode });
+            setSuccessMsg(`Administrative override confirmed: "${reason}". You may now issue the authorized supplementary bill.`);
+          }}
+          studentCount={targetStudentsForGen.length}
+          monthsText={periodCalc.targetMonths.join(', ')}
+        />
+      )}
+
+      {/* Authoritative Billing Coverage Reconciliation Modal */}
+      {showReconciliationModal && (
+        <BillingCoverageReconciliationModal
+          isOpen={showReconciliationModal}
+          onClose={() => setShowReconciliationModal(false)}
+          students={students}
+          currentAcademicYear={currentAcademicYear}
+          remitBills={remitBills}
+          initialStudentId={reconcileStudentId}
+          onViewBillDetails={(bill) => {
+            setPrintingBill(bill);
+            setShowReconciliationModal(false);
+          }}
+          onOpenVoidModal={(bill) => {
+            setVoidingBill(bill);
+            setShowReconciliationModal(false);
+          }}
+        />
       )}
     </div>
   );

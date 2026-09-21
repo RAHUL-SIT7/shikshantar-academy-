@@ -1,28 +1,82 @@
-import React, { useState, useEffect } from 'react';
-import { History, Wallet, CreditCard, AlertCircle, FileDown, Receipt, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  History, 
+  Wallet, 
+  CreditCard, 
+  AlertCircle, 
+  FileDown, 
+  Receipt, 
+  FileText, 
+  ChevronDown, 
+  ChevronUp, 
+  Sparkles, 
+  ShieldCheck, 
+  CheckCircle2, 
+  Clock, 
+  Coins, 
+  ArrowUpRight, 
+  BookOpen, 
+  Award, 
+  GraduationCap, 
+  Calendar,
+  Layers,
+  X
+} from 'lucide-react';
 import { db, auth } from '../firebase';
-import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { toPng } from 'html-to-image';
-import jsPDF from 'jspdf';
-import { useRef } from 'react';
-import logoImage from '../assets/logo.png';
+import CashReceiptModal, { CashReceiptData } from '../components/fee_management/CashReceiptModal';
+import { getSchoolLogoBase64 } from '../lib/logoHelper';
 
-const MONTHS = ['Baisakh', 'Jestha', 'Asar', 'Shrawan', 'Bhadra', 'Ashwin', 'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'];
+// Standard 12 Nepali Academic Months in Canonical Order
+const NEPALI_ACADEMIC_MONTHS = [
+  'Baisakh',
+  'Jestha',
+  'Ashadh',
+  'Shrawan',
+  'Bhadra',
+  'Ashwin',
+  'Kartik',
+  'Mangsir',
+  'Poush',
+  'Magh',
+  'Falgun',
+  'Chaitra'
+];
+
+// Helper to normalize month names (e.g. Asar -> Ashadh)
+const normalizeMonthName = (m: string): string => {
+  const clean = (m || '').trim().toLowerCase();
+  if (clean.includes('baisak')) return 'Baisakh';
+  if (clean.includes('jest')) return 'Jestha';
+  if (clean.includes('asar') || clean.includes('ashad')) return 'Ashadh';
+  if (clean.includes('shrawan') || clean.includes('srawan')) return 'Shrawan';
+  if (clean.includes('bhadra') || clean.includes('bhadau')) return 'Bhadra';
+  if (clean.includes('ashwin') || clean.includes('asoj') || clean.includes('aswin')) return 'Ashwin';
+  if (clean.includes('kartik')) return 'Kartik';
+  if (clean.includes('mangsir') || clean.includes('mangs')) return 'Mangsir';
+  if (clean.includes('poush') || clean.includes('paush') || clean.includes('pus')) return 'Poush';
+  if (clean.includes('magh')) return 'Magh';
+  if (clean.includes('falgun') || clean.includes('fagun')) return 'Falgun';
+  if (clean.includes('chaitra') || clean.includes('chait')) return 'Chaitra';
+  return m;
+};
 
 function getMonthsCovered(billingPeriod: string): string[] {
   if (!billingPeriod) return [];
   
-  // Find all standard month names mentioned in the text
   const foundMonths: { month: string; index: number }[] = [];
-  MONTHS.forEach(m => {
-    const idx = billingPeriod.indexOf(m);
+  NEPALI_ACADEMIC_MONTHS.forEach(m => {
+    // Check both standard name and normalized aliases
+    let idx = billingPeriod.indexOf(m);
+    if (idx === -1 && m === 'Ashadh') {
+      idx = billingPeriod.indexOf('Asar');
+    }
     if (idx !== -1) {
       foundMonths.push({ month: m, index: idx });
     }
   });
   
-  // Sort by order of occurrence in the string to identify start and end accurately
   foundMonths.sort((a, b) => a.index - b.index);
 
   if (foundMonths.length === 1) {
@@ -30,22 +84,20 @@ function getMonthsCovered(billingPeriod: string): string[] {
   } else if (foundMonths.length >= 2) {
     const startM = foundMonths[0].month;
     const endM = foundMonths[foundMonths.length - 1].month;
-    const startIdx = MONTHS.indexOf(startM);
-    const endIdx = MONTHS.indexOf(endM);
+    const startIdx = NEPALI_ACADEMIC_MONTHS.indexOf(startM);
+    const endIdx = NEPALI_ACADEMIC_MONTHS.indexOf(endM);
     if (startIdx !== -1 && endIdx !== -1) {
       if (startIdx <= endIdx) {
-        return MONTHS.slice(startIdx, endIdx + 1);
+        return NEPALI_ACADEMIC_MONTHS.slice(startIdx, endIdx + 1);
       } else {
-        // Wrap-around
-        return [...MONTHS.slice(startIdx), ...MONTHS.slice(0, endIdx + 1)];
+        return [...NEPALI_ACADEMIC_MONTHS.slice(startIdx), ...NEPALI_ACADEMIC_MONTHS.slice(0, endIdx + 1)];
       }
     }
   }
   
-  // Fallback
   const covered: string[] = [];
-  MONTHS.forEach(m => {
-    if (billingPeriod.includes(m)) {
+  NEPALI_ACADEMIC_MONTHS.forEach(m => {
+    if (billingPeriod.includes(m) || (m === 'Ashadh' && billingPeriod.includes('Asar'))) {
       covered.push(m);
     }
   });
@@ -55,39 +107,35 @@ function getMonthsCovered(billingPeriod: string): string[] {
 export default function Account() {
   const [studentRecord, setStudentRecord] = useState<any>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [remitBills, setRemitBills] = useState<any[]>([]);
+  const [advances, setAdvances] = useState<any[]>([]);
   const [feeStructure, setFeeStructure] = useState<any>(null);
-  const [receipt, setReceipt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const receiptRef = useRef<HTMLDivElement>(null);
 
-  const downloadReceipt = async () => {
-    if (!receiptRef.current) return;
-    try {
-      const el = receiptRef.current;
-      const w = el.offsetWidth;
-      const h = el.scrollHeight;
-      const canvas = await toPng(el, { pixelRatio: 2 });
-      const dataUrl = canvas;
-      const pdfWidth = 210;
-      const pdfHeight = (h * pdfWidth) / w;
-      const pdf = new jsPDF('p', 'mm', [pdfWidth, pdfHeight]);
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Receipt_${receipt.id}.pdf`);
-    } catch (err) {
-      console.error('Failed to generate PDF', err);
-    }
+  // Expandable UI States
+  const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({});
+  const [selectedReceipt, setSelectedReceipt] = useState<CashReceiptData | null>(null);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [selectedBillForDetail, setSelectedBillForDetail] = useState<any | null>(null);
+  const [selectedPaymentForDetail, setSelectedPaymentForDetail] = useState<any | null>(null);
+
+  const toggleMonthExpand = (month: string) => {
+    setExpandedMonths(prev => ({ ...prev, [month]: !prev[month] }));
   };
 
   useEffect(() => {
     let unsubAuth = () => {};
     let unsubSettings = () => {};
+    let unsubUser = () => {};
     let unsubFees1 = () => {};
     let unsubFees2 = () => {};
     let unsubTx1 = () => {};
     let unsubTx2 = () => {};
     let unsubBills1 = () => {};
     let unsubBills2 = () => {};
+    let unsubAdv1 = () => {};
+    let unsubAdv2 = () => {};
 
     unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -109,22 +157,35 @@ export default function Account() {
           return;
         }
 
-        const userData = userDoc.data();
-        if (userData.role !== 'student') {
+        const initialUserData = userDoc.data();
+        if (initialUserData.role !== 'student') {
           setStudentRecord(null);
           setLoading(false);
           return;
         }
 
-        if (userData.status === 'pending') {
+        if (initialUserData.status === 'pending') {
           setStudentRecord({ isPending: true });
           setLoading(false);
           return;
         }
 
-        const customId = userData.studentId;
+        const customId = initialUserData.studentId;
 
-        // 1. Listen to settings/fee_structure
+        // 1. Listen to user profile real-time updates (e.g. advance balance, scholarship changes)
+        unsubUser = onSnapshot(userDocRef, (snap) => {
+          if (snap.exists()) {
+            const freshData = snap.data();
+            setStudentRecord((prev: any) => ({
+              ...(prev || {}),
+              ...freshData,
+              id: studentId,
+              name: freshData.fullName || freshData.name
+            }));
+          }
+        });
+
+        // 2. Listen to settings/fee_structure
         unsubSettings = onSnapshot(doc(db, 'settings', 'fee_structure'), (settingsSnap) => {
           if (settingsSnap.exists()) {
             const data = settingsSnap.data();
@@ -132,12 +193,12 @@ export default function Account() {
 
             const normalize = (name: string) =>
               (name || '').toLowerCase().replace(/^class\s+/, '').replace(/\s+/g, '').trim();
-            const targetClass = normalize(userData.class);
+            const targetClass = normalize(initialUserData.class);
             const structure = structs.find((s: any) => normalize(s.className) === targetClass) || { tuition: '1000', annual: '12000' };
 
             let tuitionFeeNum = Number(String(structure.tuition || '1000').replace(/[^0-9.]/g, ''));
-            if (userData.scholarshipStatus === 'Provided' && userData.scholarshipAmount) {
-              const deduction = Number(userData.scholarshipAmount);
+            if (initialUserData.scholarshipStatus === 'Provided' && initialUserData.scholarshipAmount) {
+              const deduction = Number(initialUserData.scholarshipAmount);
               tuitionFeeNum = Math.max(0, tuitionFeeNum - deduction);
             }
             structure.tuitionFee = tuitionFeeNum;
@@ -149,7 +210,7 @@ export default function Account() {
           }
         });
 
-        // 2. Setup queries for fees, transactions, remitBills
+        // 3. Setup real-time queries for fees, transactions, remitBills, student_advances
         const qFees1 = query(collection(db, 'studentFees'), where('studentId', '==', studentId));
         const qFees2 = customId && customId !== studentId ? query(collection(db, 'studentFees'), where('studentId', '==', customId)) : null;
 
@@ -159,61 +220,93 @@ export default function Account() {
         const qBills1 = query(collection(db, 'remitBills'), where('studentId', '==', studentId));
         const qBills2 = customId && customId !== studentId ? query(collection(db, 'remitBills'), where('studentId', '==', customId)) : null;
 
+        const qAdv1 = query(collection(db, 'student_advances'), where('studentId', '==', studentId));
+        const qAdv2 = customId && customId !== studentId ? query(collection(db, 'student_advances'), where('studentId', '==', customId)) : null;
+
         let feesList1: any[] = [];
         let feesList2: any[] = [];
         let txList1: any[] = [];
         let txList2: any[] = [];
         let billsList1: any[] = [];
         let billsList2: any[] = [];
+        let advList1: any[] = [];
+        let advList2: any[] = [];
 
         const updateState = () => {
           const combinedFees = Array.from(new Map([...feesList1, ...feesList2].map(item => [item.id || item.month, item])).values());
           const combinedTx = Array.from(new Map([...txList1, ...txList2].map(item => [item.id, item])).values());
           const combinedBills = Array.from(new Map([...billsList1, ...billsList2].map(item => [item.id, item])).values());
+          const combinedAdv = Array.from(new Map([...advList1, ...advList2].map(item => [item.id, item])).values());
 
-          setStudentRecord({
-            ...userData,
+          setStudentRecord((prev: any) => ({
+            ...(prev || initialUserData),
             id: studentId,
-            name: userData.fullName || userData.name,
+            name: (prev?.fullName || prev?.name) || initialUserData.fullName || initialUserData.name,
             fees: combinedFees,
             remitBills: combinedBills
-          });
+          }));
           setTransactions(combinedTx);
+          setRemitBills(combinedBills);
+          setAdvances(combinedAdv);
           setLoading(false);
         };
 
         unsubFees1 = onSnapshot(qFees1, (snap) => {
-          feesList1 = snap.docs.map(d => d.data());
+          feesList1 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           updateState();
         });
 
         if (qFees2) {
           unsubFees2 = onSnapshot(qFees2, (snap) => {
-            feesList2 = snap.docs.map(d => d.data());
+            feesList2 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             updateState();
           });
         }
 
+        // MIGRATION-SAFE STATUS FILTER:
+        // Current transactions MUST have status 'SUCCESS' or 'OVERRIDE_SUCCESS'.
+        // For unmigrated historical records where status is undefined, verify it has a positive amount
+        // and is not marked cancelled/refunded, voided, or drafted.
+        const isRecognizedActiveRevenue = (t: any): boolean => {
+          if (t.status === 'SUCCESS' || t.status === 'OVERRIDE_SUCCESS') return true;
+          if (!t.status) {
+            return Boolean(Number(t.amount || 0) > 0 && !t.cancelledAt && !t.refundedAt && !t.isDraft && t.status !== 'CANCELLED' && t.status !== 'REFUNDED' && t.status !== 'VOID');
+          }
+          return false;
+        };
+
         unsubTx1 = onSnapshot(qTx1, (snap) => {
-          txList1 = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((t: any) => t.status === 'SUCCESS' || !t.status);
+          txList1 = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(isRecognizedActiveRevenue);
           updateState();
         });
 
         if (qTx2) {
           unsubTx2 = onSnapshot(qTx2, (snap) => {
-            txList2 = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((t: any) => t.status === 'SUCCESS' || !t.status);
+            txList2 = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(isRecognizedActiveRevenue);
             updateState();
           });
         }
 
         unsubBills1 = onSnapshot(qBills1, (snap) => {
-          billsList1 = snap.docs.map(d => d.data());
+          billsList1 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           updateState();
         });
 
         if (qBills2) {
           unsubBills2 = onSnapshot(qBills2, (snap) => {
-            billsList2 = snap.docs.map(d => d.data());
+            billsList2 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            updateState();
+          });
+        }
+
+        unsubAdv1 = onSnapshot(qAdv1, (snap) => {
+          advList1 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          updateState();
+        });
+
+        if (qAdv2) {
+          unsubAdv2 = onSnapshot(qAdv2, (snap) => {
+            advList2 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             updateState();
           });
         }
@@ -227,6 +320,7 @@ export default function Account() {
 
     return () => {
       unsubAuth();
+      unsubUser();
       unsubSettings();
       unsubFees1();
       unsubFees2();
@@ -234,9 +328,12 @@ export default function Account() {
       unsubTx2();
       unsubBills1();
       unsubBills2();
+      unsubAdv1();
+      unsubAdv2();
     };
   }, []);
 
+  // 12-Month Canonical Detailed Academic Ledger
   const detailedLedger = React.useMemo(() => {
     if (!studentRecord) return [];
 
@@ -250,7 +347,6 @@ export default function Account() {
     const realFees = studentRecord.fees || [];
     const studentRemitBills = studentRecord.remitBills || [];
 
-    // Optional Computer fee: check if they paid it in any month (via remitBills or legacy studentFees)
     const hasPaidComputerFeeInAnyMonth = realFees.some((f: any) => {
       const cVal = f.breakdown?.computer !== undefined ? Number(f.breakdown.computer) : 0;
       return cVal > 0 && f.status === 'paid';
@@ -260,25 +356,21 @@ export default function Account() {
     });
 
     const monthlyComputerFee = hasPaidComputerFeeInAnyMonth ? Number(studentRecord.computerFee || feeStructure?.computerFee || 500) : 0;
-
-    // Check if scholarship applies
     const hasScholarship = studentRecord.scholarshipStatus === 'Provided';
     const scholarshipAmount = hasScholarship ? Number(studentRecord.scholarshipAmount || 0) : 0;
 
-    return MONTHS.map((monthName, idx) => {
-      // Find official generated remitBill covering this month
+    return NEPALI_ACADEMIC_MONTHS.map((monthName, idx) => {
+      // 1. Find official generated remitBill covering this month
       const matchingBill = studentRemitBills.find((b: any) => {
+        if (b.status === 'void') return false; // Ignore void bills from active calculation
         const covered = getMonthsCovered(b.billingPeriod);
-        return covered.some((m: string) => m.trim().toLowerCase() === monthName.toLowerCase());
+        return covered.some((m: string) => normalizeMonthName(m) === monthName);
       });
 
-      // Find standard legacy fee record if any
+      // 2. Find standard legacy fee record if any
       const realData = realFees.find((f: any) => {
-        const mName = f.month ? f.month.trim().toLowerCase() : '';
-        return mName === monthName.toLowerCase() || 
-               (monthName === 'Baisakh' && mName.includes('baisak')) ||
-               (monthName === 'Jestha' && mName.includes('jest')) ||
-               (monthName === 'Asar' && mName.includes('asar'));
+        const mName = normalizeMonthName(f.month || '');
+        return mName === monthName;
       });
 
       let items: any[] = [];
@@ -288,28 +380,36 @@ export default function Account() {
       let isBilled = false;
       let ledgerPageNo = '';
       let isFullyPaid = false;
+      let isPartial = false;
 
       if (matchingBill) {
         isBilled = true;
         ledgerPageNo = matchingBill.billNo || 'RMT-LEDGER';
-        isFullyPaid = matchingBill.status === 'paid';
+        const billTotal = Number(matchingBill.totalAmount || 0);
+        const billPaid = Number(matchingBill.paidAmount || 0);
+        isFullyPaid = matchingBill.status === 'paid' || (billPaid >= billTotal && billTotal > 0);
+        isPartial = matchingBill.status === 'partial' || (billPaid > 0 && billPaid < billTotal);
 
         const covered = getMonthsCovered(matchingBill.billingPeriod);
         const numMonths = covered.length > 0 ? covered.length : 1;
         
-        matchingBill.itemizedCharges.forEach((charge: any) => {
-          const proRatedAmt = Number(charge.total || 0) / numMonths;
-          if (proRatedAmt !== 0) {
-            items.push({
-              name: charge.name,
-              amount: proRatedAmt,
-              isCredit: proRatedAmt < 0
-            });
-          }
-        });
+        if (Array.isArray(matchingBill.itemizedCharges) && matchingBill.itemizedCharges.length > 0) {
+          matchingBill.itemizedCharges.forEach((charge: any) => {
+            const chargeTotal = Number(charge.total || 0);
+            const proRatedAmt = charge.months && charge.months > 0 ? (charge.rate || (chargeTotal / charge.months)) : (chargeTotal / numMonths);
+            if (proRatedAmt !== 0) {
+              items.push({
+                name: charge.name,
+                amount: proRatedAmt,
+                rate: charge.rate,
+                isCredit: proRatedAmt < 0
+              });
+            }
+          });
+        }
 
-        totalBilled = Number(matchingBill.totalAmount || 0) / numMonths;
-        totalPaid = Number(matchingBill.paidAmount || 0) / numMonths;
+        totalBilled = billTotal / numMonths;
+        totalPaid = billPaid / numMonths;
         totalDue = Math.max(0, totalBilled - totalPaid);
 
       } else if (realData) {
@@ -345,31 +445,21 @@ export default function Account() {
         }
 
         totalBilled = Number(realData.totalFee || realData.totalAmount || 0);
-        totalPaid = Number(realData.paidAmount || 0);
-        totalDue = Number(realData.dueAmount !== undefined ? realData.dueAmount : (realData.status === 'paid' ? 0 : totalBilled));
-        isFullyPaid = totalPaid >= totalBilled || realData.status === 'paid';
+        totalPaid = Number(realData.paidAmount || (realData.status === 'paid' ? totalBilled : 0) || 0);
+        totalDue = Number(realData.dueAmount !== undefined ? realData.dueAmount : (realData.status === 'paid' ? 0 : Math.max(0, totalBilled - totalPaid)));
+        isFullyPaid = realData.status === 'paid' || (totalPaid >= totalBilled && totalBilled > 0);
+        isPartial = realData.status === 'partial' || (totalPaid > 0 && totalPaid < totalBilled);
 
       } else {
+        // Unbilled / upcoming month: No active bill or ledger charges exist in Firestore.
+        // Billed and Due amounts must be 0 (no synthetic estimation).
         isBilled = false;
-        
-        if (tuitionFee > 0) items.push({ name: 'Tuition Fee', amount: tuitionFee });
-        
-        if (monthlyComputerFee > 0) {
-          items.push({ name: 'Computer Fee', amount: monthlyComputerFee });
-        }
-
-        if (resolvedTransportFee > 0) {
-          items.push({ name: 'Transport Fee', amount: resolvedTransportFee });
-        }
-
-        if (scholarshipAmount > 0) {
-          items.push({ name: 'Scholarship Grant', amount: -scholarshipAmount, isCredit: true });
-        }
-
-        totalBilled = Math.max(0, tuitionFee + monthlyComputerFee + resolvedTransportFee - scholarshipAmount);
+        items = [];
+        totalBilled = 0;
         totalPaid = 0;
-        totalDue = totalBilled;
+        totalDue = 0;
         isFullyPaid = false;
+        isPartial = false;
       }
 
       return {
@@ -377,6 +467,7 @@ export default function Account() {
         monthIndex: idx,
         isBilled,
         isFullyPaid,
+        isPartial,
         totalBilled,
         totalPaid,
         totalDue,
@@ -387,721 +478,1140 @@ export default function Account() {
     });
   }, [studentRecord, feeStructure]);
 
-  const breakdownData = React.useMemo(() => {
-    if (!studentRecord || !feeStructure) {
-      return {
-        admissionFee: 0,
-        annualFee: 0,
-        examFee: 0,
-        tuitionFeeAnnual: 0,
-        computerFeeAnnual: 0,
-        transportFeeAnnual: 0,
-        scholarshipAnnual: 0,
-        grossTotal: 10000,
-        hasComputer: false,
-        hasTransport: false
-      };
-    }
+  // Verified Payment Transactions (From canonical `transactions` collection)
+  const studentTransactions = React.useMemo(() => {
+    if (!studentRecord) return [];
+    const list: any[] = [];
+    const seen = new Set<string>();
 
-    const admissionFee = Number(feeStructure.admissionFee || 0);
-    const annualFee = Number(feeStructure.annualFee || 0);
-    const examFee = Number(feeStructure.examFee || 0) * 3; // 3 Term exams in an academic year
-    
-    const tuitionFee = Number(studentRecord.monthlyFee || feeStructure?.tuitionFee || 1000);
-    const tuitionFeeAnnual = tuitionFee * 12;
+    const sId = (studentRecord.id || studentRecord.studentId || '').trim();
+    const sName = (studentRecord.name || '').trim().toLowerCase();
+    const sRoll = String(studentRecord.rollNumber || studentRecord.roll || '').trim();
+    const sClass = String(studentRecord.class || '').trim().toLowerCase();
 
-    const realFees = studentRecord.fees || [];
-    const studentRemitBills = studentRecord.remitBills || [];
+    transactions.forEach((tx: any) => {
+      const matchId = tx.studentId && String(tx.studentId).trim() === sId;
+      const matchName = tx.studentName && String(tx.studentName).trim().toLowerCase() === sName;
+      const matchRoll = sRoll && tx.rollNo && String(tx.rollNo).trim() === sRoll && (!tx.className || String(tx.className).trim().toLowerCase() === sClass);
 
-    const hasPaidComputerFeeInAnyMonth = realFees.some((f: any) => {
-      const cVal = f.breakdown?.computer !== undefined ? Number(f.breakdown.computer) : 0;
-      return cVal > 0 && f.status === 'paid';
-    }) || studentRemitBills.some((b: any) => {
-      const hasComp = b.itemizedCharges?.some((item: any) => item.name.toLowerCase().includes('computer'));
-      return hasComp && b.status === 'paid';
+      if (matchId || matchName || matchRoll) {
+        const key = tx.receipt || tx.receiptNo || tx.id;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const cashReceived = Number(tx.cashReceived !== undefined ? tx.cashReceived : (tx.cashTendered !== undefined ? tx.cashTendered : (tx.amount || 0)));
+          const feeAmountApplied = Number(tx.netPayable !== undefined ? Math.min(tx.netPayable, tx.amountApplied || tx.amount || 0) : (tx.amountApplied || tx.amount || 0));
+          const advanceCreated = Number(tx.advanceCreated || (tx.excessAmount && tx.excessDecision === 'ADVANCE' ? tx.excessAmount : 0));
+          const cashReturned = Number(tx.changeReturned || tx.excessReturned || 0);
+          const due = tx.remainingDue !== undefined ? Number(tx.remainingDue) : (tx.remainingOutstanding !== undefined ? Number(tx.remainingOutstanding) : 0);
+          const isPartial = tx.isPartial !== undefined ? Boolean(tx.isPartial) : (due > 0);
+
+          list.push({
+            id: tx.id || key,
+            receipt: tx.receipt || tx.receiptNo || key,
+            date: tx.date || tx.dateBS || '-',
+            cashReceived,
+            feeAmountApplied,
+            advanceCreated,
+            changeReturned: cashReturned,
+            remainingDue: due,
+            isPartial,
+            particulars: tx.particulars || tx.remarks || tx.billingPeriod || 'Official Cash Receipt',
+            method: tx.method || 'Cash',
+            status: tx.status || 'SUCCESS',
+            remitBillId: tx.remitBillId || tx.billNo || '-',
+            billingPeriod: tx.billingPeriod || tx.remarks || '-',
+            raw: tx
+          });
+        }
+      }
     });
 
-    const monthlyComputerFee = hasPaidComputerFeeInAnyMonth ? Number(studentRecord.computerFee || feeStructure?.computerFee || 500) : 0;
-    const computerFeeAnnual = monthlyComputerFee * 12;
+    return list.sort((a, b) => (b.date > a.date ? 1 : -1));
+  }, [studentRecord, transactions]);
 
-    const isTransportIncluded = studentRecord.hasTransportation === 'Yes' || (studentRecord.transportRoute && studentRecord.transportRoute !== '') || Number(studentRecord.transportFee) > 0;
-    const resolvedTransportFee = isTransportIncluded ? Number(studentRecord.transportFee || 400) : 0;
-    const transportFeeAnnual = resolvedTransportFee * 12;
+  // Financial Totals Computed Directly From Canonical Sources
+  const totalBilledSum = React.useMemo(() => {
+    return detailedLedger.reduce((sum, r) => sum + (Number(r.totalBilled) || 0), 0);
+  }, [detailedLedger]);
 
-    const hasScholarship = studentRecord.scholarshipStatus === 'Provided';
-    const scholarshipAmount = hasScholarship ? Number(studentRecord.scholarshipAmount || 0) : 0;
-    const scholarshipAnnual = scholarshipAmount * 12;
+  const totalPaidSum = React.useMemo(() => {
+    return detailedLedger.reduce((sum, r) => sum + (Number(r.totalPaid) || 0), 0);
+  }, [detailedLedger]);
 
-    const grossTotal = admissionFee + annualFee + examFee + tuitionFeeAnnual + computerFeeAnnual + transportFeeAnnual - scholarshipAnnual;
+  const totalDue = React.useMemo(() => {
+    let due = 0;
+    detailedLedger.forEach((row: any) => {
+      if (row.isBilled && !row.isFullyPaid) {
+        due += row.totalDue;
+      }
+    });
+    return due;
+  }, [detailedLedger]);
 
+  // Advance Credit Balance
+  const availableAdvance = React.useMemo(() => {
+    if (studentRecord?.advanceBalance !== undefined) {
+      return Number(studentRecord.advanceBalance || 0);
+    }
+    return advances
+      .filter((a: any) => a.status === 'ACTIVE' || !a.status)
+      .reduce((sum: number, a: any) => sum + (Number(a.remainingCredit !== undefined ? a.remainingCredit : a.amount) || 0), 0);
+  }, [studentRecord, advances]);
+
+  // Scholarship & Concession Details
+  const scholarshipInfo = React.useMemo(() => {
+    const isProvided = studentRecord?.scholarshipStatus === 'Provided';
+    const amount = isProvided ? Number(studentRecord.scholarshipAmount || 0) : 0;
+    const annualConcession = amount * 12;
+    const reason = studentRecord?.scholarshipReason || studentRecord?.scholarshipRemarks || 'Merit / Special Financial Assistance';
     return {
-      admissionFee,
-      annualFee,
-      examFee,
-      tuitionFeeAnnual,
-      computerFeeAnnual,
-      transportFeeAnnual,
-      scholarshipAnnual,
-      grossTotal,
-      hasComputer: hasPaidComputerFeeInAnyMonth,
-      hasTransport: isTransportIncluded
+      isProvided,
+      monthlyDeduction: amount,
+      annualConcession,
+      reason
     };
-  }, [studentRecord, feeStructure]);
+  }, [studentRecord]);
 
-  if (loading) return <div className="p-20 text-center font-bold text-gray-400 animate-pulse uppercase tracking-widest text-xs">Accessing Secure Ledger...</div>;
-  if (studentRecord?.isPending) return (
-    <div className="bg-white rounded-3xl p-8 md:p-12 text-center shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 max-w-2xl mx-auto mt-8 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-orange-50 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none opacity-60"></div>
-        <div className="relative z-10">
-          <div className="w-24 h-24 bg-gradient-to-br from-orange-50 to-amber-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-white">
-             <AlertCircle className="w-12 h-12 text-orange-500 relative z-10" />
-          </div>
-          <h3 className="text-2xl font-black text-gray-900 mb-3 tracking-tight">Account Pending Approval</h3>
-          <p className="text-gray-500 mb-8 max-w-md mx-auto leading-relaxed">
-            Your account is currently pending approval by the school administration. We couldn't load your financial records yet. Please check back later.
-          </p>
-          <button onClick={() => window.history.back()} className="w-full bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 shadow-md shadow-gray-900/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap">
-              &larr; Go Back
-          </button>
-        </div>
-    </div>
-  );
-  if (error || !studentRecord) return (
-    <div className="bg-white rounded-3xl p-8 md:p-12 text-center shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 max-w-2xl mx-auto mt-8 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-red-50 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none opacity-60"></div>
-        <div className="absolute bottom-0 left-0 w-48 h-48 bg-orange-50 rounded-full blur-3xl -ml-10 -mb-10 pointer-events-none opacity-60"></div>
+  // Previous Academic Year Outstanding (Back Dues)
+  const previousYearOutstanding = React.useMemo(() => {
+    return Number(studentRecord?.previousDue || studentRecord?.previousYearBalance || studentRecord?.backDues || 0);
+  }, [studentRecord]);
 
-        <div className="relative z-10">
-          <div className="w-24 h-24 bg-gradient-to-br from-red-50 to-orange-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-white">
-             <AlertCircle className="w-12 h-12 text-red-300 opacity-50 absolute" />
-             <Wallet className="w-10 h-10 text-red-500 relative z-10" />
-          </div>
-          
-          <h3 className="text-2xl font-black text-gray-900 mb-3 tracking-tight">Account Not Linked</h3>
-          <p className="text-gray-500 mb-8 max-w-md mx-auto leading-relaxed">
-            We couldn't load your financial records. This usually happens if your digital account hasn't been paired with your official school ID.
-          </p>
-          <button onClick={() => window.history.back()} className="w-full bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 shadow-md shadow-gray-900/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap">
-              &larr; Go Back
-          </button>
-        </div>
-    </div>
-  );
+  // Open Receipt Handler for CashReceiptModal
+  const handleOpenReceipt = (txRaw: any) => {
+    const linkedBill = remitBills.find(b => b.id === txRaw.remitBillId || b.billNo === txRaw.remitBillId || b.billNo === txRaw.billNo);
+    
+    const additionalCharges: { purpose: string; amount: number }[] = [];
+    const discounts: { purpose: string; amount: number }[] = [];
+    let baseTuition = 0;
+    
+    if (Array.isArray(txRaw.allocations) && txRaw.allocations.length > 0) {
+      txRaw.allocations.forEach((alloc: any) => {
+        const name = alloc.feeHead || alloc.feeName || alloc.name || 'Fee Charge';
+        const amt = Number(alloc.allocatedAmount || alloc.amount || 0);
+        if (name.toLowerCase().includes('tuition')) {
+          baseTuition += amt;
+        } else if (amt > 0) {
+          additionalCharges.push({ purpose: name, amount: amt });
+        }
+      });
+    } else if (linkedBill && Array.isArray(linkedBill.itemizedCharges)) {
+      linkedBill.itemizedCharges.forEach((item: any) => {
+        const name = item.name || 'Charge';
+        const amt = Number(item.total || 0);
+        if (name.toLowerCase().includes('tuition')) {
+          baseTuition += amt;
+        } else if (amt > 0) {
+          additionalCharges.push({ purpose: name, amount: amt });
+        }
+      });
+    } else {
+      baseTuition = Number(txRaw.netPayable || txRaw.amountApplied || txRaw.amount || 0);
+    }
 
-  const printMonthDetail = (monthData: any) => {
+    const receiptModalData: CashReceiptData = {
+      receiptNo: txRaw.receiptNo || txRaw.receipt || txRaw.id,
+      date: txRaw.date || txRaw.dateBS || 'Current Date',
+      englishDate: txRaw.englishDate,
+      academicYear: txRaw.academicYear || linkedBill?.academicYear || '2083-2084 BS',
+      studentName: txRaw.studentName || studentRecord?.name || 'Student',
+      studentId: txRaw.studentId || studentRecord?.studentId || studentRecord?.id,
+      className: txRaw.class || txRaw.className || studentRecord?.class || 'N/A',
+      rollNo: txRaw.rollNo || studentRecord?.rollNumber || studentRecord?.roll || '',
+      guardianName: studentRecord?.fatherName || studentRecord?.guardianName || studentRecord?.parentName,
+      billingPeriod: txRaw.billingPeriod || linkedBill?.billingPeriod || 'Official Fee Payment',
+      baseTuition: baseTuition,
+      coveredMonths: txRaw.coveredMonths || (linkedBill ? getMonthsCovered(linkedBill.billingPeriod) : []),
+      additionalCharges: additionalCharges,
+      discounts: discounts,
+      totalPayable: Number(txRaw.netPayable !== undefined ? txRaw.netPayable : (txRaw.totalPayable || txRaw.amount || 0)),
+      netPayable: Number(txRaw.netPayable !== undefined ? txRaw.netPayable : (txRaw.totalPayable || txRaw.amount || 0)),
+      cashReceived: Number(txRaw.cashReceived !== undefined ? txRaw.cashReceived : (txRaw.cashTendered !== undefined ? txRaw.cashTendered : (txRaw.amount || 0))),
+      amountApplied: Number(txRaw.amountApplied !== undefined ? txRaw.amountApplied : (txRaw.amount || 0)),
+      remainingOutstanding: Number(txRaw.remainingOutstanding !== undefined ? txRaw.remainingOutstanding : (txRaw.remainingDue || 0)),
+      excessAmount: Number(txRaw.excessAmount || 0),
+      advanceCreated: Number(txRaw.advanceCreated || 0),
+      excessReturned: Number(txRaw.excessReturned || txRaw.changeReturned || 0),
+      changeReturned: Number(txRaw.changeReturned || 0),
+      cashierName: txRaw.cashierName || txRaw.collectedBy || 'School Accountant',
+      remarks: txRaw.remarks || txRaw.particulars || 'Fee Payment Settlement',
+      handwrittenLedgerNo: txRaw.handwrittenLedgerNo || txRaw.ledgerPageNo || ''
+    };
+
+    setSelectedReceipt(receiptModalData);
+    setIsReceiptModalOpen(true);
+  };
+
+  // Printable Audited Statement (Universal Standard Compliant)
+  const printFullStatement = () => {
     if (!studentRecord) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    let itemsHtml = '';
-    monthData.items.forEach((item: any) => {
-      const isCredit = item.isCredit;
-      const amtText = isCredit ? `-NRs. ${Math.abs(item.amount)}` : `NRs. ${item.amount}`;
-      const statusText = monthData.isBilled ? (monthData.isFullyPaid ? 'PAID' : 'DUE') : 'UNBILLED';
-      const statusBg = monthData.isBilled ? (monthData.isFullyPaid ? '#dcfce7' : '#fee2e2') : '#fef3c7';
-      const statusColor = monthData.isBilled ? (monthData.isFullyPaid ? '#15803d' : '#b91c1c') : '#b45309';
+    let ledgerRowsHtml = '';
+    detailedLedger.forEach((r: any) => {
+      const statusLabel = r.isBilled
+        ? (r.isFullyPaid ? 'FULLY PAID' : (r.isPartial ? `PARTIAL (${Math.round((r.totalPaid / (r.totalBilled || 1)) * 100)}%)` : 'UNPAID DUE'))
+        : 'UPCOMING / UNBILLED';
+      const statusBg = r.isBilled
+        ? (r.isFullyPaid ? '#dcfce7; color: #15803d;' : (r.isPartial ? '#fef3c7; color: #b45309;' : '#fee2e2; color: #b91c1c;'))
+        : '#f1f5f9; color: #475569;';
 
-      itemsHtml += `
+      ledgerRowsHtml += `
         <tr>
-          <td style="border: 1px solid #e5e7eb; padding: 12px; font-size: 13px; font-weight: bold; color: #1e293b;">${item.name}</td>
-          <td style="border: 1px solid #e5e7eb; padding: 12px; font-size: 13px; text-align: right; font-weight: black; color: ${isCredit ? '#16a34a' : '#1e293b'};">${amtText}</td>
-          <td style="border: 1px solid #e5e7eb; padding: 12px; font-size: 13px; text-align: center;">
-            <span style="font-weight: 800; font-size: 10px; padding: 4px 10px; border-radius: 9999px; background-color: ${statusBg}; color: ${statusColor}; text-transform: uppercase;">
-              ${statusText}
-            </span>
+          <td style="border: 1px solid #e2e8f0; padding: 8px 12px; font-weight: bold;">${r.month}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-family: monospace;">NRs. ${Math.round(r.totalBilled).toLocaleString()}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-family: monospace; color: #16a34a; font-weight: bold;">NRs. ${Math.round(r.totalPaid).toLocaleString()}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-family: monospace; color: ${r.totalDue > 0 ? '#dc2626' : '#64748b'}; font-weight: bold;">NRs. ${Math.round(r.totalDue).toLocaleString()}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: center;">
+            <span style="font-weight: 800; font-size: 10px; padding: 2px 8px; border-radius: 9999px; background: ${statusBg}">${statusLabel}</span>
           </td>
+          <td style="border: 1px solid #e2e8f0; padding: 8px 12px; font-size: 11px; color: #64748b;">${r.ledgerPageNo || '-'}</td>
         </tr>
       `;
     });
 
-    printWindow.document.write(`
+    let txRowsHtml = '';
+    if (studentTransactions.length === 0) {
+      txRowsHtml = `<tr><td colspan="7" style="border: 1px solid #e2e8f0; padding: 12px; text-align: center; color: #94a3b8; font-style: italic;">No payment transactions recorded yet.</td></tr>`;
+    } else {
+      studentTransactions.forEach((tx: any) => {
+        txRowsHtml += `
+          <tr>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; font-family: monospace;">${tx.date}</td>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; font-weight: bold; font-family: monospace;">${tx.receipt}</td>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-family: monospace;">NRs. ${Number(tx.cashReceived || 0).toLocaleString()}</td>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; font-weight: bold; color: #16a34a; font-family: monospace;">NRs. ${Number(tx.feeAmountApplied || 0).toLocaleString()}</td>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; color: #0284c7; font-family: monospace;">${tx.advanceCreated > 0 ? `NRs. ${Number(tx.advanceCreated).toLocaleString()}` : '-'}</td>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; color: #64748b; font-family: monospace;">${tx.changeReturned > 0 ? `NRs. ${Number(tx.changeReturned).toLocaleString()}` : '-'}</td>
+            <td style="border: 1px solid #e2e8f0; padding: 8px 12px; text-align: center;"><span style="background: #dcfce7; color: #15803d; font-weight: 800; font-size: 10px; padding: 2px 8px; border-radius: 9999px;">SUCCESS</span></td>
+          </tr>
+        `;
+      });
+    }
+
+    const html = `
+      <!DOCTYPE html>
       <html>
-        <head>
-          <title>Monthly Invoice - ${monthData.month}</title>
-          <style>
-            body { font-family: system-ui, sans-serif; padding: 40px; color: #1e293b; line-height: 1.5; }
-            .header { text-align: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 24px; margin-bottom: 24px; }
-            .school-title { font-size: 24px; font-weight: 900; color: #1e1b4b; text-transform: uppercase; letter-spacing: 0.05em; margin: 0; }
-            .school-sub { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; margin: 4px 0 0 0; }
-            .invoice-label { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 6px 16px; border-radius: 9999px; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 16px; }
-            .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-            .meta-table td { padding: 8px 0; font-size: 13px; font-weight: bold; }
-            .label { color: #64748b; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
-            .val { text-align: right; color: #0f172a; font-weight: 800; }
-            .invoice-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-            .invoice-table th { background: #f8fafc; border: 1px solid #e5e7eb; padding: 12px; font-size: 11px; font-weight: 900; text-transform: uppercase; color: #475569; letter-spacing: 0.05em; }
-            .summary-box { background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; padding: 16px; margin-top: 24px; }
-            .summary-row { display: flex; justify-between: space-between; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
-            .summary-row:last-child { margin-bottom: 0; padding-top: 8px; border-t: 1px solid #e2e8f0; font-size: 16px; font-weight: 900; }
-            .footer { text-align: center; margin-top: 48px; font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-          </style>
-        </head>
-        <body onload="window.print();">
-          <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 32px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);">
-            <div class="header">
-              <div style="font-size: 32px; font-weight: 900; color: #4338ca; text-align: center; margin-bottom: 8px;">🏫</div>
-              <h1 class="school-title">Shikshantar Academy</h1>
-              <p class="school-sub">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>
-              <div class="invoice-label">${monthData.month} Statement</div>
+      <head>
+        <title>Student Fee Statement - ${studentRecord.name}</title>
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; padding: 30px; color: #1e293b; }
+          .container { max-width: 800px; margin: 0 auto; }
+          .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 20px; }
+          .title { font-size: 20px; font-weight: 900; text-transform: uppercase; margin: 0; color: #0f172a; }
+          .sub { font-size: 11px; color: #64748b; margin: 4px 0 0 0; }
+          .badge { display: inline-block; background: #0f172a; color: #fff; font-size: 10px; font-weight: 800; padding: 4px 12px; border-radius: 9999px; margin-top: 8px; text-transform: uppercase; }
+          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; font-size: 12px; background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; }
+          .summary-ribbon { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px; text-align: center; }
+          .sum-card { border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; background: #fff; }
+          .sum-card.due { background: #fef2f2; border-color: #fecaca; }
+          .sum-card.paid { background: #f0fdf4; border-color: #bbf7d0; }
+          .sum-card.advance { background: #f0f9ff; border-color: #bae6fd; }
+          .sum-label { font-size: 10px; text-transform: uppercase; font-weight: 800; color: #64748b; display: block; }
+          .sum-val { font-size: 16px; font-weight: 900; font-family: monospace; margin-top: 4px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px; }
+          th { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 8px 12px; font-size: 10px; text-transform: uppercase; font-weight: 800; color: #475569; }
+          .section-title { font-size: 12px; font-weight: 900; text-transform: uppercase; color: #0f172a; margin-bottom: 8px; letter-spacing: 0.05em; }
+          .footer { text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px dashed #cbd5e1; padding-top: 16px; margin-top: 32px; }
+        </style>
+      </head>
+      <body onload="window.print()">
+        <div class="container">
+          <div class="header">
+            <h1 class="title">SHIKSHANTAR ACADEMY</h1>
+            <p class="sub">Bastipur, Karjanha-05, Siraha, Nepal &bull; Regd: 1482/071 &bull; Phone: +977 9709867048</p>
+            <div class="badge">OFFICIAL STUDENT FINANCIAL LEDGER STATEMENT &bull; SESSION 2083-2084 BS</div>
+          </div>
+
+          <div class="meta-grid">
+            <div>
+              <strong>Student Name:</strong> ${studentRecord.name}<br/>
+              <strong>Class &amp; Roll:</strong> Class ${studentRecord.class} ${studentRecord.rollNumber ? `| Roll #${studentRecord.rollNumber}` : ''}<br/>
+              <strong>Student ID:</strong> ${studentRecord.studentId || studentRecord.id}
             </div>
-
-            <table class="meta-table">
-              <tr>
-                <td class="label">Student Name</td>
-                <td class="val">${studentRecord.name}</td>
-              </tr>
-              <tr>
-                <td class="label">Class & Roll No</td>
-                <td class="val">Class ${studentRecord.class} ${studentRecord.rollNumber ? `| Roll #${studentRecord.rollNumber}` : ''}</td>
-              </tr>
-              <tr>
-                <td class="label">Student ID</td>
-                <td class="val">${studentRecord.studentId || studentRecord.id}</td>
-              </tr>
-              <tr>
-                <td class="label">Statement Type</td>
-                <td class="val">${monthData.isBilled ? 'OFFICIAL INVOICE BILL' : 'PROJECTED / PRE-BILLING QUOTE'}</td>
-              </tr>
-              ${monthData.ledgerPageNo ? `
-              <tr>
-                <td class="label">Handwritten Ledger Reference</td>
-                <td class="val">${monthData.ledgerPageNo}</td>
-              </tr>
-              ` : ''}
-            </table>
-
-            <table class="invoice-table">
-              <thead>
-                <tr>
-                  <th style="text-align: left;">Fee Category Description</th>
-                  <th style="text-align: right; width: 120px;">Amount</th>
-                  <th style="text-align: center; width: 100px;">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${itemsHtml}
-              </tbody>
-            </table>
-
-            <div class="summary-box">
-              <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
-                <span style="color: #64748b; text-transform: uppercase; font-size: 10px;">Gross Total Billed</span>
-                <span style="color: #0f172a; font-weight: 800;">NRs. ${monthData.totalBilled.toLocaleString()}</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
-                <span style="color: #16a34a; text-transform: uppercase; font-size: 10px;">Amount Paid</span>
-                <span style="color: #16a34a; font-weight: 800;">NRs. ${monthData.totalPaid.toLocaleString()}</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 900; padding-top: 8px; border-top: 1px solid #e2e8f0; margin-top: 8px;">
-                <span style="color: #b91c1c; text-transform: uppercase; font-size: 11px;">Outstanding Due</span>
-                <span style="color: #b91c1c;">NRs. ${monthData.totalDue.toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div class="footer">
-              Thank you for supporting quality education.<br/>
-              Shikshantar Academy Billing Registry &bull; Siraha, Nepal
+            <div style="text-align: right;">
+              <strong>Guardian:</strong> ${studentRecord.fatherName || studentRecord.guardianName || studentRecord.parentName || '-'}<br/>
+              <strong>Contact:</strong> ${studentRecord.mobileNumber || studentRecord.phone || '-'}<br/>
+              <strong>Statement Date:</strong> ${new Date().toLocaleDateString('en-GB')}
             </div>
           </div>
-        </body>
+
+          <div class="summary-ribbon">
+            <div class="sum-card">
+              <span class="sum-label">Active Billed Charges</span>
+              <div class="sum-val" style="color: #0f172a;">NRs. ${Math.round(totalBilledSum).toLocaleString()}</div>
+            </div>
+            <div class="sum-card paid">
+              <span class="sum-label" style="color: #15803d;">Fees Paid / Allocated</span>
+              <div class="sum-val" style="color: #15803d;">NRs. ${Math.round(totalPaidSum).toLocaleString()}</div>
+            </div>
+            <div class="sum-card due">
+              <span class="sum-label" style="color: #b91c1c;">Current Outstanding</span>
+              <div class="sum-val" style="color: #b91c1c;">NRs. ${Math.round(totalDue).toLocaleString()}</div>
+            </div>
+            <div class="sum-card advance">
+              <span class="sum-label" style="color: #0284c7;">Advance Credit</span>
+              <div class="sum-val" style="color: #0284c7;">NRs. ${Math.round(availableAdvance).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div class="section-title">1. Itemized Monthly Fee Account (12 Academic Months)</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left;">Month</th>
+                <th style="text-align: right;">Billed Amount</th>
+                <th style="text-align: right;">Fees Paid</th>
+                <th style="text-align: right;">Outstanding Due</th>
+                <th style="text-align: center;">Status</th>
+                <th style="text-align: left;">Ledger Ref</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${ledgerRowsHtml}
+            </tbody>
+          </table>
+
+          <div class="section-title">2. Payment History (Cash Received vs Fees Applied)</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left;">Date</th>
+                <th style="text-align: left;">Receipt #</th>
+                <th style="text-align: right;">Cash Received</th>
+                <th style="text-align: right;">Fees Applied</th>
+                <th style="text-align: right;">Advance Created</th>
+                <th style="text-align: right;">Cash Returned</th>
+                <th style="text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${txRowsHtml}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            Official Computer-Generated Fee Audit &bull; Shikshantar Academy Accounting Office<br/>
+            Inquiries: +977 9807790805 &bull; Bastipur-5, Siraha &bull; academyshikshantar@gmail.com
+          </div>
+        </div>
+      </body>
       </html>
-    `);
+    `;
+
+    printWindow.document.write(html);
     printWindow.document.close();
   };
 
-  const getStudentDue = () => {
-      let totalDue = 0;
-      detailedLedger.forEach((row: any) => {
-          if (row.isBilled && !row.isFullyPaid) {
-              totalDue += row.totalDue;
-          }
-      });
-      return totalDue;
-  };
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[450px] p-12 text-center">
+        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+        <p className="font-bold text-gray-500 uppercase tracking-widest text-xs">Accessing Secure Student Fee Portal...</p>
+      </div>
+    );
+  }
 
-  const getStudentPaidAmount = () => {
-      let totalPaid = 0;
-      transactions.forEach(t => {
-          totalPaid += t.amount || 0;
-      });
-      return totalPaid;
-  };
+  if (studentRecord?.isPending) {
+    return (
+      <div className="bg-white rounded-3xl p-8 md:p-12 text-center shadow-sm border border-gray-100 max-w-2xl mx-auto mt-8">
+        <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6 border border-amber-100">
+          <AlertCircle className="w-10 h-10 text-amber-500" />
+        </div>
+        <h3 className="text-2xl font-black text-gray-900 mb-3 tracking-tight">Account Pending Approval</h3>
+        <p className="text-gray-500 mb-8 max-w-md mx-auto leading-relaxed text-sm">
+          Your account is currently pending administrative verification. Once approved by the school office, your official fee statements and payment history will appear here.
+        </p>
+        <button onClick={() => window.history.back()} className="bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 transition-all text-xs uppercase tracking-widest">
+          &larr; Return to Dashboard
+        </button>
+      </div>
+    );
+  }
 
-  const totalDue = getStudentDue();
-  const totalPaid = getStudentPaidAmount();
-  const annualTotal = breakdownData.grossTotal;
-  
-  const paymentHistory = transactions.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  const progressPercentage = annualTotal > 0 ? Math.min(Math.round((totalPaid / annualTotal) * 100), 100) : 0;
+  if (error || !studentRecord) {
+    return (
+      <div className="bg-white rounded-3xl p-8 md:p-12 text-center shadow-sm border border-gray-100 max-w-2xl mx-auto mt-8">
+        <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-100">
+          <Wallet className="w-10 h-10 text-red-500" />
+        </div>
+        <h3 className="text-2xl font-black text-gray-900 mb-3 tracking-tight">Financial Account Not Found</h3>
+        <p className="text-gray-500 mb-8 max-w-md mx-auto leading-relaxed text-sm">
+          Could not load the financial profile. Please ensure your student ID is paired with an active student enrollment record.
+        </p>
+        <button onClick={() => window.history.back()} className="bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 transition-all text-xs uppercase tracking-widest">
+          &larr; Return to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-6 animate-in fade-in duration-500 max-w-5xl mx-auto mb-20">
+    <div className="flex flex-col gap-6 animate-in fade-in duration-300 max-w-6xl mx-auto mb-20 px-3 sm:px-4">
       
-      {/* Top Banner specific handling */}
-      {totalDue > 0 ? (
-        <div className="w-full bg-red-100 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between border border-red-200">
-           <div className="text-center md:text-left mb-4 md:mb-0">
-               <h3 className="text-lg font-black text-red-800 flex items-center justify-center md:justify-start gap-2">
-                 ⚠️ Fee Due: NRs. {totalDue.toLocaleString()}
-               </h3>
-               <p className="text-red-600 text-sm font-medium mt-1">Please visit the school fee office to pay in Cash.</p>
-           </div>
-        </div>
-      ) : (
-        <div className="w-full bg-emerald-100 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between border border-emerald-200">
-           <div className="text-center md:text-left mb-4 md:mb-0">
-               <h3 className="text-lg font-black text-emerald-800 flex items-center justify-center md:justify-start gap-2">
-                 ✅ All fees cleared for this month
-               </h3>
-               <p className="text-emerald-700 text-sm font-medium mt-1">Thank you for keeping your account up to date.</p>
-           </div>
-        </div>
-      )}
-
-      {/* Account Info Banner */}
-      <div className="bg-[#1e293b] text-white rounded-3xl p-6 md:p-10 shadow-xl relative overflow-hidden group">
-        <Wallet className="absolute -right-6 -bottom-6 w-48 h-48 text-white/5 group-hover:scale-110 transition-transform duration-700" />
-        <div className="relative z-10">
-          <p className="text-[10px] font-black uppercase tracking-[4px] text-blue-400 mb-2">My Fee Status</p>
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-            <div>
-              <h1 className="text-3xl lg:text-4xl font-black tracking-tight">{studentRecord.name}</h1>
-              <p className="text-sm font-bold opacity-70 mt-3 flex flex-wrap items-center gap-2">
-                <span className="bg-white/10 px-3 py-1 rounded-full border border-white/5 uppercase tracking-widest text-[10px]">Class {studentRecord.class}</span>
-                <span className="bg-white/10 px-3 py-1 rounded-full border border-white/5 uppercase tracking-widest text-[10px]">ID: {studentRecord.studentId || studentRecord.id.substring(0, 8)}</span>
-              </p>
-            </div>
-            
-            {/* ANNUAL OVERVIEW CARD */}
-            <div className="text-left md:text-right bg-white/10 p-5 rounded-2xl backdrop-blur-md border border-white/10 shrink-0 min-w-[200px]">
-               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-1 gap-2 md:gap-4">
-                  <div className="flex-1 w-full text-left md:text-right">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/50 mb-1">Annual Fee</p>
-                      <p className="text-xs font-black text-white py-0.5">NRs. {annualTotal.toLocaleString()}</p>
-                  </div>
-                  <button onClick={() => window.print()} className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-1 shrink-0 md:ml-auto">
-                      <FileDown className="w-3 h-3"/> Statement
-                  </button>
-               </div>
-               <div className="flex justify-between items-center mb-3 mt-4">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-white/50">Remaining Due</p>
-                  <p className={`text-sm font-black ${totalDue > 0 ? 'text-red-400' : 'text-emerald-400'}`}>NRs. {totalDue.toLocaleString()}</p>
-               </div>
-               
-               <div className="w-full bg-black/40 rounded-full h-2 mb-1 border border-white/5 overflow-hidden">
-                  <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${progressPercentage}%` }}></div>
-               </div>
-               <p className="text-[10px] text-white/60 font-bold tracking-wider text-right">{progressPercentage}% Paid (NRs. {totalPaid.toLocaleString()})</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* TRANSPARENT LEDGER SUMMARY BOARD */}
-      <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-gray-100">
-         <h2 className="text-sm font-black uppercase tracking-widest text-gray-800 mb-6 flex items-center gap-2">
-           <Receipt className="w-5 h-5 text-indigo-500" /> Transparent Fee Ledger Summary
-         </h2>
-         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-           <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100">
-             <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-widest mb-1">Gross Annual Fee</span>
-             <span className="text-gray-800 font-black text-base">NRs. {annualTotal.toLocaleString()}</span>
-           </div>
-           <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100">
-             <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-widest mb-1">Scholarship Grant</span>
-             <span className="text-emerald-600 font-black text-base">
-               {studentRecord.scholarshipStatus === 'Provided' ? `NRs. ${(Number(studentRecord.scholarshipAmount || 0) * 12).toLocaleString()}` : 'None'}
-             </span>
-           </div>
-           <div className="bg-[#1e293b] p-4 rounded-2xl text-white">
-             <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-widest mb-1">Total Paid (Collected)</span>
-             <span className="text-emerald-400 font-black text-base">NRs. {totalPaid.toLocaleString()}</span>
-           </div>
-           <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
-             <span className="text-red-400 font-bold block text-[10px] uppercase tracking-widest mb-1">Outstanding Balance</span>
-             <span className="text-red-600 font-black text-base">NRs. {totalDue.toLocaleString()}</span>
-           </div>
-         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Main Content Col */}
-        <div className="lg:col-span-12 space-y-6">
-           
-          {/* 12-MONTH PERSONAL LEDGER SYSTEM */}
-          <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-gray-100">
-             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <div>
-                   <h3 className="text-lg font-black text-gray-900 tracking-tight">Personal Academic Ledger (12-Month Breakdown)</h3>
-                   <p className="text-xs text-gray-500 font-semibold mt-1">
-                      Official monthly bills generated by administrative office combined with upcoming pre-billing projections.
-                   </p>
+      {/* 1. TOP DUE ALERT / ZERO-DEBT STATUS & CASH-ONLY SCHOOL POLICY BANNER */}
+      <div className="flex flex-col gap-3">
+        {totalDue > 0 ? (
+          <div className="w-full bg-red-50/90 border border-red-200 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-red-950 uppercase tracking-wide">
+                    Current Outstanding Due: NRs. {totalDue.toLocaleString()}
+                  </h3>
+                  <span className="bg-red-200 text-red-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                    Action Required
+                  </span>
                 </div>
-                <div className="flex items-center gap-3">
-                   <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span> PAID
-                   </span>
-                   <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-50 px-2.5 py-1 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-red-500"></span> DUE
-                   </span>
-                   <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span> PROJECTED
-                   </span>
-                </div>
-             </div>
-
-             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {detailedLedger.map((monthData: any) => {
-                   const { month, isBilled, isFullyPaid, totalBilled, totalPaid, totalDue, items, ledgerPageNo } = monthData;
-                   
-                   return (
-                      <div key={month} className={`rounded-2xl border p-5 transition-all hover:shadow-md flex flex-col justify-between ${
-                         isBilled ? (isFullyPaid ? 'bg-emerald-50/20 border-emerald-100 hover:border-emerald-200' : 'bg-red-50/20 border-red-100 hover:border-red-200') : 'bg-amber-50/10 border-amber-100/50 hover:border-amber-200/50'
-                      }`}>
-                         <div>
-                            {/* Card Header */}
-                            <div className="flex items-center justify-between gap-2 border-b border-gray-100/80 pb-3 mb-3">
-                               <div className="flex items-center gap-2">
-                                  <span className="text-base font-black text-gray-950">{month}</span>
-                                  {ledgerPageNo && (
-                                     <span className="text-[9px] font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded" title={`Handwritten Ledger Ref: Page ${ledgerPageNo}`}>
-                                        Ref: #{ledgerPageNo}
-                                     </span>
-                                  )}
-                               </div>
-                               <div>
-                                  {isBilled ? (
-                                     isFullyPaid ? (
-                                        <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-lg">
-                                           PAID ✓
-                                        </span>
-                                     ) : (
-                                        <span className="text-[9px] font-black uppercase tracking-wider bg-red-100 text-red-800 px-2 py-0.5 rounded-lg">
-                                           DUE: NRs. {totalDue}
-                                        </span>
-                                     )
-                                  ) : (
-                                     <span className="text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 px-2 py-0.5 rounded-lg" title="Upcoming month pre-billing projection">
-                                        PROJECTED ⌛
-                                     </span>
-                                  )}
-                               </div>
-                            </div>
-
-                            {/* Itemized Categories */}
-                            <div className="space-y-1.5 my-3">
-                               {items.map((item: any, idx: number) => (
-                                  <div key={idx} className="flex justify-between items-center text-xs">
-                                     <span className="text-gray-500 font-medium">{item.name}</span>
-                                     <span className={`font-mono font-bold ${item.isCredit ? 'text-emerald-600' : 'text-gray-800'}`}>
-                                        {item.isCredit ? '-' : ''}NRs. {Math.abs(item.amount).toLocaleString()}
-                                     </span>
-                                  </div>
-                               ))}
-                            </div>
-                         </div>
-
-                         {/* Card Footer Summary */}
-                         <div className="pt-3 border-t border-gray-100/80 mt-2 flex items-center justify-between gap-4">
-                            <div>
-                               <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 font-sans">Month Summary</p>
-                               <div className="flex items-baseline gap-2 mt-0.5">
-                                  <span className="text-sm font-black text-gray-950">
-                                     NRs. {totalBilled.toLocaleString()}
-                                  </span>
-                                  {totalPaid > 0 && (
-                                     <span className="text-[10px] font-semibold text-emerald-600">
-                                        (Paid {totalPaid.toLocaleString()})
-                                     </span>
-                                  )}
-                               </div>
-                            </div>
-                            <button 
-                               onClick={() => printMonthDetail(monthData)}
-                               className="text-gray-500 hover:text-indigo-600 bg-white hover:bg-indigo-50/50 p-2 rounded-xl border border-gray-100 transition-all active:scale-95 flex items-center justify-center" 
-                               title="Print Statement Invoice"
-                            >
-                               <FileText className="w-4 h-4" />
-                            </button>
-                         </div>
-                      </div>
-                   );
-                })}
-             </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-             {/* Fee Breakdown */}
-             <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
-                <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-4">Annual Fee Breakdown</h3>
-                <div className="space-y-3.5">
-                   <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                      <span className="font-bold text-gray-600">Admission Fee (Class approved)</span>
-                      <span className="font-black text-gray-900">NRs. {breakdownData.admissionFee.toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                      <span className="font-bold text-gray-600">Annual Registration Fee</span>
-                      <span className="font-black text-gray-900">NRs. {breakdownData.annualFee.toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                      <span className="font-bold text-gray-600">Terminal Exam Fee (3 Terms)</span>
-                      <span className="font-black text-gray-900">NRs. {breakdownData.examFee.toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                      <span className="font-bold text-gray-600">Monthly Tuition Fee (Annualized: 12 months)</span>
-                      <span className="font-black text-gray-900">NRs. {breakdownData.tuitionFeeAnnual.toLocaleString()}</span>
-                   </div>
-                   {breakdownData.hasComputer && (
-                      <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                         <span className="font-bold text-gray-600">Computer Facility Fee (Annualized)</span>
-                         <span className="font-black text-emerald-600">NRs. {breakdownData.computerFeeAnnual.toLocaleString()}</span>
-                      </div>
-                   )}
-                   {breakdownData.hasTransport && (
-                      <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                         <span className="font-bold text-gray-600">Transportation Charges (Annualized)</span>
-                         <span className="font-black text-emerald-600">NRs. {breakdownData.transportFeeAnnual.toLocaleString()}</span>
-                      </div>
-                   )}
-                   {breakdownData.scholarshipAnnual > 0 && (
-                      <div className="flex justify-between text-xs py-1.5 border-b border-gray-100">
-                         <span className="font-bold text-emerald-700">Scholarship Deduction (Annualized)</span>
-                         <span className="font-black text-emerald-600">-NRs. {breakdownData.scholarshipAnnual.toLocaleString()}</span>
-                      </div>
-                   )}
-                   <div className="flex justify-between items-center py-3 text-primary rounded-xl px-4 mt-2 bg-indigo-50/50 border border-indigo-100">
-                      <span className="text-xs font-black text-indigo-950 uppercase tracking-widest">Gross Annual Total</span>
-                      <span className="text-lg font-black text-indigo-950">NRs. {annualTotal.toLocaleString()}</span>
-                   </div>
-                </div>
-             </div>
-
-             {/* Class Approved Rates */}
-             <div className="bg-gradient-to-br from-indigo-50 to-blue-50/50 rounded-3xl p-6 border border-indigo-100 shadow-sm">
-                <h3 className="text-sm font-black text-indigo-950 uppercase tracking-widest mb-4 flex items-center gap-2">
-                   🏫 Class {studentRecord.class} Approved Rates
-                </h3>
-                <div className="space-y-3.5">
-                   <div className="flex justify-between text-xs py-1.5 border-b border-indigo-100/40 text-indigo-900 font-bold">
-                      <span>Monthly Tuition Fee</span>
-                      <span>NRs. {Number(feeStructure?.tuition || 0).toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-indigo-100/40 text-indigo-900 font-bold">
-                      <span>Admission Fee</span>
-                      <span>NRs. {Number(feeStructure?.admission || 0).toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-indigo-100/40 text-indigo-900 font-bold">
-                      <span>Annual Registration Fee</span>
-                      <span>NRs. {Number(feeStructure?.annual || 0).toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-indigo-100/40 text-indigo-900 font-bold">
-                      <span>Terminal Exam Fee</span>
-                      <span>NRs. {Number(feeStructure?.exam || 0).toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between text-xs py-1.5 border-b border-indigo-100/40 text-indigo-900 font-bold">
-                      <span>Computer Fee</span>
-                      <span>NRs. {Number(feeStructure?.computer || 0).toLocaleString()}</span>
-                   </div>
-                </div>
-                <p className="text-[10px] text-indigo-700/70 font-semibold mt-4 italic">
-                  *These rates are officially approved by the Karjanhana Municipality Board.
+                <p className="text-xs text-red-700 font-medium mt-0.5">
+                  Officially billed and issued unpaid dues. Please visit the school accounting office to settle in cash.
                 </p>
-             </div>
+              </div>
+            </div>
+            <button 
+              onClick={printFullStatement} 
+              className="shrink-0 bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold uppercase tracking-wider px-4 py-2.5 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            >
+              <FileDown className="w-3.5 h-3.5" /> Download Statement
+            </button>
+          </div>
+        ) : (
+          <div className="w-full bg-emerald-50/90 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-emerald-950 uppercase tracking-wide">
+                    All Officially Billed Dues Cleared ✓
+                  </h3>
+                  <span className="bg-emerald-200 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                    Zero Debt
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-700 font-medium mt-0.5">
+                  All issued fee obligations are settled. Thank you for maintaining an up-to-date account.
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={printFullStatement} 
+              className="shrink-0 bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold uppercase tracking-wider px-4 py-2.5 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            >
+              <FileDown className="w-3.5 h-3.5" /> Audited Statement
+            </button>
+          </div>
+        )}
 
-             {/* Receipts Grid */}
-             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <History className="w-5 h-5 text-blue-600" />
-                  <h3 className="text-sm font-black text-gray-800 uppercase tracking-widest">My Payment Receipts</h3>
+        {/* Cash-Only School Accounting Policy Notice */}
+        <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs text-amber-900">
+          <div className="flex items-center gap-2 font-medium">
+            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+            <span>
+              <strong>Cash-Only School Policy:</strong> Fee payments are accepted in <strong>Cash</strong> at the school accounting counter. Online or electronic payments are not supported.
+            </span>
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 shrink-0 hidden md:inline-block">
+            Official Policy
+          </span>
+        </div>
+      </div>
+
+      {/* 2. STUDENT PROFILE & ACADEMIC SESSION HEADER */}
+      <div className="bg-[#0A3D62] text-white rounded-3xl p-6 md:p-8 shadow-md relative overflow-hidden">
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="bg-white/15 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-blue-200 border border-white/10">
+                Academic Session 2083-2084 BS
+              </span>
+              <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                Active Student
+              </span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">{studentRecord.name}</h1>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-white/80 mt-2">
+              <span className="bg-white/10 px-2.5 py-0.5 rounded-md">Class: {studentRecord.class}</span>
+              {studentRecord.rollNumber && <span className="bg-white/10 px-2.5 py-0.5 rounded-md">Roll No: {studentRecord.rollNumber}</span>}
+              <span className="bg-white/10 px-2.5 py-0.5 rounded-md">ID: {studentRecord.studentId || studentRecord.id}</span>
+              {studentRecord.fatherName && <span className="bg-white/10 px-2.5 py-0.5 rounded-md">Guardian: {studentRecord.fatherName}</span>}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={printFullStatement}
+              className="bg-white/15 hover:bg-white/25 text-white border border-white/20 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 backdrop-blur-sm"
+            >
+              <FileText className="w-4 h-4" /> Print Ledger Statement
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. PHASE 1 — STUDENT ACCOUNT OVERVIEW (8 KEY FINANCIAL INDICATORS) */}
+      <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-xs font-black uppercase tracking-widest text-gray-900 flex items-center gap-2">
+            <Coins className="w-4 h-4 text-[#0A3D62]" /> Financial Overview &amp; Account Matrix
+          </h2>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+            Canonical Firestore Ledger
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          
+          {/* 1. Academic Year */}
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-wider mb-1">1. Academic Year</span>
+            <span className="text-gray-900 font-black text-sm sm:text-base">2083-2084 BS</span>
+          </div>
+
+          {/* 2. Total Active Charges */}
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-wider mb-1">2. Active Billed Charges</span>
+            <span className="text-gray-900 font-black text-sm sm:text-base">NRs. {totalBilledSum.toLocaleString()}</span>
+          </div>
+
+          {/* 3. Scholarship / Concession */}
+          <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100">
+            <span className="text-emerald-700 font-bold block text-[10px] uppercase tracking-wider mb-1">3. Concession / Grant</span>
+            <span className="text-emerald-700 font-black text-sm sm:text-base">
+              {scholarshipInfo.isProvided ? `NRs. ${scholarshipInfo.annualConcession.toLocaleString()}` : 'None'}
+            </span>
+          </div>
+
+          {/* 4. Net Charges */}
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-wider mb-1">4. Net Billed Payable</span>
+            <span className="text-gray-900 font-black text-sm sm:text-base">NRs. {totalBilledSum.toLocaleString()}</span>
+          </div>
+
+          {/* 5. Total Fees Paid / Allocated */}
+          <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200">
+            <span className="text-emerald-700 font-bold block text-[10px] uppercase tracking-wider mb-1">5. Fees Paid / Allocated</span>
+            <span className="text-emerald-800 font-black text-sm sm:text-base">NRs. {totalPaidSum.toLocaleString()}</span>
+          </div>
+
+          {/* 6. Current Outstanding (Active Dues) */}
+          <div className={`p-4 rounded-2xl border ${totalDue > 0 ? 'bg-red-50 border-red-200 text-red-900' : 'bg-slate-50 border-slate-100 text-gray-900'}`}>
+            <span className={`font-bold block text-[10px] uppercase tracking-wider mb-1 ${totalDue > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+              6. Current Outstanding
+            </span>
+            <span className={`font-black text-sm sm:text-base ${totalDue > 0 ? 'text-red-700' : 'text-gray-900'}`}>
+              NRs. {totalDue.toLocaleString()}
+            </span>
+          </div>
+
+          {/* 7. Advance Credit */}
+          <div className="bg-sky-50 p-4 rounded-2xl border border-sky-200">
+            <span className="text-sky-700 font-bold block text-[10px] uppercase tracking-wider mb-1">7. Available Advance Credit</span>
+            <span className="text-sky-800 font-black text-sm sm:text-base">
+              NRs. {availableAdvance.toLocaleString()}
+            </span>
+          </div>
+
+          {/* 8. Previous Academic Year Outstanding */}
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <span className="text-gray-400 font-bold block text-[10px] uppercase tracking-wider mb-1">8. Previous Year Dues</span>
+            <span className="text-gray-700 font-black text-sm sm:text-base">
+              {previousYearOutstanding > 0 ? `NRs. ${previousYearOutstanding.toLocaleString()}` : 'Cleared (NRs. 0)'}
+            </span>
+          </div>
+
+        </div>
+      </div>
+
+      {/* 4. PHASE 1 — MONTHLY FEE ACCOUNT (12 NEPALI MONTHS IN CANONICAL ORDER) */}
+      <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-widest text-gray-900 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-[#0A3D62]" /> 12-Month Academic Fee Account
+            </h2>
+            <p className="text-xs text-gray-500 font-medium mt-0.5">
+              Itemized charges per month. Click any month card to view the breakdown of fee heads.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> PAID
+            </span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> PARTIAL
+            </span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-lg border border-red-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> DUE
+            </span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> UNBILLED
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {detailedLedger.map((monthData: any) => {
+            const { month, isBilled, isFullyPaid, isPartial, totalBilled, totalPaid, totalDue: mDue, items, ledgerPageNo } = monthData;
+            const isExpanded = Boolean(expandedMonths[month]);
+
+            return (
+              <div 
+                key={month}
+                className={`rounded-2xl border transition-all duration-200 flex flex-col justify-between overflow-hidden ${
+                  isBilled
+                    ? isFullyPaid 
+                      ? 'bg-emerald-50/30 border-emerald-200 hover:border-emerald-300' 
+                      : isPartial 
+                        ? 'bg-amber-50/40 border-amber-300 hover:border-amber-400' 
+                        : 'bg-red-50/30 border-red-200 hover:border-red-300'
+                    : 'bg-slate-50/40 border-slate-200'
+                }`}
+              >
+                {/* Header Row */}
+                <div 
+                  onClick={() => toggleMonthExpand(month)}
+                  className="p-4 cursor-pointer hover:bg-white/40 transition-colors flex items-center justify-between border-b border-gray-100/70"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-sm text-gray-900">{month}</span>
+                    {ledgerPageNo && (
+                      <span className="text-[9px] font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded">
+                        Ref: #{ledgerPageNo}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isBilled ? (
+                      isFullyPaid ? (
+                        <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                          PAID ✓
+                        </span>
+                      ) : isPartial ? (
+                        <span className="text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">
+                          PARTIAL
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-black uppercase tracking-wider bg-red-100 text-red-800 px-2 py-0.5 rounded-full border border-red-200">
+                          DUE: NRs. {mDue.toLocaleString()}
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                        UPCOMING
+                      </span>
+                    )}
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                  </div>
                 </div>
 
-                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                  {paymentHistory.map(txn => (
-                    <div key={txn.id} className="border-primary text-primary border border-gray-100 rounded-xl p-4 flex flex-wrap gap-2 justify-between items-center hover:border-blue-200 transition-colors">
-                       <div>
-                          <p className="text-xs font-black text-gray-900">{txn.receipt || txn.id.substring(0, 8)}</p>
-                          <p className="text-[10px] font-bold text-gray-500 uppercase mt-0.5">{txn.date} • {txn.method}</p>
-                       </div>
-                       <div className="text-right flex items-center gap-4">
-                          <p className="text-sm font-black text-emerald-600">NRs. {txn.amount.toLocaleString()}</p>
-                          <button onClick={() => setReceipt(txn)} className="text-blue-600 hover:text-blue-800 bg-blue-50 p-2 rounded-lg" title="Download Receipt Voucher">
-                             <FileDown className="w-4 h-4" />
-                          </button>
-                       </div>
+                {/* Card Body Matrix */}
+                <div className="p-4 space-y-2">
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs pb-2 border-b border-gray-100/60">
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wider text-gray-400 font-bold block">Billed</span>
+                      <span className="font-black text-gray-900 font-mono">NRs. {Math.round(totalBilled).toLocaleString()}</span>
                     </div>
-                  ))}
-                  {paymentHistory.length === 0 && (
-                    <div className="p-8 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">
-                        No transactions recorded
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wider text-emerald-600 font-bold block">Paid</span>
+                      <span className="font-black text-emerald-700 font-mono">NRs. {Math.round(totalPaid).toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wider text-red-500 font-bold block">Outstanding</span>
+                      <span className={`font-black font-mono ${mDue > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                        NRs. {Math.round(mDue).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Expandable Itemized Fee Heads */}
+                  {isExpanded && (
+                    <div className="pt-2 space-y-1.5 animate-in fade-in duration-200">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-gray-400 mb-1">Applicable Fee Heads:</p>
+                      {items.length > 0 ? (
+                        items.map((item: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-xs py-0.5">
+                            <span className="text-gray-600 font-medium">{item.name}</span>
+                            <span className={`font-mono font-bold ${item.isCredit ? 'text-emerald-600' : 'text-gray-800'}`}>
+                              {item.isCredit ? '-' : ''}NRs. {Math.abs(Math.round(item.amount)).toLocaleString()}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-gray-400 italic">No charges issued yet for this upcoming month.</p>
+                      )}
                     </div>
                   )}
                 </div>
-             </div>
-          </div>
-          
+
+                {/* Footer Status Bar */}
+                <div className="px-4 py-2 bg-black/[0.02] border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-500 font-medium">
+                  <span>{isBilled ? `Status: ${isFullyPaid ? 'Settled in full' : (isPartial ? 'Partially settled' : 'Payment pending')}` : 'Status: Unbilled month'}</span>
+                  <button 
+                    onClick={() => toggleMonthExpand(month)}
+                    className="text-[#0A3D62] hover:underline font-bold"
+                  >
+                    {isExpanded ? 'Collapse' : 'Details'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-2xl md:hidden z-50">
-         <a 
-            href={`https://wa.me/9779807790805?text=${encodeURIComponent(`Namaste, Ma ${studentRecord.name} hu, Class ${studentRecord.class}, Mero fee barema kura garna chahanchhu.`)}`}
-            target="_blank" rel="noopener noreferrer"
-            className="w-full bg-primary text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2">
-            📞 Contact Fee Office — +977 9807790805
-         </a>
+      {/* 5. OFFICIAL ISSUED BILLS (REMIT BILLS) */}
+      <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-widest text-gray-900 flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-[#0A3D62]" /> Official Issued Remit Bills
+            </h2>
+            <p className="text-xs text-gray-500 font-medium mt-0.5">
+              Authorized invoice bills generated by the administration office.
+            </p>
+          </div>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+            {remitBills.filter(b => b.status !== 'void').length} Active Bill{remitBills.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-gray-200 text-gray-400 uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-3">Bill Number</th>
+                <th className="py-3 px-3">Academic Session</th>
+                <th className="py-3 px-3">Billing Period</th>
+                <th className="py-3 px-3">Issue Date</th>
+                <th className="py-3 px-3 text-right">Total Amount</th>
+                <th className="py-3 px-3 text-right">Fees Paid</th>
+                <th className="py-3 px-3 text-right">Outstanding</th>
+                <th className="py-3 px-3 text-center">Status</th>
+                <th className="py-3 px-3 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 font-medium">
+              {remitBills.filter(b => b.status !== 'void').map((bill: any) => {
+                const total = Number(bill.totalAmount || 0);
+                const paid = Number(bill.paidAmount || 0);
+                const due = Math.max(0, total - paid);
+                const isPaid = bill.status === 'paid' || (paid >= total && total > 0);
+                const isPartial = bill.status === 'partial' || (paid > 0 && paid < total);
+
+                return (
+                  <tr key={bill.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="py-3 px-3 font-mono font-bold text-gray-900">{bill.billNo || bill.id}</td>
+                    <td className="py-3 px-3 text-gray-600">{bill.academicYear || '2083-2084 BS'}</td>
+                    <td className="py-3 px-3 text-gray-800 font-semibold">{bill.billingPeriod || 'Academic Billing'}</td>
+                    <td className="py-3 px-3 text-gray-500">{bill.issueDate || bill.dateBS || bill.date || '-'}</td>
+                    <td className="py-3 px-3 text-right font-mono font-bold text-gray-900">NRs. {total.toLocaleString()}</td>
+                    <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600">NRs. {paid.toLocaleString()}</td>
+                    <td className="py-3 px-3 text-right font-mono font-bold text-red-600">{due > 0 ? `NRs. ${due.toLocaleString()}` : '0'}</td>
+                    <td className="py-3 px-3 text-center">
+                      <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        isPaid ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : (isPartial ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-red-100 text-red-800 border border-red-200')
+                      }`}>
+                        {isPaid ? 'PAID ✓' : (isPartial ? 'PARTIAL' : 'DUE')}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <button 
+                        onClick={() => setSelectedBillForDetail(bill)}
+                        className="text-[#0A3D62] hover:bg-blue-50 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors border border-blue-100"
+                      >
+                        View Items
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {remitBills.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="py-8 text-center text-gray-400 font-semibold italic">
+                    No official remit bills generated for this student yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {receipt && (
-         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-           <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[90vh]">
-              <div className="flex-1 overflow-auto bg-gray-100 p-4 sm:p-8 custom-scrollbar">
-                 <div ref={receiptRef} className="bg-white mx-auto shadow-md relative overflow-hidden" style={{ width: '600px', minHeight: '848px' }}>
-                    <div className="p-8 sm:p-10 text-gray-800">
-                        <div className="text-center mb-6 border-b border-gray-200 pb-6">
-                            <div className="mx-auto mb-3 flex items-center justify-center">
-                                <img src={logoImage} alt="Shikshantar Academy Logo" className="w-16 h-16 object-contain" />
-                            </div>
-                            <h2 className="font-black text-xl text-primary uppercase tracking-widest">Shikshantar Academy</h2>
-                            <p className="text-[10px] font-bold text-gray-500 uppercase flex items-center justify-center gap-1 mt-1">Karjanhana Municipality, Bastipur-5, Siraha, Nepal</p>
-                            <div className="mt-4 inline-block bg-emerald-50 text-emerald-700 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-emerald-200">
-                                Payment Receipt
-                            </div>
-                        </div>
-                
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm text-primary p-4 rounded-xl">
-                    <div>
-                      <span className="block text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Receipt No</span>
-                      <span className="text-gray-800 font-mono font-black">{receipt.receipt || receipt.id.substring(0, 8)}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="block text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Date</span>
-                      <span className="text-gray-800 font-bold">{receipt.date}</span>
-                    </div>
-                  </div>
+      {/* 6. PAYMENT HISTORY & OFFICIAL CASH RECEIPTS */}
+      <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-widest text-gray-900 flex items-center gap-2">
+              <History className="w-4 h-4 text-[#0A3D62]" /> Payment History &amp; Official Receipts
+            </h2>
+            <p className="text-xs text-gray-500 font-medium mt-0.5">
+              Verified transactions showing Cash Received, Fees Applied, and Advance Created.
+            </p>
+          </div>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+            {studentTransactions.length} Payment{studentTransactions.length === 1 ? '' : 's'}
+          </span>
+        </div>
 
-                  <div className="p-4 border border-gray-100 rounded-xl">
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-gray-500 font-bold">Student Name</span>
-                      <span className="text-gray-800 font-black">{receipt.studentName}</span>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-gray-200 text-gray-400 uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-3">Receipt No</th>
+                <th className="py-3 px-3">Date (BS)</th>
+                <th className="py-3 px-3 text-right">Cash Received</th>
+                <th className="py-3 px-3 text-right text-emerald-700">Fees Applied</th>
+                <th className="py-3 px-3 text-right text-sky-700">Advance Created</th>
+                <th className="py-3 px-3 text-right text-gray-500">Cash Returned</th>
+                <th className="py-3 px-3">Method</th>
+                <th className="py-3 px-3 text-center">Status</th>
+                <th className="py-3 px-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 font-medium">
+              {studentTransactions.map((tx: any) => (
+                <tr key={tx.id} className="hover:bg-gray-50/60 transition-colors">
+                  <td className="py-3 px-3 font-mono font-bold text-gray-900">{tx.receipt}</td>
+                  <td className="py-3 px-3 text-gray-600">{tx.date}</td>
+                  <td className="py-3 px-3 text-right font-mono font-bold text-gray-900">NRs. {tx.cashReceived.toLocaleString()}</td>
+                  <td className="py-3 px-3 text-right font-mono font-bold text-emerald-700">NRs. {tx.feeAmountApplied.toLocaleString()}</td>
+                  <td className="py-3 px-3 text-right font-mono text-sky-700 font-bold">
+                    {tx.advanceCreated > 0 ? `NRs. ${tx.advanceCreated.toLocaleString()}` : '-'}
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono text-gray-500">
+                    {tx.changeReturned > 0 ? `NRs. ${tx.changeReturned.toLocaleString()}` : '-'}
+                  </td>
+                  <td className="py-3 px-3 text-gray-600">{tx.method}</td>
+                  <td className="py-3 px-3 text-center">
+                    <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-emerald-200">
+                      CLEARED ✓
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button 
+                        onClick={() => setSelectedPaymentForDetail(tx)}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors"
+                        title="View Settlement Accounting Breakdown"
+                      >
+                        Breakdown
+                      </button>
+                      <button 
+                        onClick={() => handleOpenReceipt(tx.raw || tx)}
+                        className="bg-[#0A3D62] hover:bg-[#082e4a] text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 shadow-xs"
+                        title="View & Download Official Receipt"
+                      >
+                        <FileDown className="w-3 h-3" /> Receipt
+                      </button>
                     </div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-gray-500 font-bold">Class | ID</span>
-                      <span className="text-gray-800 font-bold text-right">{receipt.class}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl space-y-2">
-                     {(() => {
-                       const linkedBill = studentRecord?.remitBills?.find((b: any) => b.id === receipt.remitBillId || b.transactionId === receipt.receipt);
-                       if (linkedBill && linkedBill.itemizedCharges?.length > 0) {
-                         return linkedBill.itemizedCharges.map((charge: any, idx: number) => (
-                           <div key={idx} className="flex justify-between text-sm py-1 border-b border-blue-100 last:border-0 last:pb-0">
-                             <span className="text-blue-800 font-bold">
-                               {charge.name} {charge.months > 1 ? `(${charge.months} months)` : ''}
-                             </span>
-                             <span className="text-blue-900 font-black">
-                               NRs. {charge.total.toLocaleString()}
-                             </span>
-                           </div>
-                         ));
-                       }
+                  </td>
+                </tr>
+              ))}
+              {studentTransactions.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="py-8 text-center text-gray-400 font-semibold italic">
+                    No payment transactions recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-                       // Fallback standard receipt breakdown
-                       return (
-                         <>
-                           {receipt.months?.length > 0 && receipt.months.map((m: string) => {
-                             const netPerMonth = (receipt.amount - (receipt.otherFees?.reduce((a: number, c: any) => a + Number(c.amount), 0) || 0)) / receipt.months.length;
-                             return (
-                               <div key={m} className="space-y-1 pb-3 mb-3 border-b border-blue-100 last:border-0 last:pb-0 last:mb-0">
-                                 <div className="flex justify-between text-sm">
-                                   <span className="text-blue-800 font-bold">{m} Tuition Fee</span>
-                                   <span className="text-blue-900 font-black">NRs. {netPerMonth.toLocaleString()}</span>
-                                 </div>
-                               </div>
-                             );
-                           })}
-                           {receipt.otherFees?.length > 0 && receipt.otherFees.map((f: any, idx: number) => (
-                             <div key={idx} className="space-y-1 pb-3 mb-3 border-b border-blue-100 last:border-0 last:pb-0 last:mb-0">
-                               <div className="flex justify-between text-sm">
-                                 <span className="text-blue-800 font-bold">{f.name}</span>
-                                 <span className="text-blue-900 font-black">NRs. {Number(f.amount).toLocaleString()}</span>
-                               </div>
-                             </div>
-                           ))}
-                           {(receipt.months?.length === 0 && receipt.otherFees?.length === 0) && (
-                             <div className="flex justify-between text-sm">
-                               <span className="text-blue-800 font-bold">{receipt.remarks || 'Tuition Payment'}</span>
-                               <span className="text-blue-900 font-black">NRs. {(receipt.amount || 0).toLocaleString()}</span>
-                             </div>
-                           )}
-                         </>
-                       );
-                     })()}
-                  </div>
+      {/* 7. DEDICATED ADVANCE CREDIT, SCHOLARSHIP & PREVIOUS ACADEMIC YEAR CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        {/* Advance Credit Ledger Card */}
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-black uppercase tracking-widest text-sky-950 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-sky-600" /> Advance Credit
+              </h3>
+              <span className="text-xs font-black text-sky-800 bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
+                NRs. {availableAdvance.toLocaleString()}
+              </span>
+            </div>
 
-                  <div className="mt-6 border-t border-b border-gray-200 py-4 divide-y divide-gray-100">
-                    <div className="flex justify-between items-center pb-3">
-                      <span className="font-black text-gray-400 uppercase tracking-widest text-xs">Total Paid</span>
-                      <span className="text-2xl font-black text-gray-800">NRs. {(receipt.amount || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-3 mt-1 text-sm">
-                      <span className="font-bold text-gray-500">Method: <span className="text-gray-800">{receipt.method}</span></span>
-                    </div>
+            <p className="text-xs text-gray-500 mb-4 font-medium leading-relaxed">
+              Advance Credit is money held by the school for future fee adjustment. It is automatically deducted when new bills are issued.
+            </p>
+
+            <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1">
+              {advances.map((adv: any) => (
+                <div key={adv.id} className="p-3 bg-sky-50/50 rounded-xl border border-sky-100 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-mono font-bold text-sky-950 block">{adv.receiptNo || 'Advance Credit'}</span>
+                    <span className="text-[10px] text-gray-500 font-medium">{adv.dateBS || 'Session 2083-2084'} &bull; Status: {adv.status || 'ACTIVE'}</span>
                   </div>
-                  
-                  <div className="mt-8 flex justify-between items-end text-xs pt-8 border-t border-gray-100">
-                    <div>
-                      <span className="text-gray-400 font-bold block mb-1">Collected by: </span>
-                      <span className="text-gray-800 font-black">{receipt.collectedBy}</span>
-                    </div>
-                    <div className="border-t-2 border-gray-800 w-32 text-center pt-2 font-bold text-gray-800">
-                       
-                    </div>
+                  <div className="text-right">
+                    <span className="font-mono font-black text-sky-800 block">NRs. {Number(adv.remainingCredit !== undefined ? adv.remainingCredit : adv.amount).toLocaleString()}</span>
+                    <span className="text-[9px] text-gray-400 uppercase">Available</span>
                   </div>
                 </div>
-              </div>
-              </div>
-              </div>
+              ))}
+              {advances.length === 0 && (
+                <div className="p-4 text-center text-gray-400 text-xs italic bg-slate-50 rounded-xl">
+                  No active advance balance on file.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
-              <div className="p-4 bg-white border-t border-gray-200 space-y-3">
-                <div className="flex gap-2">
-                   <button onClick={() => setReceipt(null)} className="flex-1 py-3 border border-gray-200 rounded-xl font-black text-gray-600 uppercase tracking-widest text-[10px] sm:text-xs transition-colors hover:bg-gray-100">Close</button>
-                   <button onClick={() => {
-                     const printContent = receiptRef.current?.innerHTML;
-                     if (printContent) {
-                       const printWindow = window.open('', '_blank');
-                       if (printWindow) {
-                         printWindow.document.write(`
-                           <html>
-                             <head>
-                               <title>Receipt_${receipt.receipt || receipt.id.substring(0,8)}</title>
-                               <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-                               <style>
-                                 @media print {
-                                   body { padding: 20px; background: white; color: black; }
-                                   .no-print { display: none; }
-                                 }
-                               </style>
-                             </head>
-                             <body onload="window.print(); window.close();">
-                               <div style="width: 600px; margin: 0 auto; border: 2px dashed #000; padding: 20px; font-family: sans-serif;">
-                                 ${printContent}
-                               </div>
-                             </body>
-                           </html>
-                         `);
-                         printWindow.document.close();
-                       }
-                     }
-                   }} className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs shadow-lg flex justify-center items-center gap-2 transition-colors">🖨️ Print Receipt</button>
-                   <button onClick={downloadReceipt} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs shadow-lg flex justify-center items-center gap-2 transition-colors"><FileDown className="w-4 h-4"/> Download PDF</button>
+        {/* Scholarship & Concessions Card */}
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-black uppercase tracking-widest text-emerald-950 flex items-center gap-2">
+                <Award className="w-4 h-4 text-emerald-600" /> Scholarship &amp; Concessions
+              </h3>
+              <span className={`text-xs font-black px-2.5 py-1 rounded-full border ${
+                scholarshipInfo.isProvided 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                  : 'bg-slate-50 text-slate-600 border-slate-200'
+              }`}>
+                {scholarshipInfo.isProvided ? 'Active ✓' : 'Standard'}
+              </span>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-4 font-medium leading-relaxed">
+              Approved concessions reduce net tuition payable without erasing the official standard base rate.
+            </p>
+
+            <div className="space-y-2.5 text-xs">
+              <div className="flex justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Monthly Concession:</span>
+                <span className="font-black text-emerald-700 font-mono">
+                  {scholarshipInfo.isProvided ? `NRs. ${scholarshipInfo.monthlyDeduction.toLocaleString()}` : 'NRs. 0'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Annualized Concession:</span>
+                <span className="font-black text-emerald-700 font-mono">
+                  {scholarshipInfo.isProvided ? `NRs. ${scholarshipInfo.annualConcession.toLocaleString()}` : 'NRs. 0'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Category / Reason:</span>
+                <span className="font-semibold text-gray-800">{scholarshipInfo.reason}</span>
+              </div>
+              <div className="flex justify-between py-1.5">
+                <span className="text-gray-500 font-medium">Class Standard Base:</span>
+                <span className="font-bold text-gray-800 font-mono">NRs. {Number(feeStructure?.tuition || 2800).toLocaleString()} / mo</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Previous Academic Year Card */}
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-black uppercase tracking-widest text-gray-900 flex items-center gap-2">
+                <GraduationCap className="w-4 h-4 text-[#0A3D62]" /> Previous Academic Year
+              </h3>
+              <span className={`text-xs font-black px-2.5 py-1 rounded-full border ${
+                previousYearOutstanding > 0 
+                  ? 'bg-red-50 text-red-800 border-red-200' 
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              }`}>
+                {previousYearOutstanding > 0 ? 'Dues Pending' : 'Cleared ✓'}
+              </span>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-4 font-medium leading-relaxed">
+              Historical ledger obligations for previous sessions (2082-2083 BS) tracked separately from the current year.
+            </p>
+
+            <div className="space-y-2.5 text-xs">
+              <div className="flex justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Previous Session:</span>
+                <span className="font-bold text-gray-800">2082-2083 BS</span>
+              </div>
+              <div className="flex justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Previous Back-Dues:</span>
+                <span className={`font-mono font-black ${previousYearOutstanding > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                  {previousYearOutstanding > 0 ? `NRs. ${previousYearOutstanding.toLocaleString()}` : 'NRs. 0 (Cleared)'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1.5 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Ledger Audit Status:</span>
+                <span className="font-semibold text-gray-700">Archived &amp; Verified</span>
+              </div>
+              <div className="flex justify-between py-1.5">
+                <span className="text-gray-500 font-medium">Session Balance:</span>
+                <span className="font-bold text-gray-800">Zero Debt</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* 8. MODAL FOR SETTLEMENT ACCOUNTING BREAKDOWN */}
+      {selectedPaymentForDetail && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-sm font-black text-gray-900">Payment Settlement Breakdown</h3>
+                <p className="text-[11px] text-gray-500 font-mono mt-0.5">Receipt #{selectedPaymentForDetail.receipt}</p>
+              </div>
+              <button 
+                onClick={() => setSelectedPaymentForDetail(null)}
+                className="w-8 h-8 rounded-full hover:bg-gray-200 flex items-center justify-center text-gray-500 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs">
+              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
+                <div className="flex justify-between text-blue-950 font-semibold">
+                  <span>Transaction Date:</span>
+                  <span>{selectedPaymentForDetail.date}</span>
+                </div>
+                <div className="flex justify-between text-blue-950 font-semibold">
+                  <span>Payment Mode:</span>
+                  <span>{selectedPaymentForDetail.method} (Accounting Counter)</span>
                 </div>
               </div>
-           </div>
-         </div>
+
+              <div className="border border-gray-100 rounded-xl divide-y divide-gray-100 font-medium">
+                <div className="p-3 flex justify-between items-center">
+                  <span className="text-gray-600">Total Cash Tendered / Received:</span>
+                  <span className="font-mono font-bold text-gray-900 text-sm">NRs. {selectedPaymentForDetail.cashReceived.toLocaleString()}</span>
+                </div>
+                <div className="p-3 flex justify-between items-center bg-emerald-50/40">
+                  <span className="text-emerald-900">Amount Applied to Billed Fees:</span>
+                  <span className="font-mono font-bold text-emerald-800 text-sm">NRs. {selectedPaymentForDetail.feeAmountApplied.toLocaleString()}</span>
+                </div>
+                <div className="p-3 flex justify-between items-center bg-sky-50/40">
+                  <span className="text-sky-900">Advance Credit Created (Excess):</span>
+                  <span className="font-mono font-bold text-sky-800 text-sm">NRs. {Number(selectedPaymentForDetail.advanceCreated || 0).toLocaleString()}</span>
+                </div>
+                <div className="p-3 flex justify-between items-center">
+                  <span className="text-gray-600">Cash Change Returned:</span>
+                  <span className="font-mono font-bold text-gray-700">NRs. {Number(selectedPaymentForDetail.changeReturned || 0).toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-gray-600 space-y-1">
+                <p>
+                  <strong>Mathematical Verification:</strong>
+                </p>
+                <p className="font-mono text-[10px] text-gray-800">
+                  Cash Received ({selectedPaymentForDetail.cashReceived.toLocaleString()}) = Fees Applied ({selectedPaymentForDetail.feeAmountApplied.toLocaleString()}) + Advance ({Number(selectedPaymentForDetail.advanceCreated || 0).toLocaleString()}) + Change ({Number(selectedPaymentForDetail.changeReturned || 0).toLocaleString()})
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              <button 
+                onClick={() => {
+                  const raw = selectedPaymentForDetail.raw || selectedPaymentForDetail;
+                  setSelectedPaymentForDetail(null);
+                  handleOpenReceipt(raw);
+                }}
+                className="bg-[#0A3D62] hover:bg-[#082e4a] text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5"
+              >
+                <FileDown className="w-3.5 h-3.5" /> View Official Receipt
+              </button>
+              <button 
+                onClick={() => setSelectedPaymentForDetail(null)}
+                className="bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-bold px-4 py-2 rounded-xl transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
+
+      {/* 8. MODAL FOR ITEMIZED BILL DETAIL */}
+      {selectedBillForDetail && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-sm font-black text-gray-900">Itemized Charges Breakdown</h3>
+                <p className="text-[11px] text-gray-500 font-mono mt-0.5">Bill #{selectedBillForDetail.billNo || selectedBillForDetail.id}</p>
+              </div>
+              <button 
+                onClick={() => setSelectedBillForDetail(null)}
+                className="w-8 h-8 rounded-full hover:bg-gray-200 flex items-center justify-center text-gray-500 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <div className="p-3 bg-blue-50 rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-medium text-blue-900">
+                  <span>Billing Period:</span>
+                  <span className="font-bold">{selectedBillForDetail.billingPeriod}</span>
+                </div>
+                <div className="flex justify-between font-medium text-blue-900">
+                  <span>Issue Date:</span>
+                  <span>{selectedBillForDetail.issueDate || selectedBillForDetail.dateBS || '-'}</span>
+                </div>
+              </div>
+
+              <div className="border border-gray-100 rounded-xl overflow-hidden">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-gray-50 border-b border-gray-100 text-[10px] text-gray-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">Fee Head</th>
+                      <th className="py-2.5 px-3 text-center">Months</th>
+                      <th className="py-2.5 px-3 text-right">Rate</th>
+                      <th className="py-2.5 px-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 font-medium">
+                    {Array.isArray(selectedBillForDetail.itemizedCharges) && selectedBillForDetail.itemizedCharges.map((item: any, idx: number) => (
+                      <tr key={idx}>
+                        <td className="py-2.5 px-3 font-semibold text-gray-800">{item.name}</td>
+                        <td className="py-2.5 px-3 text-center text-gray-500">{item.months || '-'}</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-gray-600">{item.rate ? `NRs. ${item.rate.toLocaleString()}` : '-'}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-gray-900">NRs. {Number(item.total || 0).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex justify-between items-center text-xs font-black">
+                <span className="text-gray-600 uppercase tracking-wide text-[10px]">Net Payable Amount:</span>
+                <span className="text-base text-gray-900 font-mono">NRs. {Number(selectedBillForDetail.totalAmount || 0).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 border-t border-gray-100 text-right">
+              <button 
+                onClick={() => setSelectedBillForDetail(null)}
+                className="bg-gray-900 hover:bg-gray-800 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. UNIVERSAL STANDARD CASH RECEIPT MODAL */}
+      <CashReceiptModal 
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        receipt={selectedReceipt}
+      />
 
     </div>
   );

@@ -67,9 +67,9 @@ export default function SalaryAdmin() {
                 dbReqs.forEach(r => {
                     mergedMap[r.id] = r;
                 });
-                setSalaryRequests(Object.values(mergedMap).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+                setSalaryRequests(Object.values(mergedMap).sort((a: any, b: any) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))));
              } catch(e) {
-                setSalaryRequests(dbReqs.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+                setSalaryRequests(dbReqs.sort((a: any, b: any) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))));
              }
          }, (err) => console.log('Could not load salary requests', err));
          
@@ -270,7 +270,7 @@ export default function SalaryAdmin() {
                                                   </p>
                                               )}
                                               
-                                              <p className="text-[9px] text-gray-400 font-semibold">{new Date(req.createdAt).toLocaleString()}</p>
+                                              <p className="text-[9px] text-gray-400 font-semibold">{req.createdAt ? (typeof req.createdAt === 'object' && req.createdAt.seconds ? new Date(req.createdAt.seconds * 1000).toLocaleString() : new Date(req.createdAt).toLocaleString()) : 'N/A'}</p>
                                           </div>
 
                                           {req.status === 'Pending' && (

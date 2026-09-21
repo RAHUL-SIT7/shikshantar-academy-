@@ -4,12 +4,14 @@ import { Helmet } from 'react-helmet-async';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs, updateDoc, writeBatch } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { Edit2, Save, X, Plus, Trash2, Search, Award, User as UserIcon, Users, CreditCard, FileText, Printer, Tv, PlusCircle, CheckCircle2, AlertCircle, Database, Calendar, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
+import FeeStructureWallChartModal from '../components/fee_management/FeeStructureWallChartModal';
 import ScholarshipTab from '../components/fee_management/ScholarshipTab';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import DOMPurify from 'isomorphic-dompurify';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { getSchoolLogoBase64 } from '../lib/logoHelper';
 
 interface ColumnConfig {
   key: string;
@@ -56,6 +58,12 @@ interface CustomTable {
 
 interface FeeStructureData {
   academicYear?: string;
+  headingTitle?: string;
+  headingSubtitle?: string;
+  academicTitle?: string;
+  academicSubtitle?: string;
+  transportTitle?: string;
+  transportSubtitle?: string;
   academic: AcademicFee[];
   transportation: TransportFee[];
   lab: LabFee[];
@@ -102,6 +110,12 @@ const defaultCustomTables: CustomTable[] = [
 
 const defaultData: FeeStructureData = {
   academicYear: '2083',
+  headingTitle: 'Fees & Scholarships',
+  headingSubtitle: 'Comprehensive fee schedules, policies, development offsets, and active scholarships',
+  academicTitle: 'Academic Fees',
+  academicSubtitle: 'Playgroup to Class 10 tuition and standard admission schedules',
+  transportTitle: 'Transportation Fees',
+  transportSubtitle: 'Area-wise monthly transportation subscription fees',
   academic: [
     { id: '0', className: 'Play Group', admission: '2000', annual: '3000', tuition: '1500', exam: '300', computer: '0' },
     { id: '1', className: 'Nursery', admission: '3000', annual: '3000', tuition: '1600', exam: '300', computer: '0' },
@@ -188,8 +202,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [generatingFees, setGeneratingFees] = useState(false);
   const [toastMessage, setToastMessage] = useState({ type: '', text: '' });
-  const [showBulkModal, setShowBulkModal] = useState(false);
-  const [bulkMonth, setBulkMonth] = useState('Baisakh');
+  const [showWallChartModal, setShowWallChartModal] = useState(false);
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -197,79 +210,6 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
 
   const mobileScrollContainerRef = React.useRef<HTMLDivElement>(null);
   const isScrollingProgrammatically = React.useRef(false);
-
-  const applyBulkFee = async () => {
-      if (!bulkMonth) return;
-      setGeneratingFees(true);
-      setShowBulkModal(false);
-      setToastMessage({ type: '', text: '' });
-      try {
-          // 1. Fetch all students
-          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
-          const students = usersSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-
-          // 2. Fetch current structure map
-          const structMap = new Map();
-          data.academic.forEach(s => structMap.set(s.className, s));
-
-          // 3. Batch commit fees for a specific month
-          const selectedMonth = bulkMonth;
-
-          let count = 0;
-          let batch = writeBatch(db);
-          
-          for (const s of students) {
-              const rawClass = s.class || s.studentClass || '';
-              // Match "Class 1" or "1" depending on how they saved it
-              const formattedClass = ['PG', 'Play Group', 'Nursery', 'LKG', 'UKG'].includes(rawClass) ? rawClass : `Class ${rawClass}`;
-              const feeStruct = structMap.get(formattedClass) || structMap.get(rawClass);
-              let tuitionFee = feeStruct && feeStruct.tuition ? Number(feeStruct.tuition.replace(/[^0-9.]/g, '')) : 1000;
-
-              let breakdownObj: any = { tuition: tuitionFee };
-              if (s.examFee) breakdownObj.exam = Number(s.examFee);
-              if (s.computerFee) breakdownObj.computer = Number(s.computerFee);
-              if (s.transportFee) breakdownObj.transport = Number(s.transportFee);
-              if (s.otherFee) breakdownObj.other = Number(s.otherFee);
-              
-              let totalOther = (breakdownObj.exam || 0) + (breakdownObj.computer || 0) + (breakdownObj.transport || 0) + (breakdownObj.other || 0);
-              let totalFee = tuitionFee + totalOther;
-
-              if (s.scholarshipStatus === 'Provided' && s.scholarshipAmount) {
-                 breakdownObj.scholarship = Number(s.scholarshipAmount);
-                 totalFee = Math.max(0, totalFee - Number(s.scholarshipAmount));
-              }
-
-              const feeRef = doc(db, 'studentFees', `${s.id}_${selectedMonth}`);
-              batch.set(feeRef, {
-                  studentId: s.id,
-                  month: selectedMonth,
-                  totalFee: totalFee,
-                  breakdown: breakdownObj,
-                  paidAmount: 0,
-                  dueAmount: totalFee,
-                  status: 'due',
-                  createdAt: new Date().toISOString()
-              }, { merge: true });
-
-              count++;
-              if (count === 400) {
-                  await batch.commit();
-                  batch = writeBatch(db);
-                  count = 0;
-              }
-          }
-          if (count > 0) {
-              await batch.commit();
-          }
-
-          setToastMessage({ type: 'success', text: `Successfully generated ${selectedMonth} fee for ${students.length} students!` });
-          setTimeout(() => setToastMessage({ type: '', text: '' }), 5000);
-      } catch (err) {
-          console.error("Failed bulk fee generation:", err);
-          setToastMessage({ type: 'error', text: "Failed to generate bulk fees." });
-      }
-      setGeneratingFees(false);
-  };
 
   const applyStructureToStudents = async () => {
       setGeneratingFees(true);
@@ -691,34 +631,56 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
   };
 
   // High quality Official Printed catalog matching exact system specifications
-  const generatePrintChartPdf = () => {
+  const generatePrintChartPdf = async () => {
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 14;
+    const sessionYear = (editMode ? editedData.academicYear : data.academicYear) || '2083';
+
+    // Top Header Banner
+    pdf.setFillColor(10, 61, 98); // #0A3D62
+    pdf.rect(0, 0, pageWidth, 5, 'F');
+
+    // School Logo
+    try {
+      const logoBase64 = await getSchoolLogoBase64();
+      if (logoBase64) {
+        pdf.addImage(logoBase64, 'PNG', 14, 7, 20, 20);
+      }
+    } catch (err) {
+      console.warn('Could not add logo to PDF:', err);
+    }
+
+    // School Title & Header
     pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(14);
-    pdf.setTextColor(27, 79, 114); // Slate Blue
-    pdf.text('SHIKSHANTAR ACADEMY', pageWidth / 2, 15, { align: 'center' });
-    
+    pdf.setFontSize(15);
+    pdf.setTextColor(10, 61, 98);
+    pdf.text('SHIKSHANTAR ACADEMY SECONDARY SCHOOL', pageWidth / 2, 14, { align: 'center' });
+
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8);
-    pdf.setTextColor(100, 116, 139);
-    pdf.text('Bastipur, Karjanha-05, Siraha, Nepal • Ph: +977 9709867048, +977 9807790805', pageWidth / 2, 19, { align: 'center' });
-    
-    pdf.setFillColor(238, 242, 255);
-    pdf.roundedRect(pageWidth / 2 - 35, 22, 70, 5, 0.8, 0.8, 'F');
+    pdf.setTextColor(71, 85, 105);
+    pdf.text('Bastipur, Karjanha-05, Siraha, Madhesh Province, Nepal', pageWidth / 2, 19, { align: 'center' });
+    pdf.text('Estd: 2072 B.S. • Affiliated to NEB & Ministry of Education, Nepal', pageWidth / 2, 23, { align: 'center' });
+    pdf.text('Ph: +977 9807790805, +977 9709867048 | Email: shikshantaracademy@gmail.com', pageWidth / 2, 27, { align: 'center' });
+
+    // Official Notice Box
+    pdf.setFillColor(241, 245, 249);
+    pdf.setDrawColor(10, 61, 98);
+    pdf.setLineWidth(0.5);
+    pdf.roundedRect(margin, 30, pageWidth - (margin * 2), 8, 1.5, 1.5, 'FD');
+
     pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(8);
-    pdf.setTextColor(67, 56, 202); // Indigo-700
-    pdf.text('OFFICIAL FEE STRUCTURE PRINT CHART (2083)', pageWidth / 2, 25.5, { align: 'center' });
-    
-    pdf.setDrawColor(226, 232, 240);
-    pdf.line(15, 29, pageWidth - 15, 29);
-    
+    pdf.setFontSize(10);
+    pdf.setTextColor(10, 61, 98);
+    pdf.text(`OFFICIAL FEE STRUCTURE — SESSION ${sessionYear}`, pageWidth / 2, 35.5, { align: 'center' });
+
+    // Section 1: Standard Class Fee Schedule
+    pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(9);
-    pdf.setTextColor(30, 41, 59);
-    pdf.text('1. Standard Class Fee Schedule (Monthly & Annual)', 15, 34);
-    
-    // Academic Fee Table
+    pdf.setTextColor(15, 23, 42);
+    pdf.text('1. CLASS-WISE REGULAR ACADEMIC FEE SCHEDULE (MONTHLY & ANNUAL)', margin, 45);
+
     const cols = (data.academicColumns || defaultColumns);
     const headRow = cols.map(col => col.label);
     const bodyRows = data.academic.map((row: any) => {
@@ -727,87 +689,115 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
         return row[col.key] ? `NRs. ${row[col.key]}` : '-';
       });
     });
-    
+
     autoTable(pdf, {
-      startY: 36,
+      startY: 48,
       head: [headRow],
       body: bodyRows,
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 1 },
-      headStyles: { fillColor: [27, 79, 114], textColor: [255, 255, 255], fontStyle: 'bold' },
-      margin: { left: 15, right: 15 }
+      styles: { fontSize: 7, cellPadding: 1.5 },
+      headStyles: { fillColor: [10, 61, 98], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: { 0: { fontStyle: 'bold', textColor: [15, 23, 42] } },
+      margin: { left: margin, right: margin }
     });
-    
-    let nextY = (pdf as any).lastAutoTable.finalY + 8;
-    
-    // Page break if too low
-    if (nextY > 240) {
+
+    let nextY = (pdf as any).lastAutoTable.finalY + 6;
+
+    if (nextY > 210) {
       pdf.addPage();
-      nextY = 20;
+      nextY = 16;
     }
-    
+
+    // Section 2: Transportation route rates
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(9);
-    pdf.setTextColor(30, 41, 59);
-    pdf.text('2. Transportation route rates (per village)', 15, nextY);
-    
-    const transportRows = data.transportation.map(t => [t.route, t.className, `NRs. ${t.fee}`]);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text('2. SCHOOL BUS & TRANSPORTATION TARIFF (MONTHLY PER VILLAGE)', margin, nextY);
+
+    const transportRows = data.transportation.map(t => [t.route, t.className || 'All Classes', `NRs. ${t.fee}`]);
     autoTable(pdf, {
       startY: nextY + 2,
-      head: [['Route Coverage Area', 'Eligibility Class', 'Monthly Rate']],
+      head: [['Route Coverage Area / Pickup Stop', 'Applicable Grades', 'Monthly Bus Fare']],
       body: transportRows,
-      theme: 'striped',
-      styles: { fontSize: 7, cellPadding: 1 },
-      headStyles: { fillColor: [4, 120, 87], textColor: [255, 255, 255] },
-      margin: { left: 15, right: 15 }
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 1.5 },
+      headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold' },
+      margin: { left: margin, right: margin }
     });
-    
-    nextY = (pdf as any).lastAutoTable.finalY + 8;
-    // Page break if too low
-    if (nextY > 240) {
+
+    nextY = (pdf as any).lastAutoTable.finalY + 6;
+
+    if (nextY > 220) {
       pdf.addPage();
-      nextY = 20;
+      nextY = 16;
     }
-    
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(9);
-    pdf.setTextColor(30, 41, 59);
-    pdf.text('3. Special Coaching & Custom Surcharges', 15, nextY);
-    
+
+    // Section 3: Special Coaching
     const customTbl = data.customTables?.[0];
-    if (customTbl) {
-      const coachingRows = customTbl.rows.map(r => [r.programName, r.applicableClasses, r.timing, `NRs. ${r.monthlyRate}`]);
+    if (customTbl && customTbl.rows && customTbl.rows.length > 0) {
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(9);
+      pdf.setTextColor(15, 23, 42);
+      pdf.text(`3. ${customTbl.title.toUpperCase()}`, margin, nextY);
+
+      const customHead = customTbl.columns.map((c: any) => c.label);
+      const customRows = customTbl.rows.map((r: any) => {
+        return customTbl.columns.map((c: any) => r[c.key] ? (c.key.toLowerCase().includes('rate') || c.key.toLowerCase().includes('fee') ? `NRs. ${r[c.key]}` : r[c.key]) : '-');
+      });
+
       autoTable(pdf, {
         startY: nextY + 2,
-        head: [['Coaching Program / Subject', 'Target Classes', 'Session Timing', 'Monthly rate']],
-        body: coachingRows,
-        theme: 'striped',
-        styles: { fontSize: 7, cellPadding: 1 },
-        headStyles: { fillColor: [67, 56, 202], textColor: [255, 255, 255] },
-        margin: { left: 15, right: 15 }
+        head: [customHead],
+        body: customRows,
+        theme: 'grid',
+        styles: { fontSize: 7, cellPadding: 1.5 },
+        headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
+        margin: { left: margin, right: margin }
       });
-      nextY = (pdf as any).lastAutoTable.finalY + 8;
+      nextY = (pdf as any).lastAutoTable.finalY + 6;
     }
-    
-    // Signatures at bottom
-    if (nextY > 250) {
+
+    nextY += 10;
+
+    if (nextY > 260) {
       pdf.addPage();
       nextY = 20;
     }
-    
-    pdf.setDrawColor(241, 245, 249);
-    pdf.line(15, nextY + 5, pageWidth - 15, nextY + 5);
-    pdf.setFontSize(6.5);
-    pdf.setTextColor(148, 163, 184);
-    pdf.text('Shikshantar Academic Management System • Official Fee Document', 15, nextY + 9);
-    
-    pdf.setFontSize(7.5);
+
+    // Signatures
+    pdf.setDrawColor(203, 213, 225);
+    pdf.line(margin, nextY, pageWidth - margin, nextY);
+
+    const sigY = nextY + 12;
     pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(71, 85, 105);
-    pdf.text('Registrar: ___________________', 15, nextY + 16);
-    pdf.text('Principal Authority: ___________________', pageWidth - 15, nextY + 16, { align: 'right' });
-    
-    pdf.save('Shikshantar_Official_Fee_Chart_2083.pdf');
+    pdf.setFontSize(8);
+    pdf.setTextColor(30, 41, 59);
+
+    pdf.text('Prepared By: _____________________', margin, sigY);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text('Accountant / Bursar Desk', margin, sigY + 4);
+
+    pdf.setDrawColor(10, 61, 98);
+    pdf.circle(pageWidth / 2, sigY - 2, 7);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(5);
+    pdf.setTextColor(10, 61, 98);
+    pdf.text('OFFICIAL SEAL', pageWidth / 2, sigY - 3, { align: 'center' });
+    pdf.text('SHIKSHANTAR', pageWidth / 2, sigY, { align: 'center' });
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('Approved By: _____________________', pageWidth - margin, sigY, { align: 'right' });
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text('Principal / Academic Director', pageWidth - margin, sigY + 4, { align: 'right' });
+
+    pdf.save(`Shikshantar_Academy_Fee_Structure_${sessionYear}.pdf`);
   };
 
   const handleSave = async () => {
@@ -1126,60 +1116,89 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-8 w-full min-w-0 max-w-full overflow-x-hidden">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-[#e2e8f0]">
-        <div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-            <h2 className="text-2xl sm:text-3xl font-bold text-primary">
-              Fees & Scholarships
-            </h2>
-            {editMode ? (
-              <input 
-                type="text" 
-                value={editedData.academicYear || ''} 
-                onChange={e => setEditedData({ ...editedData, academicYear: e.target.value })}
-                className="text-sm font-medium bg-white text-gray-800 px-3 py-1 rounded border border-gray-300 w-48 outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g. 2083"
-              />
-            ) : (
-              <span className="text-sm font-medium bg-gray-100 text-gray-500 px-3 py-1 rounded-full whitespace-nowrap border border-gray-200 self-start sm:self-auto">
-                Academic Year {currentData.academicYear || '2083'}
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-slate-600 mt-2">Comprehensive fee schedules, policies, development offsets, and active scholarships</p>
+        <div className="w-full sm:w-auto">
+          {editMode ? (
+            <div className="space-y-2 w-full max-w-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider w-28 shrink-0">Page Title:</label>
+                <input 
+                  type="text" 
+                  value={editedData.headingTitle ?? (data.headingTitle || 'Fees & Scholarships')} 
+                  onChange={e => setEditedData({ ...editedData, headingTitle: e.target.value })}
+                  className="text-lg font-bold text-primary px-3 py-1.5 rounded-lg border border-gray-300 w-full outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Page Title (e.g. Fees & Scholarships)"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider w-28 shrink-0">Subtitle:</label>
+                <input 
+                  type="text" 
+                  value={editedData.headingSubtitle ?? (data.headingSubtitle || 'Comprehensive fee schedules, policies, development offsets, and active scholarships')} 
+                  onChange={e => setEditedData({ ...editedData, headingSubtitle: e.target.value })}
+                  className="text-xs text-slate-700 px-3 py-1.5 rounded-lg border border-gray-300 w-full outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Subtitle description"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider w-28 shrink-0">Session Year:</label>
+                <input 
+                  type="text" 
+                  value={editedData.academicYear || ''} 
+                  onChange={e => setEditedData({ ...editedData, academicYear: e.target.value })}
+                  className="text-xs font-semibold bg-white text-gray-800 px-3 py-1 rounded-lg border border-gray-300 w-36 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g. 2083"
+                />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <h2 className="text-2xl sm:text-3xl font-bold text-primary">
+                  {currentData.headingTitle || 'Fees & Scholarships'}
+                </h2>
+                <span className="text-sm font-medium bg-gray-100 text-gray-600 px-3 py-1 rounded-full whitespace-nowrap border border-gray-200 self-start sm:self-auto">
+                  Academic Year {currentData.academicYear || '2083'}
+                </span>
+              </div>
+              <p className="text-sm text-slate-600 mt-2">
+                {currentData.headingSubtitle || 'Comprehensive fee schedules, policies, development offsets, and active scholarships'}
+              </p>
+            </div>
+          )}
         </div>
         
         {isAdmin && (
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
             {toastMessage.text && (
               <div className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center ${toastMessage.type === 'error' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
                 {toastMessage.text}
               </div>
             )}
-            
-            <button
-               onClick={() => setShowBulkModal(true)}
-               disabled={generatingFees}
-               title="Create detailed fee invoices for a specific month for all students."
-               className="flex justify-center items-center gap-2 bg-[#059669] hover:bg-[#047857] text-white px-4 py-2 rounded-xl text-sm font-bold transition-colors shadow-sm disabled:opacity-50"
-            >
-               <Users className="w-4 h-4" />
-               {generatingFees ? 'Calculating...' : 'Generate Bills'}
-            </button>
 
             {!editMode ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center flex-wrap gap-2 sm:gap-3">
+                <button
+                  onClick={generatePrintChartPdf}
+                  title="Print official fee structure document (Downloads print-ready official PDF with school logo)"
+                  className="flex justify-center items-center gap-2 bg-[#0A3D62] hover:bg-[#06263e] text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print Fee Structure
+                </button>
+
                 <button
                   onClick={applyStructureToStudents}
-                  title="Update all students' default monthly fee based on the current structure."
-                  className="flex justify-center items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                  title="Update all students' default monthly base tuition in their individual profiles to match this fee structure."
+                  className="flex justify-center items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
                   disabled={generatingFees}
                 >
                   <Users className="w-4 h-4" />
                   {generatingFees ? 'Syncing...' : 'Sync Base Fees'}
                 </button>
+
                 <button
                   onClick={() => setEditMode(true)}
-                  className="flex justify-center items-center gap-2 bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+                  className="flex justify-center items-center gap-2 bg-primary hover:bg-primary-dark text-white px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
                 >
                   <Edit2 className="w-4 h-4" />
                   Edit Fee Structure
@@ -1287,11 +1306,36 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
               {/* Inner masked content card */}
               <div className="relative w-full h-full bg-white rounded-[14px] flex flex-col z-10 overflow-hidden flex-1 max-w-full min-w-0">
                 <div className="p-6 border-b border-[#e2e8f0] bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                    <div>
-                      <h3 className="text-xl font-bold text-primary">Academic Fees</h3>
-                      <p className="text-xs text-slate-500 mt-1">Playgroup to Class 10 tuition and standard admission schedules</p>
-                    </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                    {editMode ? (
+                      <div className="space-y-1.5 w-full max-w-md">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded shrink-0 border border-indigo-200">Table Heading:</span>
+                          <input
+                            type="text"
+                            value={editedData.academicTitle ?? (data.academicTitle || 'Academic Fees')}
+                            onChange={e => setEditedData({ ...editedData, academicTitle: e.target.value })}
+                            className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none px-2.5 py-1 rounded text-sm font-bold text-primary bg-white"
+                            placeholder="e.g. Academic Fees"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase font-bold text-slate-500 bg-slate-150 px-2 py-0.5 rounded shrink-0 border border-slate-200">Subtitle:</span>
+                          <input
+                            type="text"
+                            value={editedData.academicSubtitle ?? (data.academicSubtitle || 'Playgroup to Class 10 tuition and standard admission schedules')}
+                            onChange={e => setEditedData({ ...editedData, academicSubtitle: e.target.value })}
+                            className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none px-2.5 py-0.5 rounded text-xs text-slate-600 bg-white"
+                            placeholder="Subtitle description"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <h3 className="text-xl font-bold text-primary">{currentData.academicTitle || 'Academic Fees'}</h3>
+                        <p className="text-xs text-slate-500 mt-1">{currentData.academicSubtitle || 'Playgroup to Class 10 tuition and standard admission schedules'}</p>
+                      </div>
+                    )}
                   </div>
                   {editMode && (
             <div className="flex gap-3">
@@ -1396,7 +1440,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
               </tr>
             </thead>
             <tbody className="text-sm">
-              {currentData.academic.map((row, index) => (
+              {(currentData.academic || []).map((row, index) => (
                 <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
                   {(currentData.academicColumns || defaultColumns).map((col) => (
                     <td key={col.key} className="py-3 pr-4">
@@ -1405,7 +1449,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                           className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded-lg text-sm font-medium"
                           value={row[col.key] || ''}
                           onChange={(e) => {
-                            const newAcademic = [...editedData.academic];
+                            const newAcademic = [...(editedData.academic || [])];
                             newAcademic[index] = { ...newAcademic[index], [col.key]: e.target.value };
                             setEditedData({ ...editedData, academic: newAcademic });
                           }}
@@ -1421,7 +1465,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     <td className="py-3 text-right">
                       <button
                         onClick={() => {
-                          const newAcademic = editedData.academic.filter((_, i) => i !== index);
+                          const newAcademic = (editedData.academic || []).filter((_, i) => i !== index);
                           setEditedData({ ...editedData, academic: newAcademic });
                         }}
                         className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
@@ -1433,7 +1477,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                   )}
                 </tr>
               ))}
-              {currentData.academic.length === 0 && (
+              {(!currentData.academic || currentData.academic.length === 0) && (
                 <tr>
                   <td colSpan={(currentData.academicColumns || defaultColumns).length + (editMode ? 1 : 0)} className="py-4 text-center text-gray-500">
                     No academic fees data.
@@ -1486,11 +1530,36 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
             {/* Inner masked content card */}
             <div className="relative w-full h-full bg-white rounded-[14px] flex flex-col z-10 overflow-hidden flex-1 max-w-full min-w-0">
               <div className="p-6 border-b border-[#e2e8f0] bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <div>
-                    <h3 className="text-xl font-bold text-primary">Transportation Fees</h3>
-                    <p className="text-xs text-slate-500 mt-1">Area-wise monthly transportation subscription fees</p>
-                  </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                  {editMode ? (
+                    <div className="space-y-1.5 w-full max-w-md">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded shrink-0 border border-indigo-200">Table Heading:</span>
+                        <input
+                          type="text"
+                          value={editedData.transportTitle ?? (data.transportTitle || 'Transportation Fees')}
+                          onChange={e => setEditedData({ ...editedData, transportTitle: e.target.value })}
+                          className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none px-2.5 py-1 rounded text-sm font-bold text-primary bg-white"
+                          placeholder="e.g. Transportation Fees"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 bg-slate-150 px-2 py-0.5 rounded shrink-0 border border-slate-200">Subtitle:</span>
+                        <input
+                          type="text"
+                          value={editedData.transportSubtitle ?? (data.transportSubtitle || 'Area-wise monthly transportation subscription fees')}
+                          onChange={e => setEditedData({ ...editedData, transportSubtitle: e.target.value })}
+                          className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none px-2.5 py-0.5 rounded text-xs text-slate-600 bg-white"
+                          placeholder="Subtitle description"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <h3 className="text-xl font-bold text-primary">{currentData.transportTitle || 'Transportation Fees'}</h3>
+                      <p className="text-xs text-slate-500 mt-1">{currentData.transportSubtitle || 'Area-wise monthly transportation subscription fees'}</p>
+                    </div>
+                  )}
                 </div>
                 {editMode && (
                   <button onClick={addTransportRow} className="text-sm font-semibold text-blue-600 flex items-center gap-1 hover:text-blue-800 shrink-0">
@@ -1536,12 +1605,12 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {currentData.transportation.map((row, index) => (
+                {(currentData.transportation || []).map((row, index) => (
                   <tr key={row.id} className="border-b border-slate-100">
                     <td className="py-3">
                       {editMode ? (
                         <input className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded" value={row.className || ''} onChange={(e) => {
-                          const newTransport = [...editedData.transportation];
+                          const newTransport = [...(editedData.transportation || [])];
                           newTransport[index].className = e.target.value;
                           setEditedData({ ...editedData, transportation: newTransport });
                         }} />
@@ -1550,7 +1619,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     <td className="py-3">
                       {editMode ? (
                         <input className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded" value={row.route || ''} onChange={(e) => {
-                          const newTransport = [...editedData.transportation];
+                          const newTransport = [...(editedData.transportation || [])];
                           newTransport[index].route = e.target.value;
                           setEditedData({ ...editedData, transportation: newTransport });
                         }} />
@@ -1559,7 +1628,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     <td className={`py-3 text-right ${editMode ? '' : 'pr-14'}`}>
                       {editMode ? (
                         <input className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded text-right" value={row.fee || ''} onChange={(e) => {
-                          const newTransport = [...editedData.transportation];
+                          const newTransport = [...(editedData.transportation || [])];
                           newTransport[index].fee = e.target.value;
                           setEditedData({ ...editedData, transportation: newTransport });
                         }} />
@@ -1568,14 +1637,14 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     {editMode && (
                       <td className="py-3 text-right pr-14">
                         <button onClick={() => {
-                          const newTransport = editedData.transportation.filter((_, i) => i !== index);
+                          const newTransport = (editedData.transportation || []).filter((_, i) => i !== index);
                           setEditedData({ ...editedData, transportation: newTransport });
                         }} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 className="w-4 h-4"/></button>
                       </td>
                     )}
                   </tr>
                 ))}
-                {currentData.transportation.length === 0 && (
+                {(!currentData.transportation || currentData.transportation.length === 0) && (
                   <tr><td colSpan={4} className="py-4 text-center text-gray-500">No transportation fees data.</td></tr>
                 )}
               </tbody>
@@ -1649,12 +1718,12 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {currentData.lab.map((row, index) => (
+                {(currentData.lab || []).map((row, index) => (
                   <tr key={row.id} className="border-b border-slate-100">
                     <td className="py-3">
                       {editMode ? (
                         <input className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded" value={row.className || ''} onChange={(e) => {
-                          const newLab = [...editedData.lab];
+                          const newLab = [...(editedData.lab || [])];
                           newLab[index].className = e.target.value;
                           setEditedData({ ...editedData, lab: newLab });
                         }} />
@@ -1663,7 +1732,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     <td className="py-3">
                       {editMode ? (
                         <input className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded" value={row.subject || ''} onChange={(e) => {
-                          const newLab = [...editedData.lab];
+                          const newLab = [...(editedData.lab || [])];
                           newLab[index].subject = e.target.value;
                           setEditedData({ ...editedData, lab: newLab });
                         }} />
@@ -1672,7 +1741,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     <td className={`py-3 text-right ${editMode ? '' : 'pr-14'}`}>
                       {editMode ? (
                         <input className="w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none p-2 rounded text-right" value={row.fee || ''} onChange={(e) => {
-                          const newLab = [...editedData.lab];
+                          const newLab = [...(editedData.lab || [])];
                           newLab[index].fee = e.target.value;
                           setEditedData({ ...editedData, lab: newLab });
                         }} />
@@ -1681,14 +1750,14 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     {editMode && (
                       <td className="py-3 text-right pr-14">
                         <button onClick={() => {
-                          const newLab = editedData.lab.filter((_, i) => i !== index);
+                          const newLab = (editedData.lab || []).filter((_, i) => i !== index);
                           setEditedData({ ...editedData, lab: newLab });
                         }} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 className="w-4 h-4"/></button>
                       </td>
                     )}
                   </tr>
                 ))}
-                {currentData.lab.length === 0 && (
+                {(!currentData.lab || currentData.lab.length === 0) && (
                   <tr><td colSpan={4} className="py-4 text-center text-gray-500">No lab fees data.</td></tr>
                 )}
               </tbody>
@@ -1757,7 +1826,7 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
                     ) : (
                       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                         <h4 className="text-base font-bold text-primary flex items-center gap-2">
-                          ✨ {table.title}
+                          {table.title}
                         </h4>
                       </div>
                     )}
@@ -2118,36 +2187,12 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
         </div>
       </div>
 
-      {showBulkModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Generate Monthly Bills</h3>
-              <p className="text-sm text-gray-600 mb-6">Select the academic month to configure pending fee records for all students.</p>
-              
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Select Month</label>
-                <select
-                  value={bulkMonth}
-                  onChange={(e) => setBulkMonth(e.target.value)}
-                  className="block w-full border border-slate-300 rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500 font-bold"
-                >
-                   {['Baisakh', 'Jestha', 'Asar', 'Shrawan', 'Bhadra', 'Ashwin', 'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'].map(m => (
-                      <option key={m} value={m}>{m}</option>
-                   ))}
-                </select>
-              </div>
-
-              <div className="flex gap-3 justify-end">
-                 <button onClick={() => setShowBulkModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors">
-                    Cancel
-                 </button>
-                 <button onClick={applyBulkFee} disabled={generatingFees} className="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors disabled:opacity-50">
-                    {generatingFees ? 'Generating...' : 'Generate Bills'}
-                 </button>
-              </div>
-           </div>
-        </div>
-      )}
+      {/* Wall Poster Print / Download Modal */}
+      <FeeStructureWallChartModal
+        isOpen={showWallChartModal}
+        onClose={() => setShowWallChartModal(false)}
+        data={currentData}
+      />
 
     </div>
   );

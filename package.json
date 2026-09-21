@@ -12,10 +12,6 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
-  "overrides": {
-    "react": "$react",
-    "react-dom": "$react-dom"
-  },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
     "@capacitor/core": "^8.3.4",
@@ -47,7 +43,7 @@
     "nepali-date-converter": "^3.4.0",
     "nepali-datepicker-reactjs": "^1.1.9",
     "nepali-datetime": "^2.0.0",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^10.0.10",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -59,9 +55,7 @@
     "react-quill-new": "^3.8.3",
     "react-router-dom": "^7.14.1",
     "react-zoom-pan-pinch": "^4.0.3",
-    "recharts": "^3.8.1",
-    "vite": "^6.2.0",
-    "xlsx": "^0.18.5"
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.4",
@@ -73,6 +67,7 @@
     "@types/nodemailer": "^8.0.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
+    "playwright": "^1.63.0",
     "sharp": "^0.35.3",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",

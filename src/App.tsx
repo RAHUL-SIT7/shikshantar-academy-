@@ -309,21 +309,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const forcedRole = urlParams.get("previewRole");
-
-    if (forcedRole) {
-      setUserRole(forcedRole);
-      setIsAuthenticated(forcedRole !== "guest");
-      setLoading(false);
-    }
-
     let unSubDoc: (() => void) | null = null;
     let isCancelled = false;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (forcedRole) return; // prevent overriding the forced state
-
       if (user) {
         // Multi-user safety check: If a different user has signed in, clear all previous cached keys
         const lastUid = localStorage.getItem("lastUserUid");
@@ -337,15 +326,7 @@ export default function App() {
         }
         localStorage.setItem("lastUserUid", user.uid);
 
-        // Optimistic UI: read local role first so app loads instantly
-        const localRole = localStorage.getItem("userRole");
-        if (localRole) {
-          setUserRole(localRole);
-          setIsAuthenticated(true);
-          setLoading(false);
-        }
-
-        // Fetch role from Firestore for security in background
+        // Authoritative validation from Firestore
         try {
           const userDoc = await Promise.race([
             getDoc(doc(db, "users", user.uid)),
@@ -356,46 +337,41 @@ export default function App() {
           
           if (isCancelled) return;
 
-          let roleToSet = "student";
-
-          if (user.email === "rahulsah4534@gmail.com") {
-            roleToSet = "admin";
-            setDoc(
-              doc(db, "users", user.uid),
-              {
-                role: "admin",
-                email: user.email,
-                activeSessions: arrayUnion(localSessionId),
-              },
-              { merge: true },
-            ).catch((e) => console.error("Failed to persist admin role:", e));
-          } else if (userDoc && userDoc.exists()) {
-            roleToSet = userDoc.data().role || "student";
+          if (userDoc && userDoc.exists()) {
+            const uData = userDoc.data();
+            if (uData.status === 'blocked' || uData.status === 'rejected' || uData.active === false || uData.status === 'pending') {
+              await signOut(auth);
+              setIsAuthenticated(false);
+              setUserRole('guest');
+              localStorage.removeItem("userRole");
+              setLoading(false);
+              return;
+            }
+            const authoritativeRole = (uData.role || "student").toLowerCase();
+            setUserRole(authoritativeRole);
+            localStorage.setItem("userRole", authoritativeRole);
+            
             setDoc(
               doc(db, "users", user.uid),
               { activeSessions: arrayUnion(localSessionId) },
               { merge: true },
             ).catch((e) => console.warn("Failed to set active session:", e));
           } else {
-            // Document doesn't exist! They might be signing up right now OR they were deleted.
-            if (window.location.pathname !== "/login") {
-              await signOut(auth);
-              setIsAuthenticated(false);
-              setLoading(false);
-              return;
-            }
+            // Unregistered / arbitrary account not in database -> Deny access
+            await signOut(auth);
+            setIsAuthenticated(false);
+            setUserRole('guest');
+            localStorage.removeItem("userRole");
+            setLoading(false);
+            return;
           }
 
-          if (roleToSet !== localRole) {
-              setUserRole(roleToSet);
-              localStorage.setItem("userRole", roleToSet);
-          }
           setIsAuthenticated(true);
           setLoading(false);
 
           let docExisted = userDoc ? userDoc.exists() : false;
 
-          // Setup real-time listener for cross-device logout
+          // Setup real-time listener for cross-device logout, role change, and status revocation
           if (unSubDoc) unSubDoc();
           unSubDoc = onSnapshot(
             doc(db, "users", user.uid),
@@ -403,6 +379,17 @@ export default function App() {
               if (docSnap.exists()) {
                 docExisted = true;
                 const data = docSnap.data();
+                if (data.status === 'blocked' || data.status === 'rejected' || data.active === false || data.status === 'pending') {
+                  signOut(auth);
+                  setIsAuthenticated(false);
+                  setUserRole('guest');
+                  localStorage.removeItem("userRole");
+                  return;
+                }
+                if (data.role && data.role.toLowerCase() !== userRole) {
+                  setUserRole(data.role.toLowerCase());
+                  localStorage.setItem("userRole", data.role.toLowerCase());
+                }
                 if (data.activeSessions && Array.isArray(data.activeSessions)) {
                   if (!data.activeSessions.includes(localSessionId)) {
                     // Session was revoked
@@ -410,7 +397,7 @@ export default function App() {
                   }
                 }
               } else {
-                if (docExisted && user.email !== "rahulsah4534@gmail.com") {
+                if (docExisted) {
                   // Profile deleted while actively using the app!
                   signOut(auth);
                   window.location.reload();
@@ -422,13 +409,13 @@ export default function App() {
             },
           );
         } catch (err) {
-          console.error("Error fetching role:", err);
-          if (user.email === "rahulsah4534@gmail.com") {
-            setUserRole("admin");
-            localStorage.setItem("userRole", "admin");
+          console.error("Error fetching authoritative role:", err);
+          // If network timeout, fall back safely without privilege escalation
+          const localRole = localStorage.getItem("userRole");
+          if (localRole && ['admin', 'teacher', 'student'].includes(localRole)) {
+            setUserRole(localRole);
           } else {
             setUserRole("student");
-            localStorage.setItem("userRole", "student");
           }
         }
         setIsAuthenticated(true);
@@ -528,7 +515,7 @@ export default function App() {
           <Route
             path="account-admin"
             element={
-              isAuthenticated && (userRole === "admin" || userRole === "bill_generator") ? (
+              isAuthenticated && userRole === "admin" ? (
                 <AccountAdmin />
               ) : (
                 <Navigate to="/" />

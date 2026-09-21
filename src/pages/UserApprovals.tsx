@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Shield, Search, CheckCircle2, AlertCircle, User, Mail, Smartphone, BadgeCheck, MoreHorizontal, Trash2, Edit3, X, Filter, UserPlus, Users, UserCheck, ShieldCheck, Lock, Eye, EyeOff, ChevronDown, Calendar, Sparkles, Copy, Check } from 'lucide-react';
+import { Shield, Search, CheckCircle2, AlertCircle, User, Mail, Smartphone, BadgeCheck, MoreHorizontal, Trash2, Edit3, X, Filter, UserPlus, Users, UserCheck, ShieldCheck, Lock, Eye, EyeOff, ChevronDown, Calendar, KeyRound, Copy, Check, AlertTriangle } from 'lucide-react';
 import { db, auth, firebaseConfig } from '../firebase';
 import { doc, onSnapshot, collection, updateDoc, deleteDoc, setDoc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { onAuthStateChanged, getAuth } from 'firebase/auth';
 import { initializeApp, getApps } from 'firebase/app';
 import { initializeAuth, createUserWithEmailAndPassword, inMemoryPersistence } from 'firebase/auth';
 import NepaliADDatePicker from '../components/NepaliADDatePicker';
+import { checkDuplicateStudentRoll, checkDuplicateStudentRollInFirestore, extractStudentRoll } from '../lib/studentValidation';
 
 // Initialize a secondary Firebase app to create users without signing out the admin
 const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
@@ -160,31 +161,30 @@ export default function UserApprovals() {
     const runMigration = async () => {
       if (!auth.currentUser || isUsersLoading) return;
       
-      const adminEmail = 'rahulsah4534@gmail.com';
-      
-      // 1. Check if the logged-in super admin has a document in the users collection
-      if (auth.currentUser.email === adminEmail) {
-        const adminInList = usersList.find(u => u.id === auth.currentUser?.uid);
-        if (!adminInList) {
-          console.log("Super admin document missing from users collection. Creating it...");
-          try {
-            await setDoc(doc(db, 'users', auth.currentUser.uid), {
-              email: adminEmail,
-              fullName: 'Rahul Sah',
-              role: 'admin',
-              adminTier: 'primary',
-              status: 'approved',
-              active: true,
-              createdAt: new Date().toISOString()
-            });
-          } catch (err) {
-            console.error("Failed to self-heal super admin document:", err);
-          }
+      const currentUserRole = localStorage.getItem('userRole');
+      if (currentUserRole !== 'admin') return;
+
+      // 1. Check if the logged-in admin has a document in the users collection
+      const adminInList = usersList.find(u => u.id === auth.currentUser?.uid);
+      if (!adminInList && auth.currentUser) {
+        console.log("Admin document missing from users collection. Creating it...");
+        try {
+          await setDoc(doc(db, 'users', auth.currentUser.uid), {
+            email: auth.currentUser.email || 'admin@shikshantar.edu.np',
+            fullName: auth.currentUser.displayName || 'Administrator',
+            role: 'admin',
+            adminTier: 'primary',
+            status: 'approved',
+            active: true,
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (err) {
+          console.error("Failed to self-heal admin document:", err);
         }
       }
       
       // 2. Migrate any orphaned user profiles from (default) database to custom database
-      if (auth.currentUser.email === adminEmail) {
+      if (currentUserRole === 'admin') {
         try {
           const { getFirestore: getFirestoreSecondary } = await import('firebase/firestore');
           const secondaryDb = getFirestoreSecondary(secondaryApp); // This points to (default)
@@ -278,6 +278,18 @@ export default function UserApprovals() {
         setTimeout(() => setStatus({ type: null, message: '' }), 3000);
         return;
       }
+
+      // Check for duplicate Roll Number in the SAME class
+      const dupCheck = checkDuplicateStudentRoll(usersList, editingUser.class || '', formattedId, editingUser.id);
+      if (dupCheck.isDuplicate) {
+        setStatus({
+          type: 'error',
+          message: dupCheck.message || `Roll number already exists in Class ${editingUser.class}. Duplicate roll numbers in the same class are not allowed.`
+        });
+        setTimeout(() => setStatus({ type: null, message: '' }), 6000);
+        return;
+      }
+
       editingUser.studentId = formattedId;
     } else {
       // Staff / Admin format: SA_T01, etc.
@@ -317,6 +329,9 @@ export default function UserApprovals() {
         } else if (!editingUser.classAssignedYear) {
           rawUpdateData.classAssignedYear = academicYear;
         }
+        const extractedRoll = extractStudentRoll(editingUser.studentId, editingUser.class);
+        rawUpdateData.rollNumber = extractedRoll;
+        rawUpdateData.rollNo = extractedRoll;
       }
 
       if (rawUpdateData.role === 'admin') {
@@ -400,9 +415,13 @@ export default function UserApprovals() {
       // 1. First, attempt to delete Firebase Authentication account via the backend API (if available)
       let authDeleted = false;
       try {
+        const idToken = await auth.currentUser?.getIdToken();
         const response = await fetch('/api/users/delete-auth', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+          },
           body: JSON.stringify({ uid: userToDelete.id })
         });
         
@@ -533,9 +552,13 @@ export default function UserApprovals() {
       // 1. Call backend to delete Firebase Authentication accounts in bulk first (if backend is available)
       let backendSuccess = false;
       try {
+        const idToken = await auth.currentUser?.getIdToken();
         const response = await fetch('/api/users/delete-auth-bulk', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+          },
           body: JSON.stringify({ uids: selectedUsers })
         });
         
@@ -965,6 +988,18 @@ export default function UserApprovals() {
         });
         return;
       }
+
+      // Check for duplicate Roll Number in the SAME class
+      const dupCheck = checkDuplicateStudentRoll(usersList, newUser.class || '', formattedId);
+      if (dupCheck.isDuplicate) {
+        setStatus({ 
+          type: 'error', 
+          message: dupCheck.message || `Roll number already exists in Class ${newUser.class}. Duplicate roll numbers in the same class are not allowed.` 
+        });
+        setTimeout(() => setStatus({ type: null, message: '' }), 6000);
+        return;
+      }
+
       normalizedStudentId = formattedId;
 
       if (!newUser.class) {
@@ -1463,6 +1498,21 @@ export default function UserApprovals() {
                             <button
                               onClick={async () => {
                                 try {
+                                  if (user.role === 'student') {
+                                    const dupCheck = checkDuplicateStudentRoll(
+                                      usersList.filter(u => u.id !== user.id && u.status === 'active'),
+                                      user.class || '',
+                                      user.studentId || user.rollNumber || user.rollNo || ''
+                                    );
+                                    if (dupCheck.isDuplicate) {
+                                      setStatus({
+                                        type: 'error',
+                                        message: `Cannot approve: ${dupCheck.message}`
+                                      });
+                                      setTimeout(() => setStatus({ type: null, message: '' }), 6000);
+                                      return;
+                                    }
+                                  }
                                   const updateFields: any = { status: 'active' };
                                   await updateDoc(doc(db, 'users', user.id), updateFields);
                                   if (user.role === 'student' && user.class) {
@@ -1871,6 +1921,25 @@ export default function UserApprovals() {
                     ? "Format: SA[Class][Roll Number] (e.g., SA524 if class is 5 and roll number is 24)"
                     : "Format: SA_T01, SA_T02, etc."}
                 </p>
+                {editingUser.role === 'student' && editingUser.class && editingUser.studentId && (() => {
+                  const dup = checkDuplicateStudentRoll(usersList, editingUser.class, editingUser.studentId, editingUser.id);
+                  if (dup.isDuplicate) {
+                    return (
+                      <div className="p-3 bg-red-50 border-2 border-red-200 rounded-xl text-xs text-red-700 font-bold flex items-start gap-2 mt-2 shadow-sm animate-pulse">
+                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-black text-red-900 uppercase tracking-wide block">Duplicate Roll Number Detected!</span>
+                          <p className="mt-0.5 text-[11px] font-medium text-red-800">{dup.message}</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 ml-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Roll No. {dup.extractedRoll || 'N/A'} is valid and unique for Class {editingUser.class}
+                    </div>
+                  );
+                })()}
               </div>
 
               {editingUser.role === 'student' && (
@@ -2122,7 +2191,7 @@ export default function UserApprovals() {
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-[11px] font-black tracking-wide transition-all border border-amber-300 shadow-xs cursor-pointer active:scale-95"
                       title="Click to automatically create a strong password meeting all criteria"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                      <KeyRound className="w-3.5 h-3.5 text-amber-600" />
                       <span>Auto-Generate</span>
                     </button>
                   </div>
@@ -2167,7 +2236,7 @@ export default function UserApprovals() {
                   {!newUser.password && (
                     <div className="flex items-center justify-between bg-blue-50/70 border border-blue-100 rounded-xl p-2.5 mt-2 text-[11px] text-blue-800">
                       <div className="flex items-center gap-2 font-medium">
-                        <Sparkles className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <KeyRound className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                         <span>Save time by clicking <strong>Auto-Generate</strong> above.</span>
                       </div>
                       <button
@@ -2299,6 +2368,25 @@ export default function UserApprovals() {
                       ? "Format: SA[Class][Roll Number] (e.g., SA524 if class is 5 and roll number is 24)"
                       : "Format: SA_T01, SA_T02, etc."}
                   </p>
+                  {newUser.role === 'student' && newUser.class && newUser.studentId && (() => {
+                    const dup = checkDuplicateStudentRoll(usersList, newUser.class, newUser.studentId);
+                    if (dup.isDuplicate) {
+                      return (
+                        <div className="p-3 bg-red-50 border-2 border-red-200 rounded-xl text-xs text-red-700 font-bold flex items-start gap-2 mt-2 shadow-sm animate-pulse">
+                          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-black text-red-900 uppercase tracking-wide block">Duplicate Roll Number Detected!</span>
+                            <p className="mt-0.5 text-[11px] font-medium text-red-800">{dup.message}</p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 ml-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Roll No. {dup.extractedRoll || 'N/A'} is available for Class {newUser.class}
+                      </div>
+                    );
+                  })()}
                 </div>
                 {newUser.role === 'student' && (
                   <>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Helmet } from 'react-helmet-async';
-import { Upload, Link as LinkIcon, Image as ImageIcon, Trash2, CheckCircle, Circle, X, Sparkles, Eye, Video, Layers, Calendar, Users, Camera, Play, Grid, Coffee, Heart, RotateCw, StickyNote, Pin, Palette, Check, Plus, Volume2, VolumeX, Sun, Moon, Wind, Trees } from 'lucide-react';
+import { Upload, Link as LinkIcon, Image as ImageIcon, Trash2, CheckCircle, Circle, X, Eye, Video, Layers, Calendar, Users, Camera, Play, Grid, Coffee, Heart, RotateCw, StickyNote, Pin, Palette, Check, Plus, Volume2, VolumeX, Sun, Moon, Wind, Trees } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const faderVariants = {

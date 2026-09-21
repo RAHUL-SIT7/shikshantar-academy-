@@ -214,7 +214,7 @@ export default function ReportsAnalyticsTab({ students, transactions }: { studen
                       <tr key={idx} className="hover:bg-red-50/10">
                          <td className="p-4 px-6 font-bold text-gray-800">{s.name}</td>
                          <td className="p-4 text-xs font-black text-gray-500">{s.class}</td>
-                         <td className="p-4 text-right font-black text-red-500">रू {s.due?.toLocaleString()}</td>
+                         <td className="p-4 text-right font-black text-red-500">रू {(s.due ?? 0).toLocaleString()}</td>
                          <td className="p-4 text-center text-xs font-bold text-gray-500">{s.guardianPhone || 'N/A'}</td>
                          <td className="p-4 text-right">
                            <button className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-[10px] font-black uppercase hover:bg-green-100">WhatsApp Alert</button>

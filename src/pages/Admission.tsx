@@ -35,7 +35,6 @@ import {
   Building,
   Clock,
   ChevronRight,
-  Sparkles,
   Award,
   ShieldCheck,
   FileCheck,
@@ -46,7 +45,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { auth } from "../firebase";
-import logoImage from "../assets/logo.png";
+const logoImage = "/logo.png";
 
 export default function Admission() {
   const navigate = useNavigate();
@@ -721,137 +720,137 @@ Submitted via Digital Admission Portal.`;
           )}
         </div>
 
-        {/* 12-Column Responsive Portal Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Top Supporting Information Banner / Guide Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           
-          {/* Side Panel Column: Column 1-4 */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
+          {/* Card 1: School Profile & Mission */}
+          <div className="bg-gradient-to-br from-[#1B4F72] to-[#123851] text-white rounded-2xl p-5 shadow-sm relative overflow-hidden flex flex-col justify-between">
+            <div className="absolute top-0 right-0 w-28 h-28 bg-white/5 rounded-full blur-xl -mr-8 -mt-8 pointer-events-none" />
             
-            {/* Info Card */}
-            <div className="w-full bg-gradient-to-br from-[#1B4F72] to-[#123851] text-white rounded-3xl p-6 shadow-xl relative overflow-hidden flex flex-col gap-6">
-            
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
-
-            {/* School Profile brand */}
-            <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+            <div className="flex items-center gap-3 border-b border-white/10 pb-3">
               <img
                 src={logoUrl}
                 alt="Shikshantar Academy Logo"
-                className="w-12 h-12 object-contain rounded-full bg-white p-0.5 border border-white/20 shadow-sm"
+                className="w-10 h-10 object-contain rounded-full bg-white p-0.5 border border-white/20 shadow-xs"
               />
               <div>
-                <h1 className="text-base font-black tracking-wide uppercase leading-tight font-sans text-white">
+                <h1 className="text-sm font-black tracking-wide uppercase leading-tight font-sans text-white">
                   Shikshantar
                 </h1>
-                <p className="text-[10px] text-white/60 font-mono tracking-widest font-semibold">
-                  ACADEMY
+                <p className="text-[9px] text-white/70 font-mono tracking-widest font-semibold">
+                  ACADEMY ADMISSIONS
                 </p>
               </div>
             </div>
 
-            {/* Quick Pitch */}
-            <div className="space-y-1.5">
-              <h2 className="text-sm font-bold text-[#F0A500] uppercase tracking-wider">
+            <div className="space-y-1 mt-3">
+              <h2 className="text-xs font-bold text-[#F0A500] uppercase tracking-wider">
                 Digital Admission Portal
               </h2>
-              <p className="text-xs text-slate-200/90 leading-relaxed">
-                Experience high-fidelity school management and creative Nepalese pedagogy. Registered entries are directly processed for classroom seat-allotments.
+              <p className="text-[11px] text-slate-200/90 leading-relaxed">
+                Experience high-fidelity academic management and creative Nepalese pedagogy. Registered entries are directly processed for classroom seat-allotments.
               </p>
             </div>
 
-            {/* Application Walkthrough Tracker representation */}
-            <div className="space-y-3.5">
-              <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                Application Intake Steps
-              </h3>
+            <div className="pt-3 border-t border-white/10 flex items-center justify-between text-[11px] text-slate-300 mt-2">
+              <span className="flex items-center gap-1"><MapPin className="w-3 h-3 text-[#F0A500]" /> Bastipur, Siraha</span>
+              <span className="font-mono text-[#F0A500] text-[10px] font-bold">Session 2083</span>
+            </div>
+          </div>
 
-              <div className="flex gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-[#F0A500] text-slate-950 font-black text-[10px] flex items-center justify-center shrink-0">
+          {/* Card 2: Application Walkthrough Tracker */}
+          <div className="bg-slate-900/95 text-white rounded-2xl p-5 shadow-sm relative overflow-hidden flex flex-col justify-between border border-slate-800">
+            <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-[#F0A500]" /> Application Intake Steps
+            </h3>
+
+            <div className="space-y-2.5 my-2">
+              <div className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#F0A500] text-slate-950 font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">
                   1
                 </span>
                 <div>
                   <p className="text-[11px] font-bold text-slate-100">Portal Register</p>
-                  <p className="text-[10px] text-slate-300">Submit secure candidate attributes today.</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Submit secure candidate attributes today.</p>
                 </div>
               </div>
 
-              <div className="flex gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-white/50 border border-white/10 font-bold text-[10px] flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
                   2
                 </span>
                 <div>
-                  <p className="text-[11px] font-bold text-slate-300">Credential Review</p>
-                  <p className="text-[10px] text-white/55">Our registrar screens the records within 48h.</p>
+                  <p className="text-[11px] font-bold text-slate-200">Credential Review</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Registrar screens records within 48 hours.</p>
                 </div>
               </div>
 
-              <div className="flex gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-white/50 border border-white/10 font-bold text-[10px] flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
                   3
                 </span>
                 <div>
-                  <p className="text-[11px] font-bold text-slate-303">Interactive Meet</p>
-                  <p className="text-[10px] text-white/55">Visit Bastipur-5 for classroom integration.</p>
+                  <p className="text-[11px] font-bold text-slate-200">Interactive Meet</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Classroom integration & student onboarding.</p>
                 </div>
               </div>
             </div>
 
-            {/* Document Check list */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-[#F0A500] flex items-center gap-1">
+            <p className="text-[9px] text-slate-500 font-mono pt-2 border-t border-slate-800">Prompt responses via SMS / Call</p>
+          </div>
+
+          {/* Card 3: Files Checklist & Support Desk */}
+          <div className="bg-slate-900/95 text-white rounded-2xl p-5 shadow-sm relative overflow-hidden flex flex-col justify-between border border-slate-800">
+            <div>
+              <h4 className="text-[10px] font-black uppercase tracking-wider text-[#F0A500] flex items-center gap-1.5 border-b border-slate-800 pb-2">
                 <FileCheck className="w-3.5 h-3.5" /> Admission Files To Prepare
               </h4>
-              <ul className="space-y-1 text-[10.5px] text-slate-200">
+              <ul className="space-y-1.5 text-[10.5px] text-slate-300 mt-2.5">
                 <li className="flex items-center gap-1.5">
-                  <span className="text-emerald-400">✔</span> 2x Child Passport size photograph
+                  <span className="text-emerald-400 font-bold">✔</span> 2x Child Passport-size photographs
                 </li>
                 <li className="flex items-center gap-1.5">
-                  <span className="text-emerald-400">✔</span> Authentic Birth Register (Janma Darta)
+                  <span className="text-emerald-400 font-bold">✔</span> Authentic Birth Certificate (Janma Darta)
                 </li>
                 <li className="flex items-center gap-1.5">
-                  <span className="text-emerald-400">✔</span> Transfer details from previous school
+                  <span className="text-emerald-400 font-bold">✔</span> Transfer certificate from previous school
                 </li>
               </ul>
             </div>
 
-            {/* Contact Support details info card block */}
-            <div className="border-t border-white/10 pt-4 space-y-1.5 text-xs text-slate-300">
-              <p className="text-[10px] uppercase font-bold tracking-widest text-white/40">SUPPORT DESK</p>
-              <p className="font-bold text-slate-100 flex items-center gap-1.5 leading-none">
+            <div className="border-t border-slate-800 pt-2.5 mt-2 space-y-1 text-xs text-slate-300">
+              <p className="text-[9px] uppercase font-bold tracking-widest text-slate-400">SUPPORT HELPLINE</p>
+              <p className="font-bold text-slate-100 flex items-center gap-1.5 text-[11px]">
                 <Phone className="w-3 h-3 text-[#F0A500]" /> +977 9709867048, +977 9807790805
               </p>
-              <p className="text-[11px] flex items-center gap-1.5 font-medium text-slate-350">
-                <MapPin className="w-3 h-3 text-[#F0A500]" /> Karjanha-05, Bastipur, Siraha
-              </p>
             </div>
-
           </div>
 
         </div>
 
-          {/* Form Content / Success panel: Column 5-12 */}
-          <div className="lg:col-span-8 relative rounded-3xl group transition-all duration-300">
-            {/* Outer Glow Bloom aura */}
-            <div className="absolute inset-2 bg-gradient-to-r from-[#0a3d62] via-[#0284c7] to-[#F0A500] opacity-0 group-hover:opacity-30 blur-2xl transition-all duration-500 rounded-3xl -z-10 group-hover:scale-102 pointer-events-none" />
+        {/* Full-Width Admission Application Form Card */}
+        <div className="w-full relative rounded-3xl group transition-all duration-300">
+          {/* Outer Glow Bloom aura */}
+          <div className="absolute inset-2 bg-gradient-to-r from-[#0a3d62] via-[#0284c7] to-[#F0A500] opacity-0 group-hover:opacity-20 blur-2xl transition-all duration-500 rounded-3xl -z-10 group-hover:scale-101 pointer-events-none" />
 
-            {/* Boundary box with rotating gradient for lightning border effect */}
-            <div className="relative w-full h-full rounded-3xl overflow-hidden p-[2.5px] bg-gray-150 dark:bg-slate-800 transition-colors duration-300 group-hover:bg-transparent flex flex-col shadow-xl">
-              {/* Spinning lightning border */}
-              <div className="absolute inset-[-180%] bg-[conic-gradient(from_0deg,#0a3d62,#0284c7,#F0A500,#fbbf24,#0ea5e9,#0a3d62)] animate-[spin_4s_linear_infinite] opacity-25 group-hover:opacity-100 transition-opacity duration-300 z-0 pointer-events-none" />
+          {/* Boundary box with rotating gradient for lightning border effect */}
+          <div className="relative w-full rounded-3xl overflow-hidden p-[2px] bg-slate-200 dark:bg-slate-800 transition-colors duration-300 flex flex-col shadow-lg">
+            {/* Spinning lightning border */}
+            <div className="absolute inset-[-180%] bg-[conic-gradient(from_0deg,#0a3d62,#0284c7,#F0A500,#fbbf24,#0ea5e9,#0a3d62)] animate-[spin_4s_linear_infinite] opacity-20 group-hover:opacity-60 transition-opacity duration-300 z-0 pointer-events-none" />
 
-              {/* Inner masked content card */}
-              <div className="relative w-full h-full bg-white dark:bg-slate-900 rounded-[22px] p-6 md:p-8 flex flex-col z-10 overflow-hidden flex-1 min-h-[455px]">
-                
-                {/* Background Watermark decoration */}
-                <div
-                  className="absolute inset-0 z-0 opacity-[0.035] dark:opacity-[0.015] pointer-events-none select-none"
-                  style={{
-                    backgroundImage: `url('${logoUrl}')`,
-                    backgroundPosition: "center",
-                    backgroundSize: "40%",
-                    backgroundRepeat: "no-repeat",
-                  }}
-                />
+            {/* Inner masked content card */}
+            <div className="relative w-full bg-white dark:bg-slate-900 rounded-[22px] p-6 md:p-8 flex flex-col z-10 overflow-hidden min-h-[455px]">
+              
+              {/* Background Watermark decoration */}
+              <div
+                className="absolute inset-0 z-0 opacity-[0.035] dark:opacity-[0.015] pointer-events-none select-none"
+                style={{
+                  backgroundImage: `url('${logoUrl}')`,
+                  backgroundPosition: "center",
+                  backgroundSize: "40%",
+                  backgroundRepeat: "no-repeat",
+                }}
+              />
             
             {status.type === "success" ? (
               <motion.div
@@ -1003,7 +1002,7 @@ Submitted via Digital Admission Portal.`;
                     }}
                     className="px-4 py-2 bg-[#1B4F72] hover:bg-[#123851] rounded-xl text-xs font-bold font-sans text-white flex items-center gap-1.5 shadow-sm active:scale-[0.98] transition-all"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" /> Apply Again
+                    <RefreshCw className="w-3.5 h-3.5 text-blue-200" /> Apply Again
                   </button>
                 </div>
               </motion.div>
@@ -1607,8 +1606,6 @@ Submitted via Digital Admission Portal.`;
               </div>
             </div>
           </div>
-
-        </div>
 
       </div>
 

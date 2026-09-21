@@ -4,6 +4,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 
 import NepaliDate from 'nepali-date-converter';
+import { safeDispatchEvent } from '../lib/safeEvents';
 
 export interface Notice {
   id: string;
@@ -275,7 +276,7 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
       if (!reads.includes(noticeId)) {
         const newReads = [...reads, noticeId];
         localStorage.setItem('localReadNotices', JSON.stringify(newReads));
-        window.dispatchEvent(new Event('localReadsChanged'));
+        safeDispatchEvent('localReadsChanged');
       }
     } catch (e) {
       console.error(e);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Search, MapPin, Award, Briefcase, GraduationCap, Edit2, Trash2, Star, Plus, Mail, X, CheckCircle2, BarChart2, PieChart, ChevronDown, Sparkles } from 'lucide-react';
+import { Search, MapPin, Award, Briefcase, GraduationCap, Edit2, Trash2, Star, Plus, Mail, X, CheckCircle2, BarChart2, PieChart, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../firebase';
 import { collection, addDoc, query, where, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -666,8 +666,8 @@ export default function Alumni() {
                           {a.category}
                         </span>
                         {a.isGuestRecommended && (
-                          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase animate-pulse">
-                            <Sparkles className="w-2.5 h-2.5 text-amber-500 shrink-0" /> Recommended Success
+                          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase">
+                            <Award className="w-2.5 h-2.5 text-amber-500 shrink-0" /> Recommended Success
                           </span>
                         )}
                       </div>

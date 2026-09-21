@@ -6,7 +6,6 @@ import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'fireb
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import jsPDF from 'jspdf';
 import { toCanvas } from 'html-to-image';
-import * as XLSX from 'xlsx';
 
 import { ReportCardTemplate } from '../components/admin/ReportCardTemplate';
 import { StudentResult } from '../data/resultsState';
@@ -46,19 +45,35 @@ export default function Result() {
                      if (uData.rollNumber) possibleIds.add(String(uData.rollNumber));
                      if (uData.rollNo) possibleIds.add(String(uData.rollNo));
                  } else {
-                     // Try querying by studentId
-                     const q1 = query(collection(db, 'users'), where('studentId', '==', uid));
-                     const qSnap1 = await getDocs(q1);
-                     qSnap1.forEach(docSnap => {
-                         possibleIds.add(docSnap.id);
-                         const uData = docSnap.data();
-                         if (uData.studentId) possibleIds.add(String(uData.studentId));
-                         if (uData.rollNumber) possibleIds.add(String(uData.rollNumber));
-                         if (uData.rollNo) possibleIds.add(String(uData.rollNo));
-                     });
+                     // Try querying students collection first
+                     try {
+                         const sDoc = await getDoc(doc(db, 'students', uid));
+                         if (sDoc.exists()) {
+                             const sData = sDoc.data();
+                             possibleIds.add(sDoc.id);
+                             if (sData.studentId) possibleIds.add(String(sData.studentId));
+                             if (sData.rollNumber) possibleIds.add(String(sData.rollNumber));
+                             if (sData.rollNo) possibleIds.add(String(sData.rollNo));
+                         }
+                     } catch (_) {}
+
+                     // Try querying users by studentId if permitted
+                     try {
+                         const q1 = query(collection(db, 'users'), where('studentId', '==', uid));
+                         const qSnap1 = await getDocs(q1);
+                         qSnap1.forEach(docSnap => {
+                             possibleIds.add(docSnap.id);
+                             const uData = docSnap.data();
+                             if (uData.studentId) possibleIds.add(String(uData.studentId));
+                             if (uData.rollNumber) possibleIds.add(String(uData.rollNumber));
+                             if (uData.rollNo) possibleIds.add(String(uData.rollNo));
+                         });
+                     } catch (_) {
+                         // Query may not be permitted for standard users without admin/teacher claims
+                     }
                  }
              } catch (e) {
-                 console.error("Error fetching matching user ids:", e);
+                 // Fallback to uid directly
              }
              return Array.from(possibleIds).filter(Boolean);
          })();

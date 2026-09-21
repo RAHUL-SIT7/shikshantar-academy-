@@ -15,12 +15,11 @@ import LedgerAuditLogTab from '../components/fee_management/LedgerAuditLogTab';
 
 export default function AccountAdmin() {
   const [activeTab, setActiveTab] = useState(() => {
-    const role = localStorage.getItem('userRole') || 'teacher';
-    return role === 'bill_generator' ? 'remit_bills_generator' : (role === 'admin' ? 'fee_structure' : 'simple_ledger');
+    return 'fee_structure';
   });
   const [ledgerFilterStatus, setLedgerFilterStatus] = useState('All');
   const [historySearchTerm, setHistorySearchTerm] = useState('');
-  const [userRole, setUserRole] = useState('teacher'); // Default restrictive
+  const [userRole, setUserRole] = useState('admin');
   const [targetStudentId, setTargetStudentId] = useState<string | undefined>(undefined);
   const [prefillPayment, setPrefillPayment] = useState<any>(null);
 
@@ -30,6 +29,8 @@ export default function AccountAdmin() {
   const [transactionsData, setTransactionsData] = useState<any[]>([]);
   const [cashEntriesData, setCashEntriesData] = useState<any[]>([]);
   const [feeStructures, setFeeStructures] = useState<any[]>([]);
+  const [remitBillsData, setRemitBillsData] = useState<any[]>([]);
+  const [academicYear, setAcademicYear] = useState<string>('2083');
 
   const [stats, setStats] = useState({
      collectedThisMonth: 0,
@@ -55,6 +56,7 @@ export default function AccountAdmin() {
      let unsubTx: any;
      let unsubFees: any;
      let unsubCash: any;
+     let unsubRemitBills: any;
 
      const unsubAuth = onAuthStateChanged(auth, (user) => {
          if (unsubSettings) unsubSettings();
@@ -62,6 +64,7 @@ export default function AccountAdmin() {
          if (unsubTx) unsubTx();
          if (unsubFees) unsubFees();
          if (unsubCash) unsubCash();
+         if (unsubRemitBills) unsubRemitBills();
          if (user) {
              setLoading(true);
              
@@ -71,14 +74,18 @@ export default function AccountAdmin() {
              let currentTx: any[] = [];
              let currentFees: any[] = [];
              let currentCashEntries: any[] = [];
+             let currentRemitBills: any[] = [];
 
              const updateData = () => {
                  setFeeStructures(currentStructs);
                  setTransactionsData(currentTx);
                  setCashEntriesData(currentCashEntries);
+                 setRemitBillsData(currentRemitBills);
+                 setAcademicYear(currentSettings.academicYear || '2083');
 
                  const mergedStudents = currentStudents.map(s => {
                      const studentFees = currentFees.filter(f => f.studentId === s.id);
+                     const studentRemitBills = currentRemitBills.filter(b => b.studentId === s.id || (b.studentName === (s.fullName || s.name) && b.class === s.class));
                      const struct = currentStructs.find((st: any) => st.className === s.class);
                      let baseFee = (s.monthlyFee !== undefined && s.monthlyFee !== null && s.monthlyFee !== "") ? Number(s.monthlyFee) : (struct?.tuition ? Number(String(struct.tuition).replace(/[^0-9.]/g, '')) : 1000);
                      const originalTuition = baseFee;
@@ -125,7 +132,8 @@ export default function AccountAdmin() {
                          guardianName: s.guardianName || 'Unknown',
                          guardianPhone: s.parentPhone || s.phone || '',
                          createdAt: s.createdAt || null,
-                         fees: studentFees // all fee records
+                         fees: studentFees, // all fee records
+                         remitBills: studentRemitBills
                      };
                  });
 
@@ -136,7 +144,7 @@ export default function AccountAdmin() {
                  let collectedYear = 0;
                  
                  currentTx.forEach((tx: any) => {
-                     if (tx.status === 'SUCCESS') collectedYear += Number(tx.amount || 0);
+                     if (tx.status === 'SUCCESS' || tx.status === 'OVERRIDE_SUCCESS') collectedYear += Number(tx.amount || 0);
                  });
 
                  currentFees.forEach(f => {
@@ -159,7 +167,7 @@ export default function AccountAdmin() {
                              txDate = formatBSDateYMD(tx.createdAt.seconds ? tx.createdAt.seconds * 1000 : tx.createdAt);
                          } catch(e) {}
                      }
-                     if (tx.status === 'SUCCESS' && (txDate === todayBS || txDate.startsWith(todayBS))) {
+                     if ((tx.status === 'SUCCESS' || tx.status === 'OVERRIDE_SUCCESS') && (txDate === todayBS || txDate.startsWith(todayBS))) {
                          todayFeeIncome += Number(tx.amount || 0);
                      }
                  });
@@ -235,6 +243,11 @@ export default function AccountAdmin() {
                  currentCashEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                  updateData();
              }, (err) => { console.error('Error fetching cash ledger:', err); });
+
+             unsubRemitBills = onSnapshot(collection(db, 'remitBills'), (snap) => {
+                 currentRemitBills = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                 updateData();
+             }, (err) => { console.error('Error fetching remitBills:', err); });
          } else {
              setLoading(false);
              if (unsubSettings) unsubSettings();
@@ -242,6 +255,7 @@ export default function AccountAdmin() {
              if (unsubTx) unsubTx();
              if (unsubFees) unsubFees();
              if (unsubCash) unsubCash();
+             if (unsubRemitBills) unsubRemitBills();
          }
      });
 
@@ -252,12 +266,13 @@ export default function AccountAdmin() {
          if (unsubTx) unsubTx();
          if (unsubFees) unsubFees();
          if (unsubCash) unsubCash();
+         if (unsubRemitBills) unsubRemitBills();
      };
   }, []);
 
   const ALL_TABS = [
      { id: 'fee_structure', label: 'Fee Structure & Scholarships', roles: ['admin'] },
-     { id: 'remit_bills_generator', label: 'Remit Bills Generator', roles: ['admin', 'bill_generator'] },
+     { id: 'remit_bills_generator', label: 'Remit Bills Generator', roles: ['admin'] },
      { id: 'simple_ledger', label: 'Cash Collection Counter', roles: ['admin'] },
      { id: 'student_laser', label: 'Student Ledger Details', roles: ['admin'] },
      { id: 'transaction_history', label: 'Daily Register & Undo Log', roles: ['admin'] },
@@ -424,17 +439,31 @@ export default function AccountAdmin() {
              <>
                  <div className={activeTab === 'simple_ledger' ? 'block' : 'hidden'}>
                    <SimpleStudentLedgerTab 
-                      students={studentsData} 
-                      transactions={transactionsData} 
-                      onRefresh={fetchFeeData} 
-                      prefillPayment={prefillPayment}
-                      onPrefillClear={() => setPrefillPayment(null)}
-                    />
+                       students={studentsData} 
+                       transactions={transactionsData} 
+                       remitBills={remitBillsData}
+                       academicYear={academicYear}
+                       onRefresh={fetchFeeData} 
+                       prefillPayment={prefillPayment}
+                       onPrefillClear={() => setPrefillPayment(null)}
+                       onViewStudentLedger={(studentId) => {
+                         setTargetStudentId(studentId);
+                         setActiveTab("student_laser");
+                       }}
+                     />
                  </div>
 
                  {activeTab === 'student_laser' && (
                      <div className="mt-4">
-                        <StudentLedgerDetailTab students={studentsData} transactions={transactionsData} onRefresh={fetchFeeData} />
+                        <StudentLedgerDetailTab 
+                            students={studentsData} 
+                            transactions={transactionsData} 
+                            remitBills={remitBillsData}
+                            academicYear={academicYear}
+                            onRefresh={fetchFeeData} 
+                            initialStudentId={targetStudentId}
+                            onSelectStudent={(studentId) => setTargetStudentId(studentId)}
+                         />
                      </div>
                  )}
 

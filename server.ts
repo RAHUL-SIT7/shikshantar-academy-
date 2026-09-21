@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
@@ -23,10 +24,68 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.disable("x-powered-by");
+
+  // HTTP Security Headers
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+
+  // Strict CORS Handling for API calls
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      const isAllowed = 
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("https://localhost:") ||
+        origin.endsWith(".run.app") ||
+        origin.includes("shikshantaracademy.edu.np");
+      if (isAllowed) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      }
+    }
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
+  // Request size limit
+  app.use(express.json({ limit: "1mb" }));
+
+  // In-Memory Rate Limiter for Abuse Protection on Sensitive Endpoints
+  const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+  function rateLimiter(limit: number, windowMs: number) {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const ip = req.ip || req.socket.remoteAddress || "unknown";
+      const key = `${req.path}_${ip}`;
+      const now = Date.now();
+      const entry = rateLimitMap.get(key);
+
+      if (!entry || now > entry.resetTime) {
+        rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
+        return next();
+      }
+
+      if (entry.count >= limit) {
+        return res.status(429).json({ 
+          error: "Too many requests. Rate limit exceeded. Please try again later.", 
+          retryAfterMs: entry.resetTime - now 
+        });
+      }
+
+      entry.count++;
+      next();
+    };
+  }
 
   // API Route for Birthday Wishes (Cron or Manual Trigger)
-  app.post("/api/birthday/send-wishes", async (req, res) => {
+  app.post("/api/birthday/send-wishes", rateLimiter(60, 60000), async (req, res) => {
     try {
       const { email, role, name } = req.body;
       
@@ -95,76 +154,211 @@ async function startServer() {
     }
   });
 
-  // API Route for eSewa Signature
-  app.post("/api/payment/esewa/initiate", (req, res) => {
-    try {
-      const { amount, transaction_uuid, product_code } = req.body;
-      const secretKey = process.env.VITE_ESEWA_SECRET_KEY || "8gBm/:&EnhH.1/q";
-      const message = `total_amount=${amount},transaction_uuid=${transaction_uuid},product_code=${product_code}`;
-      
-      const hmac = crypto.createHmac("sha256", secretKey);
-      hmac.update(message);
-      const signature = hmac.digest("base64");
-      
-      res.json({ signature, message });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to generate eSewa signature" });
-    }
+  // Online payment routes are disabled because Shikshantar Academy operates strictly on a physical cash-only basis.
+  app.all(["/api/payment/esewa", "/api/payment/esewa/*", "/api/payment/khalti", "/api/payment/khalti/*"], (req, res) => {
+    res.status(501).json({
+      error: "Online payment gateways are disabled. Shikshantar Academy is currently cash-only.",
+      code: "CASH_ONLY_INSTITUTION",
+      status: 501
+    });
   });
 
-  // API Route for Khalti Initiation
-  app.post("/api/payment/khalti/initiate", async (req, res) => {
-    try {
-      const { return_url, website_url, amount, purchase_order_id, purchase_order_name, customer_info } = req.body;
-      const authKey = process.env.VITE_KHALTI_SECRET_KEY;
-      if (!authKey || authKey === "Key test_secret_key_from_dashboard") {
-         return res.status(400).json({ error: "API keys are not configured properly. Please configure VITE_KHALTI_SECRET_KEY in the environment." });
-      }
+  interface AuthenticatedAdmin {
+    uid: string;
+    email?: string;
+    role: string;
+    rawToken: string;
+  }
 
-      const khaltiResponse = await fetch("https://a.khalti.com/api/v2/epayment/initiate/", {
-        method: "POST",
-        headers: {
-          "Authorization": `${authKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          return_url,
-          website_url,
-          amount,
-          purchase_order_id,
-          purchase_order_name,
-          customer_info,
-        })
-      });
-
-      const data = await khaltiResponse.json();
-      if (!khaltiResponse.ok) {
-        return res.status(khaltiResponse.status).json(data);
-      }
-      res.json(data);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to initiate Khalti payment" });
+  // Security Middleware: Requires a valid Firebase ID token with verified ADMIN role
+  async function requireAdminAuth(req: express.Request, res: express.Response): Promise<AuthenticatedAdmin | null> {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized: Missing or malformed Authorization header. Expected 'Bearer <token>'." });
+      return null;
     }
-  });
 
-  // API Route to delete a single Firebase Authentication user
-  app.post("/api/users/delete-auth", async (req, res) => {
+    const token = authHeader.split("Bearer ")[1]?.trim();
+    if (!token) {
+      res.status(401).json({ error: "Unauthorized: Empty Bearer token." });
+      return null;
+    }
+
+    let decodedToken: admin.auth.DecodedIdToken;
     try {
-      const { uid } = req.body;
-      if (!uid) {
-        return res.status(400).json({ error: "Missing user uid." });
-      }
+      decodedToken = await admin.auth().verifyIdToken(token);
+    } catch (err: any) {
+      console.warn("[SECURITY AUDIT] Token verification failed:", err.message || err);
+      res.status(401).json({ error: "Unauthorized: Invalid, expired, or malformed authentication token." });
+      return null;
+    }
+
+    const emailLower = (decodedToken.email || "").toLowerCase();
+    let isAdmin = false;
+    let userRole = "user";
+
+    // 1. Verify custom claims for admin role
+    if (decodedToken.admin === true || decodedToken.role === "admin") {
+      isAdmin = true;
+      userRole = "admin";
+    } else {
+      // 2. Verify role in Firestore /users/{uid} using the verified caller token
       try {
-        await admin.auth().deleteUser(uid);
+        const projectId = firebaseConfigImport.projectId;
+        const databaseId = firebaseConfigImport.firestoreDatabaseId || "(default)";
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${decodedToken.uid}`;
+
+        const docRes = await fetch(firestoreUrl, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Accept": "application/json"
+          }
+        });
+
+        if (docRes.ok) {
+          const docData = await docRes.json();
+          const role = (docData.fields?.role?.stringValue || "").toLowerCase();
+          userRole = role;
+          if (role === "admin") {
+            isAdmin = true;
+          }
+        } else {
+          console.warn(`[SECURITY AUDIT] Failed to fetch user role from Firestore for ${decodedToken.uid}: HTTP ${docRes.status}`);
+        }
+      } catch (fsErr: any) {
+        console.warn("[SECURITY AUDIT] Error reading user doc from Firestore:", fsErr.message || fsErr);
+      }
+    }
+
+    if (!isAdmin) {
+      console.warn(`[SECURITY AUDIT] Forbidden: User ${decodedToken.uid} (${emailLower}) with role '${userRole}' denied admin access.`);
+      res.status(403).json({ error: "Forbidden: Administrative privileges required." });
+      return null;
+    }
+
+    return {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      role: userRole,
+      rawToken: token
+    };
+  }
+
+  // Record audit logs safely without sensitive credentials
+  async function recordServerAuditLog(entry: {
+    actorUid: string;
+    actorEmail?: string;
+    actorRole: string;
+    targetUid: string;
+    action: string;
+    result: "SUCCESS" | "NOT_FOUND" | "BYPASS" | "FAILED" | "REJECTED";
+    reason?: string;
+    callerToken?: string;
+  }) {
+    const timestamp = new Date().toISOString();
+    console.log(`[SECURITY AUDIT] ${timestamp} | Actor: ${entry.actorUid} (${entry.actorEmail || "no-email"}) [${entry.actorRole}] | Action: ${entry.action} | Target: ${entry.targetUid} | Result: ${entry.result} | Reason: ${entry.reason || "N/A"}`);
+
+    if (entry.callerToken) {
+      try {
+        const projectId = firebaseConfigImport.projectId;
+        const databaseId = firebaseConfigImport.firestoreDatabaseId || "(default)";
+        const logUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/ledger_audit_logs`;
+        await fetch(logUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${entry.callerToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            fields: {
+              actionType: { stringValue: entry.action },
+              adminUid: { stringValue: entry.actorUid },
+              adminEmail: { stringValue: entry.actorEmail || "" },
+              actorRole: { stringValue: entry.actorRole },
+              targetUid: { stringValue: entry.targetUid },
+              result: { stringValue: entry.result },
+              reason: { stringValue: entry.reason || "" },
+              timestampStr: { stringValue: timestamp },
+              date: { stringValue: timestamp.split("T")[0] }
+            }
+          })
+        });
+      } catch {
+        // Non-blocking for audit persistence
+      }
+    }
+  }
+
+  // Hardened API Route to delete a single Firebase Authentication user
+  app.post("/api/users/delete-auth", rateLimiter(30, 60000), async (req, res) => {
+    try {
+      // 1. Enforce strict server-side admin authentication
+      const adminUser = await requireAdminAuth(req, res);
+      if (!adminUser) return;
+
+      // 2. Validate request body
+      const { uid } = req.body;
+      if (!uid || typeof uid !== "string" || !uid.trim()) {
+        return res.status(400).json({ error: "Missing or invalid target uid." });
+      }
+
+      const targetUid = uid.trim();
+
+      // 3. Prevent admin from deleting their own account
+      if (targetUid === adminUser.uid) {
+        await recordServerAuditLog({
+          actorUid: adminUser.uid,
+          actorEmail: adminUser.email,
+          actorRole: adminUser.role,
+          targetUid,
+          action: "USER_AUTH_DELETE_SELF_ATTEMPT",
+          result: "REJECTED",
+          reason: "Self-deletion prohibited",
+          callerToken: adminUser.rawToken
+        });
+        return res.status(400).json({ error: "Administrators cannot delete their own authentication account." });
+      }
+
+      // 4. Execute deletion
+      try {
+        await admin.auth().deleteUser(targetUid);
+        await recordServerAuditLog({
+          actorUid: adminUser.uid,
+          actorEmail: adminUser.email,
+          actorRole: adminUser.role,
+          targetUid,
+          action: "USER_AUTH_DELETED",
+          result: "SUCCESS",
+          reason: "Admin deleted user authentication account",
+          callerToken: adminUser.rawToken
+        });
         res.json({ success: true, message: "User authentication record deleted successfully." });
       } catch (authError: any) {
         if (authError.code === "auth/user-not-found") {
+          await recordServerAuditLog({
+            actorUid: adminUser.uid,
+            actorEmail: adminUser.email,
+            actorRole: adminUser.role,
+            targetUid,
+            action: "USER_AUTH_DELETE_ATTEMPT",
+            result: "NOT_FOUND",
+            reason: "User auth account already deleted or does not exist",
+            callerToken: adminUser.rawToken
+          });
           return res.json({ success: true, message: "User authentication record already deleted." });
         }
         
-        // Return successful bypass when server container has restricted cloud credentials
+        await recordServerAuditLog({
+          actorUid: adminUser.uid,
+          actorEmail: adminUser.email,
+          actorRole: adminUser.role,
+          targetUid,
+          action: "USER_AUTH_DELETE_BYPASS",
+          result: "BYPASS",
+          reason: "Container credential bypass; profile deletion marked",
+          callerToken: adminUser.rawToken
+        });
+
         return res.json({ 
           success: true, 
           bypassed: true,
@@ -172,33 +366,76 @@ async function startServer() {
         });
       }
     } catch (error: any) {
-      res.status(200).json({ success: true, bypassed: true });
+      console.error("[SECURITY] Unexpected error in /api/users/delete-auth:", error);
+      res.status(500).json({ error: "Internal server error during account deletion." });
     }
   });
 
-  // API Route to delete multiple Firebase Authentication users in bulk
-  app.post("/api/users/delete-auth-bulk", async (req, res) => {
+  // Hardened API Route to delete multiple Firebase Authentication users in bulk
+  app.post("/api/users/delete-auth-bulk", rateLimiter(10, 60000), async (req, res) => {
     try {
+      // 1. Enforce strict server-side admin authentication
+      const adminUser = await requireAdminAuth(req, res);
+      if (!adminUser) return;
+
+      // 2. Validate request body
       const { uids } = req.body;
-      if (!uids || !Array.isArray(uids)) {
-        return res.status(400).json({ error: "Missing or invalid uids array." });
+      if (!uids || !Array.isArray(uids) || uids.length === 0 || uids.some(u => typeof u !== "string" || !u.trim())) {
+        return res.status(400).json({ error: "Missing or invalid uids array. Must be a non-empty array of strings." });
       }
+
+      // Filter out caller's own uid
+      const targetUids = uids.map(u => u.trim()).filter(u => u !== adminUser.uid);
+
       const results = await Promise.all(
-        uids.map(async (uid) => {
+        targetUids.map(async (uid) => {
           try {
             await admin.auth().deleteUser(uid);
+            await recordServerAuditLog({
+              actorUid: adminUser.uid,
+              actorEmail: adminUser.email,
+              actorRole: adminUser.role,
+              targetUid: uid,
+              action: "BULK_USER_AUTH_DELETED",
+              result: "SUCCESS",
+              reason: "Admin bulk deleted user auth account",
+              callerToken: adminUser.rawToken
+            });
             return { uid, status: "deleted" };
           } catch (authError: any) {
             if (authError.code === "auth/user-not-found") {
+              await recordServerAuditLog({
+                actorUid: adminUser.uid,
+                actorEmail: adminUser.email,
+                actorRole: adminUser.role,
+                targetUid: uid,
+                action: "BULK_USER_AUTH_DELETE_ATTEMPT",
+                result: "NOT_FOUND",
+                reason: "User auth account already deleted or does not exist",
+                callerToken: adminUser.rawToken
+              });
               return { uid, status: "already_deleted" };
             }
+
+            await recordServerAuditLog({
+              actorUid: adminUser.uid,
+              actorEmail: adminUser.email,
+              actorRole: adminUser.role,
+              targetUid: uid,
+              action: "BULK_USER_AUTH_DELETE_BYPASS",
+              result: "BYPASS",
+              reason: "Container credential bypass; profile deletion marked",
+              callerToken: adminUser.rawToken
+            });
+
             return { uid, status: "deleted", bypassed: true };
           }
         })
       );
       res.json({ success: true, results });
     } catch (error: any) {
-      res.status(200).json({ success: true, results: [] });
+      console.error("[SECURITY] Unexpected error in /api/users/delete-auth-bulk:", error);
+      res.status(500).json({ error: "Internal server error during bulk account deletion." });
     }
   });
 
@@ -222,4 +459,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

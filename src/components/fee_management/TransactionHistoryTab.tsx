@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatBSDate } from '../../lib/nepaliDate';
-import { Search, Printer, Edit2, CornerUpLeft, Download, Calendar, Filter, ChevronRight, ChevronDown, Receipt, FileDown, X, Undo2, Plus, Trash2, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Search, Printer, Edit2, CornerUpLeft, Download, Calendar, Filter, ChevronRight, ChevronDown, Receipt, FileDown, X, Undo2, Plus, Trash2, ArrowUpRight, ArrowDownRight, UserCheck, Lock } from 'lucide-react';
 import QRCode from 'react-qr-code';
-import { db } from '../../firebase';
-import { collection, doc, writeBatch, query, where, getDocs, deleteField, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, doc, writeBatch, query, where, getDocs, deleteField, addDoc, serverTimestamp, onSnapshot, getDoc, increment } from 'firebase/firestore';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -13,7 +14,11 @@ import 'nepali-datepicker-reactjs/dist/index.css';
 import NepaliDate from 'nepali-date-converter';
 import { exportToPDF } from '../../lib/pdfExport';
 import { exportToExcel, exportMultiSheetExcel } from '../../lib/excelExport';
-import logoImage from '../../assets/logo.png';
+import { recordLedgerAuditLog } from '../../lib/auditLogger';
+import { cancelPaymentTransaction } from '../../lib/paymentCancellationEngine';
+import { processPaymentRefund, deleteSystemTransactionSafe } from '../../lib/paymentRefundEngine';
+import SecurityPasswordConfirmModal from './SecurityPasswordConfirmModal';
+const logoImage = "/logo.png";
 
 export default function TransactionHistoryTab({ transactionsData, studentsData = [], onRefresh, initialSearchTerm = '', onSearchTermChange }: { transactionsData: any[], studentsData?: any[], onRefresh: () => void, initialSearchTerm?: string, onSearchTermChange?: (val: string) => void }) {
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm);
@@ -52,6 +57,34 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
   const [cashRemarks, setCashRemarks] = useState('');
   const [cashSource, setCashSource] = useState('A/C');
   const [savingCash, setSavingCash] = useState(false);
+  const [activeAdminName, setActiveAdminName] = useState<string>('Rahul Sah');
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setActiveAdminName('Administrator');
+        return;
+      }
+      if (user.displayName && user.displayName.trim()) {
+        setActiveAdminName(user.displayName.trim());
+        return;
+      }
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const uData = userDoc.data();
+          if (uData.fullName && uData.fullName.trim() && uData.fullName !== 'User') {
+            setActiveAdminName(uData.fullName.trim());
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load user profile for operator name:', e);
+      }
+      setActiveAdminName(user.displayName || user.email?.split('@')[0] || 'Administrator');
+    });
+    return () => unsub();
+  }, []);
 
   // Modals & Popups States
   const [receipt, setReceipt] = useState<any>(null);
@@ -59,9 +92,9 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
   const [editAmount, setEditAmount] = useState('');
   const [editRemarks, setEditRemarks] = useState('');
   const [refundModalTx, setRefundModalTx] = useState<any>(null);
-  const [refundPassword, setRefundPassword] = useState('');
   const [undoModalTx, setUndoModalTx] = useState<any>(null);
-  const [undoing, setUndoing] = useState(false);
+  const [deleteCashModalTarget, setDeleteCashModalTarget] = useState<any | null>(null);
+  const [deleteTxModalTarget, setDeleteTxModalTarget] = useState<any | null>(null);
 
   const receiptRef = useRef<HTMLDivElement>(null);
 
@@ -83,12 +116,20 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
     if (!cashAmount || !cashCategory || !cashDate) return;
     setSavingCash(true);
     try {
+      const collector = activeAdminName || 'Rahul Sah';
+      const cleanRemarks = cashRemarks.trim();
+      const finalRemarks = cleanRemarks 
+        ? (cleanRemarks.toLowerCase().includes('collected by:') ? cleanRemarks : `${cleanRemarks} | Collected by: ${collector}`)
+        : `Recorded by: ${collector}`;
+
       await addDoc(collection(db, 'cash_ledger'), {
         type: cashType,
         date: cashDate,
         amount: Number(cashAmount),
         category: cashCategory,
-        remarks: cashRemarks,
+        remarks: finalRemarks,
+        collectedBy: collector,
+        createdBy: collector,
         expenseSource: cashType === 'Expense' ? cashSource : null,
         timestamp: serverTimestamp()
       });
@@ -105,15 +146,46 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
     setSavingCash(false);
   };
 
-  const handleDeleteCashEntry = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this cash register entry?")) return;
+  const handleDeleteCashEntry = (id: string) => {
+    const targetEntry = cashEntries.find(c => c.id === id);
+    if (targetEntry) {
+      setDeleteCashModalTarget(targetEntry);
+    } else {
+      setDeleteCashModalTarget({ id, category: 'Cash Entry', amount: 0 });
+    }
+  };
+
+  const handleExecuteDeleteCashEntry = async ({ adminName, adminEmail, reason }: { adminName: string; adminEmail: string; reason: string }) => {
+    if (!deleteCashModalTarget) return;
+    const targetEntry = deleteCashModalTarget;
     try {
+      if (targetEntry.category === 'Fee Collection' || targetEntry.transactionId || targetEntry.sourceTransactionId || targetEntry.relatedTransactionId) {
+        alert("Financial Integrity Protection: This cash ledger entry is linked to an institutional fee transaction. It cannot be deleted directly. Please use the official Refund or Payment Cancellation workflow.");
+        setDeleteCashModalTarget(null);
+        return;
+      }
+
       const batch = writeBatch(db);
-      batch.delete(doc(db, 'cash_ledger', id));
+      batch.delete(doc(db, 'cash_ledger', targetEntry.id));
       await batch.commit();
+
+      await recordLedgerAuditLog({
+        transactionId: targetEntry.id,
+        receipt: targetEntry.receipt || targetEntry.id,
+        studentName: targetEntry.category || 'Cash Register Entry',
+        studentClass: '-',
+        actionType: 'TRANSACTION_DELETED',
+        previousValue: targetEntry ? `Type: ${targetEntry.type || 'Expense'} | Category: ${targetEntry.category} | Amount: NRs. ${Number(targetEntry.amount || 0).toLocaleString()} | Remarks: ${targetEntry.remarks || 'None'}` : `Cash Entry ID: ${targetEntry.id}`,
+        newValue: 'CASH REGISTER ENTRY PERMANENTLY REMOVED',
+        reason: reason || 'Cash register entry deleted with password verification',
+        adminName,
+        adminEmail
+      });
+
+      setDeleteCashModalTarget(null);
     } catch (err) {
       console.error("Failed to delete cash entry", err);
-      alert("Failed to delete entry");
+      throw err;
     }
   };
 
@@ -554,58 +626,145 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
       }
    };
 
-  const generatePDFReport = async () => {
-      const columns = ['Date (B.S.)', 'Receipt No', 'Particulars', 'Class', 'Amount', 'Method', 'Status'];
-      const body = sortedHistory.map(tx => [
-          tx.date || '',
-          tx.receipt || tx.id || '',
-          tx.isSystem ? tx.studentName : `${tx.category} - ${tx.remarks}`,
-          tx.class || '-',
-          `NRs. ${tx.amount}`,
-          tx.method || 'Cash',
-          tx.status || 'SUCCESS'
-      ]);
+  // Helper to resolve the professional collector / administrator name
+  const resolveCollectorName = (tx: any): string => {
+    if (tx.collectedBy && tx.collectedBy !== 'Admin' && tx.collectedBy !== 'Administrator') {
+      return String(tx.collectedBy).trim();
+    }
+    if (tx.createdBy && tx.createdBy !== 'Admin' && tx.createdBy !== 'Administrator') {
+      return String(tx.createdBy).trim();
+    }
+    if (tx.cashierName && tx.cashierName !== 'Administrator') {
+      return String(tx.cashierName).trim();
+    }
+    if (tx.recordedBy) {
+      return String(tx.recordedBy).trim();
+    }
+    if (tx.remarks && typeof tx.remarks === 'string') {
+      const match = tx.remarks.match(/Collected by:\s*([^|,\n]+)/i) || tx.remarks.match(/Recorded by:\s*([^|,\n]+)/i) || tx.remarks.match(/Handled by:\s*([^|,\n]+)/i);
+      if (match && match[1] && match[1].trim()) {
+        return match[1].trim();
+      }
+    }
+    return activeAdminName || 'Rahul Sah';
+  };
 
-      await exportToPDF('Combined Cash Ledger & Transaction Report', columns, body, `Transaction_Report_${formatBSDate(new Date())}`, false);
+  // Helper to resolve professional particular name
+  const resolveParticularName = (tx: any): string => {
+    if (!tx.isSystem) {
+      return tx.category ? `${tx.category} Expense/Voucher` : 'General Ledger Voucher';
+    }
+    const studentPart = tx.studentName || 'Student';
+    const classPart = tx.class ? ` (Class ${tx.class})` : '';
+    if (tx.remitBillId || (tx.remarks && tx.remarks.includes('Remit Bill'))) {
+      return `Remit Bill Fee Clearance - ${studentPart}${classPart}`;
+    }
+    if (tx.months && Array.isArray(tx.months) && tx.months.length > 0) {
+      return `Monthly Tuition Fee Clearance (${tx.months.join(', ')}) - ${studentPart}${classPart}`;
+    }
+    if (tx.breakdown?.mode) {
+      return `Fee Payment (${tx.breakdown.mode}) - ${studentPart}${classPart}`;
+    }
+    return `Student Fee Collection - ${studentPart}${classPart}`;
+  };
+
+  // Helper to ensure remarks always contain professional description and "Collected by: [Name]"
+  const resolveFormattedRemarks = (tx: any): string => {
+    const collector = resolveCollectorName(tx);
+    let originalRemarks = tx.remarks ? String(tx.remarks).trim() : '';
+    if (!originalRemarks) {
+      originalRemarks = tx.isSystem ? 'School Fee Payment Clearance' : (tx.category || 'Office Cash Entry');
+    }
+    if (!originalRemarks.toLowerCase().includes('collected by:') && !originalRemarks.toLowerCase().includes('recorded by:')) {
+      return `${originalRemarks} | Collected by: ${collector}`;
+    }
+    return originalRemarks;
   };
 
   // Merge transactions Data and custom Cash Ledger Entries
-  const enrichedTransactions = transactionsData.map(tx => {
-     const student = studentsData?.find(s => s.id === tx.studentId || (s.studentId && s.studentId === tx.studentId));
-     return {
-         ...tx,
-         studentName: tx.studentName || student?.name || 'Unknown Student',
-         class: tx.class || student?.class || '',
-         isSystem: true,
-         type: 'Income',
-         category: 'Fee Collection',
-         particulars: tx.studentName || student?.name || 'Unknown Student'
-     };
-  });
+  const enrichedTransactions = useMemo(() => {
+    return transactionsData.map(tx => {
+      const student = studentsData?.find(s => s.id === tx.studentId || (s.studentId && s.studentId === tx.studentId));
+      const studentName = tx.studentName || student?.name || 'Unknown Student';
+      const studentClass = tx.class || student?.class || '';
+      const collector = resolveCollectorName(tx);
+      const tempTx = { ...tx, studentName, class: studentClass, collectedBy: collector, isSystem: true };
+      const particulars = resolveParticularName(tempTx);
+      const remarks = resolveFormattedRemarks(tempTx);
+      return {
+        ...tx,
+        studentName,
+        class: studentClass,
+        isSystem: true,
+        type: 'Income',
+        category: 'Fee Collection',
+        particulars,
+        remarks,
+        collectedBy: collector
+      };
+    });
+  }, [transactionsData, studentsData, activeAdminName]);
 
-  const processedCashEntries = cashEntries
-    .filter(e => e.category !== 'Fee Collection')
-    .map(e => ({
-       ...e,
-       id: e.id,
-       isSystem: false,
-       studentName: '',
-       class: '',
-       particulars: `${e.category} - ${e.remarks}`,
-       status: 'SUCCESS', // Custom cash entries are successful
-       method: 'Cash', // Default to cash for office ledger
-       collectedBy: 'Admin'
-    }));
+  const processedCashEntries = useMemo(() => {
+    return cashEntries
+      .filter(e => e.category !== 'Fee Collection')
+      .map(e => {
+        const collector = resolveCollectorName(e);
+        const tempTx = { ...e, isSystem: false, collectedBy: collector };
+        const particulars = resolveParticularName(tempTx);
+        const remarks = resolveFormattedRemarks(tempTx);
+        return {
+          ...e,
+          id: e.id,
+          isSystem: false,
+          studentName: '',
+          class: '',
+          particulars,
+          remarks,
+          status: 'SUCCESS',
+          method: 'Cash',
+          collectedBy: collector
+        };
+      });
+  }, [cashEntries, activeAdminName]);
 
   // Select dataset based on viewMode
-  let combinedList: any[] = [];
-  if (viewMode === 'combined') {
-     combinedList = [...enrichedTransactions, ...processedCashEntries];
-  } else if (viewMode === 'fees_only') {
-     combinedList = enrichedTransactions;
-  } else {
-     combinedList = processedCashEntries;
-  }
+  const combinedList = useMemo(() => {
+    if (viewMode === 'combined') {
+      return [...enrichedTransactions, ...processedCashEntries];
+    } else if (viewMode === 'fees_only') {
+      return enrichedTransactions;
+    } else {
+      return processedCashEntries;
+    }
+  }, [viewMode, enrichedTransactions, processedCashEntries]);
+
+  // Extract all unique collectors for dynamic filter dropdown
+  const uniqueCollectors = useMemo(() => {
+    const set = new Set<string>();
+    combinedList.forEach(tx => {
+      if (tx.collectedBy) set.add(tx.collectedBy);
+    });
+    if (activeAdminName) set.add(activeAdminName);
+    return Array.from(set).sort();
+  }, [combinedList, activeAdminName]);
+
+  const generatePDFReport = async () => {
+    const columns = ['Date (B.S.)', 'Receipt No', 'Particulars & Payee', 'Remarks & Notes', 'Collected By', 'Class', 'Amount', 'Method', 'Status'];
+    const body = sortedHistory.map(tx => [
+      tx.date || '',
+      tx.receipt || tx.id || '',
+      tx.particulars || (tx.isSystem ? tx.studentName : tx.category),
+      tx.remarks || '-',
+      tx.collectedBy || 'Admin',
+      tx.class || '-',
+      `NRs. ${Number(tx.amount || 0).toLocaleString()}`,
+      tx.method || 'Cash',
+      tx.status || 'SUCCESS'
+    ]);
+
+    await exportToPDF('Combined Cash Ledger & Transaction Report', columns, body, `Transaction_Report_${formatBSDate(new Date())}`, false);
+  };
 
   // Filter List
   const filteredHistory = combinedList.filter(tx => {
@@ -672,12 +831,12 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
   });
 
   // Calculation Stats
-  const totalFilteredAmount = sortedHistory.filter(tx => tx.status === 'SUCCESS' && tx.type === 'Income').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
+  const totalFilteredAmount = sortedHistory.filter(tx => (tx.status === 'SUCCESS' || tx.status === 'OVERRIDE_SUCCESS') && tx.type === 'Income').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
   const totalRefunded = sortedHistory.filter(tx => tx.status === 'REFUNDED' || tx.status === 'CANCELLED').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
   const totalExpenses = sortedHistory.filter(tx => tx.type === 'Expense').reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
   const closingBalance = totalFilteredAmount - totalExpenses;
   
-  const methodsBreakdown = sortedHistory.filter(tx => tx.status === 'SUCCESS' && tx.type === 'Income').reduce((acc: any, tx) => {
+  const methodsBreakdown = sortedHistory.filter(tx => (tx.status === 'SUCCESS' || tx.status === 'OVERRIDE_SUCCESS') && tx.type === 'Income').reduce((acc: any, tx) => {
       const m = tx.method || 'Cash';
       acc[m] = (acc[m] || 0) + (Number(tx.amount) || 0);
       return acc;
@@ -686,15 +845,16 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
   const exportExcel = async () => {
     const columns = [
        { header: 'Date (B.S.)', key: 'dateBs', width: 15 },
-       { header: 'Date (A.D.)', key: 'dateAd', width: 25 },
+       { header: 'Date (A.D.)', key: 'dateAd', width: 22 },
        { header: 'Type', key: 'type', width: 12 },
-       { header: 'Receipt / Ref No', key: 'receiptNo', width: 15 },
-       { header: 'Particulars', key: 'particulars', width: 30 },
-       { header: 'Class', key: 'studentClass', width: 15 },
-       { header: 'Amount', key: 'amount', width: 15 },
-       { header: 'Method', key: 'method', width: 15 },
+       { header: 'Receipt / Ref No', key: 'receiptNo', width: 18 },
+       { header: 'Particulars & Payee', key: 'particulars', width: 35 },
+       { header: 'Remarks (with Collector)', key: 'remarks', width: 35 },
        { header: 'Collected By', key: 'collectedBy', width: 20 },
-       { header: 'Status', key: 'status', width: 15 }
+       { header: 'Class', key: 'studentClass', width: 12 },
+       { header: 'Amount (NRs.)', key: 'amount', width: 15 },
+       { header: 'Method', key: 'method', width: 12 },
+       { header: 'Status', key: 'status', width: 12 }
     ];
 
     const formatTx = (tx: any) => {
@@ -707,11 +867,12 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
            dateAd: adDate,
            type: tx.type || 'Income',
            receiptNo: tx.receipt || tx.id || '-',
-           particulars: tx.isSystem ? tx.studentName : `${tx.category} (${tx.remarks})`,
-           studentClass: tx.class || '-',
-           amount: tx.amount || 0,
-           method: tx.method || 'Cash',
+           particulars: tx.particulars || (tx.isSystem ? tx.studentName : tx.category),
+           remarks: tx.remarks || '-',
            collectedBy: tx.collectedBy || 'Admin',
+           studentClass: tx.class || '-',
+           amount: Number(tx.amount || 0),
+           method: tx.method || 'Cash',
            status: tx.status || 'SUCCESS'
        };
     };
@@ -741,26 +902,53 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
     await exportMultiSheetExcel('Combined_Cash_Book', sheetsConfigs);
   };
 
-  const handleEditSubmit = async () => {
+   const handleEditSubmit = async () => {
      if (!editAmount || !editModalTx) return;
      try {
           const batch = writeBatch(db);
+          const oldAmount = editModalTx.amount || 0;
+          const newAmt = Number(editAmount);
+          const oldRemarks = editModalTx.remarks || '';
+          const isLinkedOrSystem = Boolean(editModalTx.isSystem || editModalTx.category === 'Fee Collection' || editModalTx.transactionId || editModalTx.sourceTransactionId);
           
-          if (editModalTx.isSystem) {
-              const txRef = doc(db, 'transactions', editModalTx.id);
-              batch.update(txRef, {
-                  amount: Number(editAmount),
-                  remarks: (editModalTx.remarks ? editModalTx.remarks + '\n' : '') + `Edited: ${editRemarks}`
-              });
+          if (isLinkedOrSystem) {
+              // System transaction amounts and fee-linked collections are strictly immutable!
+              if (editModalTx.isSystem) {
+                  const txRef = doc(db, 'transactions', editModalTx.id);
+                  batch.update(txRef, {
+                      remarks: (oldRemarks ? oldRemarks + '\n' : '') + `Admin Note: ${editRemarks}`
+                  });
+              } else {
+                  const txRef = doc(db, 'cash_ledger', editModalTx.id);
+                  batch.update(txRef, {
+                      remarks: (oldRemarks ? oldRemarks + '\n' : '') + `Admin Note: ${editRemarks}`
+                  });
+              }
           } else {
               const txRef = doc(db, 'cash_ledger', editModalTx.id);
               batch.update(txRef, {
-                  amount: Number(editAmount),
-                  remarks: (editModalTx.remarks ? editModalTx.remarks + '\n' : '') + `Edited: ${editRemarks}`
+                  amount: newAmt,
+                  remarks: (oldRemarks ? oldRemarks + '\n' : '') + `Edited: ${editRemarks}`
               });
           }
           
           await batch.commit();
+
+          await recordLedgerAuditLog({
+              transactionId: editModalTx.id,
+              receipt: editModalTx.receipt || editModalTx.id,
+              studentId: editModalTx.studentId || '',
+              studentName: editModalTx.studentName || editModalTx.category || 'General Ledger',
+              studentClass: editModalTx.class || '-',
+              actionType: isLinkedOrSystem ? 'REMARKS_MODIFIED' : 'AMOUNT_MODIFIED',
+              previousValue: `Amount: NRs. ${Number(oldAmount).toLocaleString()} | Particulars: ${editModalTx.isSystem ? (editModalTx.studentName + ' (' + (editModalTx.class || '-') + ')') : editModalTx.category} | Remarks: ${oldRemarks || 'None'}`,
+              newValue: isLinkedOrSystem 
+                ? `Amount: NRs. ${Number(oldAmount).toLocaleString()} (Protected Immutable) | Remarks: ${editRemarks || 'Modified by Admin'}`
+                : `Amount: NRs. ${newAmt.toLocaleString()} | Updated Remarks: ${editRemarks || 'Modified by Admin'}`,
+              reason: editRemarks.trim() || 'Particulars/remarks modified by administrator',
+              adminName: activeAdminName
+          });
+
           setEditModalTx(null);
           onRefresh();
      } catch (err) {
@@ -769,81 +957,24 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
      }
   };
 
-  const handleRefundSubmit = async () => {
-       if (refundPassword !== 'admin123') {
-          alert("Incorrect authentication password.");
-          return;
-       }
+  const handleExecuteRefund = async ({ adminName, adminEmail, reason }: { adminName: string; adminEmail: string; reason: string }) => {
        if (!refundModalTx) return;
+       const tx = refundModalTx;
        try {
-          const batch = writeBatch(db);
-          const txRef = doc(db, 'transactions', refundModalTx.id);
-          batch.update(txRef, { status: 'REFUNDED' });
-
-          const feeQuery = query(collection(db, 'studentFees'), where('transactionId', '==', refundModalTx.id));
-          const feeSnap = await getDocs(feeQuery);
-          
-          if (!feeSnap.empty) {
-              feeSnap.forEach(d => {
-                  batch.update(d.ref, {
-                      status: 'due',
-                      paidAmount: 0,
-                      paidAt: deleteField(),
-                      receiptNo: deleteField(),
-                      transactionId: deleteField(),
-                      paymentMethod: deleteField(),
-                      collectorId: deleteField(),
-                      collectorName: deleteField()
-                  });
-              });
-          } else if (refundModalTx.months && Array.isArray(refundModalTx.months)) {
-              refundModalTx.months.forEach((m: string) => {
-                  const feeRef = doc(db, 'studentFees', `${refundModalTx.studentId}_${m}`);
-                  batch.update(feeRef, {
-                      status: 'due',
-                      paidAmount: 0,
-                      paidAt: deleteField(),
-                      receiptNo: deleteField(),
-                      transactionId: deleteField(),
-                      paymentMethod: deleteField(),
-                      collectorId: deleteField(),
-                      collectorName: deleteField()
-                  });
-              });
-          }
-
-          // Revert associated remit bills if any
-          const receiptId = refundModalTx.receipt || refundModalTx.id;
-          if (receiptId) {
-              const remitQuery = query(collection(db, 'remitBills'), where('transactionId', '==', receiptId));
-              const remitSnap = await getDocs(remitQuery);
-              remitSnap.forEach(d => {
-                  batch.update(d.ref, {
-                      status: 'pending',
-                      paidAmount: deleteField(),
-                      paidAt: deleteField(),
-                      transactionId: deleteField()
-                  });
-              });
-          }
-
-          // Delete associated cash_ledger entry to keep ledger clean and prevent duplicates
-          const cashQuery = query(collection(db, 'cash_ledger'));
-          const cashSnap = await getDocs(cashQuery);
-          cashSnap.forEach(d => {
-              const data = d.data();
-              if (data.remarks && (data.remarks.includes(refundModalTx.receipt) || data.remarks.includes(refundModalTx.id))) {
-                  batch.delete(d.ref);
-              }
+          await processPaymentRefund({
+              transactionId: tx.id,
+              paymentGroupId: tx.paymentGroupId,
+              adminName,
+              adminEmail,
+              reason: reason || 'Administrative refund & fee balance reversal'
           });
 
-          await batch.commit();
           setRefundModalTx(null);
-          setRefundPassword('');
           onRefresh();
-       } catch(err) {
+       } catch(err: any) {
           console.error("Refund failed", err);
-          alert("Failed to refund payment");
+          alert(`Refund failed: ${err.message || 'An error occurred during refund processing.'}`);
+          throw err;
        }
   };
 
@@ -855,156 +986,47 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
      return diffHours <= 3; // Within 3 hours limit
   };
 
-  const handleUndoSubmit = async () => {
+  const handleExecuteUndo = async ({ adminName, adminEmail, reason }: { adminName: string; adminEmail: string; reason: string }) => {
      if (!undoModalTx) return;
-     setUndoing(true);
+     const tx = undoModalTx;
      try {
-        const batch = writeBatch(db);
-        const txRef = doc(db, 'transactions', undoModalTx.id);
-        
-        batch.update(txRef, { 
-            status: 'CANCELLED',
-            remarks: (undoModalTx.remarks ? undoModalTx.remarks + '\n' : '') + `Cancelled via Instant Undo (within 3h window) on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`
+        await cancelPaymentTransaction({
+            transactionId: tx.id,
+            paymentGroupId: tx.paymentGroupId,
+            adminName,
+            adminEmail,
+            reason: reason || 'Instant payment undo within 3-hour operator window with password verification'
         });
 
-        const feeQuery = query(collection(db, 'studentFees'), where('transactionId', '==', undoModalTx.id));
-        const feeSnap = await getDocs(feeQuery);
-        
-        if (!feeSnap.empty) {
-            feeSnap.forEach(d => {
-                batch.update(d.ref, {
-                    status: 'due',
-                    paidAmount: 0,
-                    paidAt: deleteField(),
-                    receiptNo: deleteField(),
-                    transactionId: deleteField(),
-                    paymentMethod: deleteField(),
-                    collectorId: deleteField(),
-                    collectorName: deleteField()
-                });
-            });
-        } else if (undoModalTx.months && Array.isArray(undoModalTx.months)) {
-            undoModalTx.months.forEach((m: string) => {
-                const feeRef = doc(db, 'studentFees', `${undoModalTx.studentId}_${m}`);
-                batch.update(feeRef, {
-                    status: 'due',
-                    paidAmount: 0,
-                    paidAt: deleteField(),
-                    receiptNo: deleteField(),
-                    transactionId: deleteField(),
-                    paymentMethod: deleteField(),
-                    collectorId: deleteField(),
-                    collectorName: deleteField()
-                });
-            });
-        }
-
-        // Revert associated remit bills if any
-        const receiptId = undoModalTx.receipt || undoModalTx.id;
-        if (receiptId) {
-            const remitQuery = query(collection(db, 'remitBills'), where('transactionId', '==', receiptId));
-            const remitSnap = await getDocs(remitQuery);
-            remitSnap.forEach(d => {
-                batch.update(d.ref, {
-                    status: 'pending',
-                    paidAmount: deleteField(),
-                    paidAt: deleteField(),
-                    transactionId: deleteField()
-                });
-            });
-        }
-
-        // Delete associated cash_ledger entry to keep ledger clean and prevent duplicates
-        const cashQuery = query(collection(db, 'cash_ledger'));
-        const cashSnap = await getDocs(cashQuery);
-        cashSnap.forEach(d => {
-            const data = d.data();
-            if (data.remarks && (data.remarks.includes(undoModalTx.receipt) || data.remarks.includes(undoModalTx.id))) {
-                batch.delete(d.ref);
-            }
-        });
-
-        await batch.commit();
         setUndoModalTx(null);
         onRefresh();
      } catch(err) {
         console.error("Undo failed", err);
-        alert("Failed to undo payment");
-     } finally {
-        setUndoing(false);
+        throw err;
      }
   };
 
-  const handleDeleteSystemTransaction = async (tx: any) => {
-     if (!window.confirm(`Are you sure you want to completely delete transaction ${tx.receipt || tx.id}? This will remove it from all records and mark the associated fee months as due.`)) return;
-     try {
-        const batch = writeBatch(db);
-        
-        // 1. Delete from transactions
-        batch.delete(doc(db, 'transactions', tx.id));
+  const handleDeleteSystemTransaction = (tx: any) => {
+     setDeleteTxModalTarget(tx);
+  };
 
-        // 2. Query and delete from cash_ledger
-        const cashQuery = query(collection(db, 'cash_ledger'));
-        const cashSnap = await getDocs(cashQuery);
-        cashSnap.forEach(d => {
-           const data = d.data();
-           if (data.remarks && (data.remarks.includes(tx.receipt) || data.remarks.includes(tx.id))) {
-              batch.delete(d.ref);
-           }
+  const handleExecuteDeleteSystemTransaction = async ({ adminName, adminEmail, reason }: { adminName: string; adminEmail: string; reason: string }) => {
+     if (!deleteTxModalTarget) return;
+     const tx = deleteTxModalTarget;
+     try {
+        await deleteSystemTransactionSafe({
+            transactionId: tx.id,
+            adminName,
+            adminEmail,
+            reason: reason || 'Sandbox test transaction cleanup'
         });
 
-        // 3. Mark studentFees back to due
-        const feeQuery = query(collection(db, 'studentFees'), where('transactionId', '==', tx.id));
-        const feeSnap = await getDocs(feeQuery);
-        if (!feeSnap.empty) {
-           feeSnap.forEach(d => {
-              batch.update(d.ref, {
-                 status: 'due',
-                 paidAmount: 0,
-                 paidAt: deleteField(),
-                 receiptNo: deleteField(),
-                 transactionId: deleteField(),
-                 paymentMethod: deleteField(),
-                 collectorId: deleteField(),
-                 collectorName: deleteField()
-              });
-           });
-        } else if (tx.months && Array.isArray(tx.months)) {
-           tx.months.forEach((m: string) => {
-              const feeRef = doc(db, 'studentFees', `${tx.studentId}_${m}`);
-              batch.update(feeRef, {
-                 status: 'due',
-                 paidAmount: 0,
-                 paidAt: deleteField(),
-                 receiptNo: deleteField(),
-                 transactionId: deleteField(),
-                 paymentMethod: deleteField(),
-                 collectorId: deleteField(),
-                 collectorName: deleteField()
-              });
-           });
-        }
-
-        // 4. Update associated remit bill status back to pending and clear transactionId/paidAt if any
-        if (tx.receipt) {
-           const remitQuery = query(collection(db, 'remitBills'), where('transactionId', '==', tx.receipt));
-           const remitSnap = await getDocs(remitQuery);
-           remitSnap.forEach(d => {
-              batch.update(d.ref, {
-                 status: 'pending',
-                 paidAmount: deleteField(),
-                 paidAt: deleteField(),
-                 transactionId: deleteField()
-              });
-           });
-        }
-
-        await batch.commit();
-        alert("Transaction completely deleted and student dues successfully restored.");
+        setDeleteTxModalTarget(null);
         onRefresh();
-     } catch(err) {
+     } catch(err: any) {
         console.error("Delete transaction failed", err);
-        alert("Failed to delete transaction");
+        alert(`Action Blocked: ${err.message || 'Physical deletion of institutional financial vouchers is strictly prohibited.'}`);
+        setDeleteTxModalTarget(null);
      }
   };
 
@@ -1107,11 +1129,8 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                  onChange={e => setFilterMethod(e.target.value)}
                  className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-600 focus:outline-none shrink-0"
                >
-                 <option value="All">All Methods</option>
-                 <option value="Cash">Cash</option>
-                 <option value="eSewa">eSewa</option>
-                 <option value="Bank Transfer">Bank Transfer</option>
-                 <option value="QR Code">QR Code</option>
+                 <option value="All">All Collections (Cash Only)</option>
+                 <option value="Cash">Physical Cash (Counter)</option>
                </select>
 
                <select 
@@ -1119,10 +1138,10 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                  onChange={e => setFilterCollectedBy(e.target.value)}
                  className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-600 focus:outline-none shrink-0"
                >
-                  <option value="All">Collected By: All</option>
-                  <option value="Admin">Admin</option>
-                  <option value="Principal">Principal</option>
-                  <option value="Custom">Custom</option>
+                  <option value="All">All Collectors ({uniqueCollectors.length})</option>
+                  {uniqueCollectors.map(collector => (
+                    <option key={collector} value={collector}>Collected By: {collector}</option>
+                  ))}
                </select>
 
                <div className="flex bg-blue-50/50 rounded-xl p-1 shrink-0 border border-blue-100">
@@ -1196,13 +1215,14 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
 
        {/* Main Register List */}
        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto custom-scrollbar pb-2 w-full">
-         <table className="w-full text-left whitespace-nowrap min-w-[800px]">
+         <table className="w-full text-left whitespace-nowrap min-w-[950px]">
             <thead className="text-primary border-b border-gray-100 bg-gray-50/50">
                <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                   <th className="p-4 px-6">Date (B.S.)</th>
                   <th className="p-4">Voucher/Receipt No</th>
                   <th className="p-4">Type</th>
-                  <th className="p-4">Particulars / Source</th>
+                  <th className="p-4">Particulars & Payee</th>
+                  <th className="p-4">Remarks & Collected By</th>
                   <th className="p-4">Class</th>
                   <th className="p-4 text-right">Inflow (Dr)</th>
                   <th className="p-4 text-right">Outflow (Cr)</th>
@@ -1211,7 +1231,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
             </thead>
             <tbody className="divide-y divide-gray-50">
                {sortedHistory.map(tx => {
-                  const isSuccess = tx.status === 'SUCCESS' || !tx.status;
+                  const isSuccess = tx.status === 'SUCCESS' || tx.status === 'OVERRIDE_SUCCESS' || !tx.status;
                   const isCancelled = tx.status === 'CANCELLED' || tx.status === 'REFUNDED';
                   const isExpense = tx.type === 'Expense';
 
@@ -1240,26 +1260,29 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                            )}
                         </td>
                         <td className="p-4">
-                           <div className="flex flex-col">
+                           <div className="flex flex-col max-w-[280px]">
                                {tx.isSystem ? (
-                                  <span className="font-bold text-gray-800 text-sm">
-                                     {tx.studentName}
-                                  </span>
-                               ) : (
-                                  <div className="flex flex-col">
-                                     <span className="font-bold text-gray-800 text-sm">
-                                        {tx.category}
+                                  <>
+                                     <span className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                                        {tx.studentName}
                                      </span>
-                                     {tx.remarks && (
-                                        <span className="text-xs text-gray-500 font-medium mt-0.5 whitespace-normal max-w-[250px] break-words">
-                                           {tx.remarks}
-                                        </span>
-                                     )}
-                                  </div>
+                                     <span className="text-[11px] text-blue-700 font-semibold mt-0.5">
+                                        {tx.particulars || 'Student Fee Collection'}
+                                     </span>
+                                  </>
+                               ) : (
+                                  <>
+                                     <span className="font-bold text-gray-900 text-sm">
+                                        {tx.category || 'Office Ledger Entry'}
+                                     </span>
+                                     <span className="text-[11px] text-gray-500 font-medium mt-0.5">
+                                        {tx.particulars || 'Voucher Disbursement'}
+                                     </span>
+                                  </>
                                )}
                               {tx.isSystem && (
                                  <span className="text-[10px] font-medium text-blue-600 bg-blue-50/50 border border-blue-100 px-1.5 py-0.5 rounded w-fit mt-1">
-                                    Fee Payment ({tx.method})
+                                    Method: {tx.method || 'Cash'}
                                  </span>
                               )}
                               {!tx.isSystem && tx.expenseSource && (
@@ -1269,6 +1292,21 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                               )}
                               {tx.status === 'REFUNDED' && <span className="text-[10px] text-red-500 font-bold mt-1 uppercase">REFUNDED</span>}
                               {tx.status === 'CANCELLED' && <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 w-fit mt-1 uppercase">UNDONE</span>}
+                           </div>
+                        </td>
+                        <td className="p-4">
+                           <div className="flex flex-col gap-1.5 max-w-[280px]">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                 <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md shadow-xs">
+                                    <UserCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>Collected by: {tx.collectedBy || resolveCollectorName(tx)}</span>
+                                 </span>
+                              </div>
+                              {tx.remarks && (
+                                 <span className="text-xs text-gray-600 font-medium leading-relaxed whitespace-normal break-words">
+                                    {tx.remarks}
+                                 </span>
+                              )}
                            </div>
                         </td>
                         <td className="p-4 text-xs font-black text-gray-500">{tx.class || '-'}</td>
@@ -1295,10 +1333,18 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                                           )}
                                        </>
                                     )}
-                                    <button onClick={() => handleDeleteSystemTransaction(tx)} className="p-2 bg-transparent text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200" title="Delete Transaction"><Trash2 className="w-4 h-4"/></button>
+                                    {Boolean(tx.isTest || tx.isSandbox || tx.environment === 'test' || tx.id?.startsWith('TEST_')) ? (
+                                       <button onClick={() => handleDeleteSystemTransaction(tx)} className="p-2 bg-transparent text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200" title="Purge Sandbox Test Record"><Trash2 className="w-4 h-4"/></button>
+                                    ) : (
+                                       <span className="p-2 text-gray-300 cursor-not-allowed inline-flex items-center" title="Permanent Record: Institutional vouchers cannot be deleted. Use Refund or Undo."><Lock className="w-4 h-4 opacity-40"/></span>
+                                    )}
                                  </>
                               ) : (
-                                 <button onClick={() => handleDeleteCashEntry(tx.id)} className="p-2 bg-transparent text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200" title="Delete Ledger Entry"><Trash2 className="w-4 h-4"/></button>
+                                 (tx.category === 'Fee Collection' || tx.transactionId || tx.sourceTransactionId || tx.relatedTransactionId) ? (
+                                    <span className="p-2 text-gray-300 cursor-not-allowed inline-flex items-center" title="Permanent Ledger Entry: Linked to fee transaction. Cannot delete directly."><Lock className="w-4 h-4 opacity-40"/></span>
+                                 ) : (
+                                    <button onClick={() => handleDeleteCashEntry(tx.id)} className="p-2 bg-transparent text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200" title="Delete Ledger Entry"><Trash2 className="w-4 h-4"/></button>
+                                 )
                               )}
                            </div>
                         </td>
@@ -1307,7 +1353,7 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                })}
                {sortedHistory.length === 0 && (
                   <tr>
-                     <td colSpan={8} className="p-10 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">No transactions or ledger entries found</td>
+                     <td colSpan={9} className="p-10 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">No transactions or ledger entries found</td>
                   </tr>
                )}
             </tbody>
@@ -1552,8 +1598,24 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                   </div>
 
                   <div>
-                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">New Amount (NRs.)</label>
-                     <input type="number" min="0" step="any" onKeyDown={(e) => { if (e.key === '-' || e.key === 'e') e.preventDefault(); }} value={editAmount} onChange={e => setEditAmount(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-bold" />
+                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">
+                        {Boolean(editModalTx.isSystem || editModalTx.category === 'Fee Collection' || editModalTx.transactionId || editModalTx.sourceTransactionId)
+                          ? 'Transaction Amount (Immutable)'
+                          : 'New Amount (NRs.)'}
+                     </label>
+                     <input 
+                        type="number" 
+                        min="0" 
+                        step="any" 
+                        disabled={Boolean(editModalTx.isSystem || editModalTx.category === 'Fee Collection' || editModalTx.transactionId || editModalTx.sourceTransactionId)}
+                        onKeyDown={(e) => { if (e.key === '-' || e.key === 'e') e.preventDefault(); }} 
+                        value={editAmount} 
+                        onChange={e => setEditAmount(e.target.value)} 
+                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg outline-none font-bold ${Boolean(editModalTx.isSystem || editModalTx.category === 'Fee Collection' || editModalTx.transactionId || editModalTx.sourceTransactionId) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'focus:ring-2 focus:ring-blue-500'}`} 
+                     />
+                     {Boolean(editModalTx.isSystem || editModalTx.category === 'Fee Collection' || editModalTx.transactionId || editModalTx.sourceTransactionId) && (
+                        <p className="text-[11px] text-amber-600 font-medium mt-1">Institutional transaction amounts are immutable. To correct monetary values, please use the Refund or Payment Cancellation workflow.</p>
+                     )}
                   </div>
                   <div>
                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Reason for edit</label>
@@ -1569,53 +1631,93 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
          document.body
        )}
 
-       {/* Refund Modal */}        {refundModalTx && createPortal(
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-150">
-               <h3 className="text-lg font-black text-red-600 mb-2 uppercase tracking-widest flex items-center gap-2"><CornerUpLeft className="w-5 h-5"/> Process Refund</h3>
-               <p className="text-xs text-gray-500 mb-4 font-medium leading-relaxed">This will revert the payment and mark associated months as due. This action requires administrative authentication.</p>
-               
-               <div className="bg-red-50 border border-red-100 p-3 rounded-xl mb-4 text-sm">
-                  <p className="font-bold text-red-800">Student: {refundModalTx.studentName}</p>
-                  <p className="font-black text-red-900 text-lg">Amount: NRs. {refundModalTx.amount}</p>
-               </div>
-
-               <div className="mb-6">
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Admin Password</label>
-                  <input type="password" value={refundPassword} onChange={e => setRefundPassword(e.target.value)} placeholder="Enter password to confirm" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-sm" />
-               </div>
-
-               <div className="flex gap-3">
-                  <button onClick={() => { setRefundModalTx(null); setRefundPassword(''); }} className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl text-sm">Cancel</button>
-                  <button onClick={handleRefundSubmit} className="flex-1 px-4 py-2.5 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-700 transition-colors">Confirm Refund</button>
-               </div>
-            </div>
-         </div>,
-         document.body
+       {/* Security Confirmation Modal for System Transaction Deletion */}
+       {deleteTxModalTarget && (
+          <SecurityPasswordConfirmModal 
+             isOpen={!!deleteTxModalTarget}
+             onClose={() => setDeleteTxModalTarget(null)}
+             onConfirm={handleExecuteDeleteSystemTransaction}
+             title="Authorize Sandbox Test Record Deletion"
+             confirmButtonText="Delete Sandbox Record"
+             confirmButtonVariant="danger"
+             defaultReason="Sandbox test fixture cleanup"
+             reasonLabel="Reason for Deletion"
+             actionDescription="Notice: Physical deletion is strictly restricted to sandbox and test records. Real institutional financial transactions are permanent legal records and cannot be destroyed. Attempting to delete an institutional record will be prohibited."
+             targetDetails={{
+                receiptOrId: deleteTxModalTarget.receipt || deleteTxModalTarget.id,
+                particulars: `${deleteTxModalTarget.studentName || 'Student'} (Class ${deleteTxModalTarget.class || '-'})`,
+                amount: deleteTxModalTarget.amount,
+                date: deleteTxModalTarget.date,
+                additionalInfo: `Months: ${(deleteTxModalTarget.months || []).join(', ') || 'N/A'} | Payment Method: ${deleteTxModalTarget.method || 'Cash'}`
+             }}
+          />
        )}
 
-       {/* Undo Modal (Fixed root level layout position) */}        {undoModalTx && createPortal(
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-             <div className="bg-white max-w-sm w-full rounded-2xl p-6 shadow-2xl animate-in zoom-in duration-150">
-                <h3 className="text-lg font-black text-amber-600 mb-2 uppercase tracking-widest flex items-center gap-2"><Undo2 className="w-5 h-5"/> Undo Cash Payment</h3>
-                <p className="text-xs text-gray-500 mb-4 font-medium leading-relaxed">
-                    This transaction was recorded within the last 3 hours. Since cash has not actually been received or was recorded by mistake, you can instantly undo it. This will cancel the receipt and mark associated months as due.
-                </p>
-                
-                <div className="bg-amber-50 border border-amber-100 p-3 rounded-xl mb-5 text-sm">
-                   <p className="font-bold text-amber-800">Student: {undoModalTx.studentName}</p>
-                   <p className="font-black text-amber-900 text-lg text-left">Amount: NRs. {undoModalTx.amount}</p>
-                   <p className="text-[10px] text-amber-600 font-bold uppercase mt-1 text-left font-mono">Receipt: {undoModalTx.receipt || undoModalTx.id}</p>
-                </div>                 <div className="flex gap-3">
-                   <button type="button" onClick={() => setUndoModalTx(null)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-600 font-bold rounded-xl text-sm">Cancel</button>
-                   <button type="button" onClick={handleUndoSubmit} disabled={undoing} className="flex-1 px-4 py-2 bg-amber-500 text-slate-950 font-black rounded-xl text-sm hover:bg-amber-600 transition-colors uppercase tracking-wider text-center">
-                      {undoing ? 'Reverting...' : 'Instant Undo'}
-                   </button>
-                 </div>
-              </div>
-           </div>,
-           document.body
-        )}
+       {/* Security Confirmation Modal for Cash Ledger Register Entry Deletion */}
+       {deleteCashModalTarget && (
+          <SecurityPasswordConfirmModal 
+             isOpen={!!deleteCashModalTarget}
+             onClose={() => setDeleteCashModalTarget(null)}
+             onConfirm={handleExecuteDeleteCashEntry}
+             title="Authorize Daily Register Entry Deletion"
+             confirmButtonText="Delete Register Entry"
+             confirmButtonVariant="danger"
+             defaultReason="Daily register adjustment & voucher correction"
+             reasonLabel="Reason for Deleting Entry"
+             actionDescription="Warning: This action will permanently delete this cash ledger record from the Daily Register. This will affect closing cash and ledger totals."
+             targetDetails={{
+                receiptOrId: deleteCashModalTarget.receipt || deleteCashModalTarget.id,
+                particulars: `${deleteCashModalTarget.type || 'Entry'}: ${deleteCashModalTarget.category || 'Office Ledger'}`,
+                amount: deleteCashModalTarget.amount,
+                date: deleteCashModalTarget.date,
+                additionalInfo: `Remarks: ${deleteCashModalTarget.remarks || 'None'} | Source: ${deleteCashModalTarget.expenseSource || 'General'}`
+             }}
+          />
+       )}
+
+       {/* Security Confirmation Modal for Administrative Refund */}
+       {refundModalTx && (
+          <SecurityPasswordConfirmModal 
+             isOpen={!!refundModalTx}
+             onClose={() => setRefundModalTx(null)}
+             onConfirm={handleExecuteRefund}
+             title="Authorize Payment Refund / Cancellation"
+             confirmButtonText="Confirm & Process Refund"
+             confirmButtonVariant="warning"
+             defaultReason="Administrative refund & fee balance reversal"
+             reasonLabel="Reason for Refund"
+             actionDescription="This will mark the payment status as REFUNDED, revert the student's associated fee months back to DUE, and remove duplicate entries from the cash register."
+             targetDetails={{
+                receiptOrId: refundModalTx.receipt || refundModalTx.id,
+                particulars: `${refundModalTx.studentName || 'Student'} (Class ${refundModalTx.class || '-'})`,
+                amount: refundModalTx.amount,
+                date: refundModalTx.date,
+                additionalInfo: `Associated Months: ${(refundModalTx.months || []).join(', ') || 'N/A'}`
+             }}
+          />
+       )}
+
+       {/* Security Confirmation Modal for 3h Instant Undo */}
+       {undoModalTx && (
+          <SecurityPasswordConfirmModal 
+             isOpen={!!undoModalTx}
+             onClose={() => setUndoModalTx(null)}
+             onConfirm={handleExecuteUndo}
+             title="Authorize Instant Payment Undo (3h Window)"
+             confirmButtonText="Authorize Instant Undo"
+             confirmButtonVariant="warning"
+             defaultReason="Payment cancellation within 3h operator window"
+             reasonLabel="Reason for Instant Undo"
+             actionDescription="This transaction was recorded recently. Confirm your administrator password to reverse this transaction, restore student dues, and update audit logs."
+             targetDetails={{
+                receiptOrId: undoModalTx.receipt || undoModalTx.id,
+                particulars: `${undoModalTx.studentName || 'Student'} (Class ${undoModalTx.class || '-'})`,
+                amount: undoModalTx.amount,
+                date: undoModalTx.date,
+                additionalInfo: `Receipt: ${undoModalTx.receipt || undoModalTx.id}`
+             }}
+          />
+       )}
 
        {/* Add Cash Ledger Entry Modal (Combined Concept) */}        {showAddCashModal && createPortal(
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">

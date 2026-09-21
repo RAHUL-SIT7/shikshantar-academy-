@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, FileSpreadsheet, ShieldAlert, CheckCircle, RefreshCcw, Search, User } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 
@@ -84,7 +85,7 @@ const IemisExport = ({ userRole }: { userRole?: string }) => {
     fetchStudents();
   }, []);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     setIsLoading(true);
     setError(null);
     setSuccess(null);
@@ -136,34 +137,38 @@ const IemisExport = ({ userRole }: { userRole?: string }) => {
         };
       });
 
-      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(`IEMIS_Export_${selectedClass !== 'All' ? selectedClass : 'All'}`);
       
-      // Set column widths for better readability
-      worksheet['!cols'] = [
-        { wch: 5 },  // sn
-        { wch: 25 }, // student_name_eng
-        { wch: 25 }, // student_name_nep
-        { wch: 15 }, // std_reg_id
-        { wch: 15 }, // emis_number
-        { wch: 5 },  // sex
-        { wch: 10 }, // dob_year
-        { wch: 10 }, // dob_month
-        { wch: 10 }, // dob_day
-        { wch: 15 }, // caste
-        { wch: 12 }, // disability
-        { wch: 15 }, // ecd_experience
-        { wch: 25 }, // father_name
-        { wch: 25 }, // mother_name
-        { wch: 15 }, // mobile_1
-        { wch: 10 }, // Class
-        { wch: 15 }  // Stream/Subject
+      // Set column headers and widths for better readability
+      worksheet.columns = [
+        { header: 'sn', key: 'sn', width: 8 },
+        { header: 'student_name_eng', key: 'student_name_eng', width: 25 },
+        { header: 'student_name_nep', key: 'student_name_nep', width: 25 },
+        { header: 'std_reg_id', key: 'std_reg_id', width: 15 },
+        { header: 'emis_number', key: 'emis_number', width: 15 },
+        { header: 'sex', key: 'sex', width: 8 },
+        { header: 'dob_year', key: 'dob_year', width: 12 },
+        { header: 'dob_month', key: 'dob_month', width: 12 },
+        { header: 'dob_day', key: 'dob_day', width: 12 },
+        { header: 'caste', key: 'caste', width: 15 },
+        { header: 'disability', key: 'disability', width: 15 },
+        { header: 'ecd_experience', key: 'ecd_experience', width: 16 },
+        { header: 'father_name', key: 'father_name', width: 25 },
+        { header: 'mother_name', key: 'mother_name', width: 25 },
+        { header: 'mobile_1', key: 'mobile_1', width: 16 },
+        { header: 'Class', key: 'Class', width: 12 },
+        { header: 'Stream/Subject', key: 'Stream/Subject', width: 16 }
       ];
 
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, `IEMIS_Export_${selectedClass !== 'All' ? selectedClass : 'All'}`);
+      exportData.forEach(row => {
+        worksheet.addRow(row);
+      });
 
-      // Generate Excel file and trigger download
-      XLSX.writeFile(workbook, `IEMIS_Nepal_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      // Generate Excel file buffer and trigger download via file-saver
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `IEMIS_Nepal_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       
       setSuccess(`Exported ${filteredStudents.length} records successfully.`);
     } catch (err: any) {

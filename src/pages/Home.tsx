@@ -14,7 +14,6 @@ import {
   Megaphone,
   ChevronRight,
   ChevronLeft,
-  Sparkles,
   Calculator,
   PieChart as PieChartIcon,
   Bell,
@@ -89,7 +88,7 @@ import {
 } from "recharts";
 import principalImageSrc from "../assets/images/regenerated_image_1780334392921.jpg";
 import principalJpgSrc from "../assets/principal.jpg";
-import logoImageSrc from "../assets/logo.png";
+const logoImageSrc = "/logo.png";
 const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "/logo.png";
 const principalImg = principalImageSrc || principalJpgSrc;

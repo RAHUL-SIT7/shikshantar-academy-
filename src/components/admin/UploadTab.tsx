@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import { Upload, CheckCircle2, AlertCircle, Download, FileEdit } from 'lucide-react';
 
 import { doc, writeBatch, collection, getDocs, query, where, setDoc } from 'firebase/firestore';
@@ -33,75 +34,112 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
     }
   }, [isTeacher, teacherClass, allowedClasses, uploadClass]);
 
-  const downloadTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([{
-      'StudentId': 'S101', 'Name': 'John Doe', 'Class': uploadClass || '10', 'Mathematics (TH)': 65, 'Mathematics (PR)': 20, 'Science': 90
-    }]);
-
-    // Set column widths for better readability
-    ws['!cols'] = [
-      { wch: 15 }, // StudentId
-      { wch: 25 }, // Name
-      { wch: 10 }, // Class
-      { wch: 20 }, // Mathematics (TH)
-      { wch: 20 }, // Mathematics (PR)
-      { wch: 20 }  // Science
+  const downloadTemplate = async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Template");
+    ws.columns = [
+      { header: 'StudentId', key: 'StudentId', width: 15 },
+      { header: 'Name', key: 'Name', width: 25 },
+      { header: 'Class', key: 'Class', width: 10 },
+      { header: 'Mathematics (TH)', key: 'Mathematics (TH)', width: 20 },
+      { header: 'Mathematics (PR)', key: 'Mathematics (PR)', width: 20 },
+      { header: 'Science', key: 'Science', width: 20 }
     ];
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Template");
-    XLSX.writeFile(wb, `Template_Class_${uploadClass || 'X'}_${uploadExamType}.xlsx`);
+    ws.addRow({
+      'StudentId': 'S101',
+      'Name': 'John Doe',
+      'Class': uploadClass || '10',
+      'Mathematics (TH)': 65,
+      'Mathematics (PR)': 20,
+      'Science': 90
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `Template_Class_${uploadClass || 'X'}_${uploadExamType}.xlsx`);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !uploadClass) {
       if(!uploadClass) setStatus({type: 'error', message: 'Select a class before uploading.'});
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        let parsedData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) as any[];
-        
-        if (parsedData.length > 0 && !('StudentId' in parsedData[0]) && !('Roll no.' in parsedData[0])) {
-          setStatus({ type: 'error', message: 'Excel must have "StudentId" or "Roll no." column.' });
-          return;
-        }
-
-        parsedData = parsedData.map(row => {
-          if ('Roll no.' in row && !('StudentId' in row)) row['StudentId'] = row['Roll no.'];
-          row['ExamType'] = uploadExamType; 
-          row['Class'] = String(row['Class'] || uploadClass);
-          return row;
-        });
-
-        if (userRole === 'teacher') {
-          parsedData = parsedData.filter(row => allowedClasses.includes(String(row['Class'])));
-        }
-        
-        parsedData = parsedData.map(r => {
-           let errs = [];
-           if (!r.Name) errs.push('Missing Name');
-           Object.keys(r).forEach(k => {
-               const lowerK = k.toLowerCase().replace(/[^a-z]/g, '');
-               if(!['studentid', 'rollno', 'roll', 'id', 'name', 'class', 'examtype', 'fullmarksdata', 'rank', '_errors'].includes(lowerK)) {
-                   if (r[k] !== 'AB' && r[k] !== 'ab' && !isNaN(Number(r[k])) && Number(r[k]) > 100) {
-                       errs.push(`${k} marks > 100`);
-                   }
-               }
-           });
-           return {...r, _errors: errs};
-        });
-
-        setPreviewData(parsedData);
-      } catch (error) {
-        setStatus({ type: 'error', message: 'Error parsing Excel file.' });
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(arrayBuffer);
+      const worksheet = wb.worksheets[0];
+      if (!worksheet) {
+        setStatus({ type: 'error', message: 'The uploaded Excel file does not contain any sheets.' });
+        return;
       }
-    };
-    reader.readAsBinaryString(file);
+
+      const rows: any[] = [];
+      const headers: { [col: number]: string } = {};
+
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) {
+          row.eachCell((cell, colNumber) => {
+            headers[colNumber] = String(cell.value ?? '').trim();
+          });
+        } else {
+          const rowData: Record<string, any> = {};
+          row.eachCell((cell, colNumber) => {
+            const header = headers[colNumber];
+            if (header) {
+              let val = cell.value;
+              if (val && typeof val === 'object' && 'result' in val) {
+                val = (val as any).result;
+              } else if (val && typeof val === 'object' && 'text' in val) {
+                val = (val as any).text;
+              }
+              rowData[header] = val;
+            }
+          });
+          if (Object.keys(rowData).length > 0) {
+            rows.push(rowData);
+          }
+        }
+      });
+
+      let parsedData = rows;
+      if (parsedData.length > 0 && !('StudentId' in parsedData[0]) && !('Roll no.' in parsedData[0])) {
+        setStatus({ type: 'error', message: 'Excel must have "StudentId" or "Roll no." column.' });
+        return;
+      }
+
+      parsedData = parsedData.map(row => {
+        if ('Roll no.' in row && !('StudentId' in row)) row['StudentId'] = row['Roll no.'];
+        row['ExamType'] = uploadExamType; 
+        row['Class'] = String(row['Class'] || uploadClass);
+        return row;
+      });
+
+      if (userRole === 'teacher') {
+        parsedData = parsedData.filter(row => allowedClasses.includes(String(row['Class'])));
+      }
+      
+      parsedData = parsedData.map(r => {
+         let errs = [];
+         if (!r.Name) errs.push('Missing Name');
+         Object.keys(r).forEach(k => {
+             const lowerK = k.toLowerCase().replace(/[^a-z]/g, '');
+             if(!['studentid', 'rollno', 'roll', 'id', 'name', 'class', 'examtype', 'fullmarksdata', 'rank', '_errors'].includes(lowerK)) {
+                 if (r[k] !== 'AB' && r[k] !== 'ab' && !isNaN(Number(r[k])) && Number(r[k]) > 100) {
+                     errs.push(`${k} marks > 100`);
+                 }
+             }
+         });
+         return {...r, _errors: errs};
+      });
+
+      setPreviewData(parsedData);
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Error parsing Excel file.' });
+    }
     e.target.value = '';
   };
 

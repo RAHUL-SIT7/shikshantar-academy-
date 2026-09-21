@@ -156,7 +156,7 @@ export default function ProcessSalaryTab({ teachers, structures, records }: { te
                  {selectedTeacher && currentStructure && (
                      <>
                         <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100 mb-4">
-                           <div className="flex justify-between text-sm mb-1"><span className="text-emerald-700">Gross Pay</span><span className="font-bold text-emerald-900">NRs. {grossPay.toLocaleString()}</span></div>
+                           <div className="flex justify-between text-sm mb-1"><span className="text-emerald-700">Gross Pay</span><span className="font-bold text-emerald-900">NRs. {(grossPay || 0).toLocaleString()}</span></div>
                         </div>
 
                         <div className="space-y-3">
@@ -179,7 +179,7 @@ export default function ProcessSalaryTab({ teachers, structures, records }: { te
 
                         <div className="bg-primary text-white rounded-xl p-5 mt-4 flex items-center justify-between">
                             <span className="font-bold text-sm uppercase tracking-widest">Net Payable</span>
-                            <span className="text-2xl font-black">NRs. {netPay.toLocaleString()}</span>
+                            <span className="text-2xl font-black">NRs. {(netPay || 0).toLocaleString()}</span>
                         </div>
 
                         <button type="submit" className="w-full bg-[#1e293b] text-white p-4 rounded-xl font-bold uppercase tracking-widest text-sm hover:bg-black transition-colors mt-2">
@@ -208,7 +208,7 @@ export default function ProcessSalaryTab({ teachers, structures, records }: { te
                                  </div>
                                  <div className="text-right">
                                     <p className="font-black flex flex-col items-end">
-                                       <span className="text-emerald-600">NRs. {r.netPay?.toLocaleString()}</span>
+                                       <span className="text-emerald-600">NRs. {(r.netPay ?? 0).toLocaleString()}</span>
                                        <span className={`text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full mt-1 ${r.status === 'Unpaid' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>{r.status || 'Paid'}</span>
                                     </p>
                                  </div>

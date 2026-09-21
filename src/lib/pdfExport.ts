@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatBSDate } from './nepaliDate';
-import logoImage from '../assets/logo.png';
+import { getSchoolLogoBase64 } from './logoHelper';
 
 export const exportToPDF = async (
     title: string, 
@@ -15,14 +15,10 @@ export const exportToPDF = async (
     const pageWidth = pdf.internal.pageSize.getWidth();
     
     try {
-        const response = await fetch(logoImage);
-        const blob = await response.blob();
-        const base64data = await new Promise((resolve) => {
-           const reader = new FileReader();
-           reader.onloadend = () => resolve(reader.result);
-           reader.readAsDataURL(blob);
-        });
-        pdf.addImage(base64data as string, 'PNG', 14, 10, 20, 20);
+        const logoBase64 = await getSchoolLogoBase64();
+        if (logoBase64) {
+            pdf.addImage(logoBase64, 'PNG', 14, 10, 20, 20);
+        }
     } catch (err) {
         console.error("Error loading logo for PDF", err);
     }

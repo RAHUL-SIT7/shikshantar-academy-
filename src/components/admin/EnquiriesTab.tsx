@@ -132,7 +132,7 @@ export function EnquiriesTab() {
     if (filteredEnquiries.length === 0) return;
     const headers = ["Date", "Name", "Phone Number", "Message", "Status"];
     const rows = filteredEnquiries.map((enq) => [
-      enq.createdAt ? new Date(enq.createdAt).toLocaleString() : "N/A",
+      enq.createdAt && !isNaN(new Date(enq.createdAt).getTime()) ? new Date(enq.createdAt).toLocaleString() : "N/A",
       enq.name || "",
       enq.phone || "",
       enq.message?.replace(/"/g, '""') || "",
@@ -292,11 +292,23 @@ export function EnquiriesTab() {
           {filteredEnquiries.map((enq) => {
             const isResolved = enq.status === "resolved";
             const rawDate = enq.submittedAt || enq.createdAt;
-            const dateStr = rawDate
-              ? (typeof rawDate === 'object' && 'toDate' in rawDate 
-                  ? (rawDate as any).toDate().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                  : new Date(rawDate).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }))
-              : "Recent";
+            let dateStr = "Recent";
+            if (rawDate) {
+              try {
+                if (typeof rawDate === 'object' && rawDate !== null && 'toDate' in rawDate && typeof (rawDate as any).toDate === 'function') {
+                  dateStr = (rawDate as any).toDate().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                } else if (typeof rawDate === 'object' && rawDate !== null && 'seconds' in rawDate && typeof (rawDate as any).seconds === 'number') {
+                  dateStr = new Date((rawDate as any).seconds * 1000).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                } else {
+                  const d = new Date(rawDate);
+                  if (!isNaN(d.getTime())) {
+                    dateStr = d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                  }
+                }
+              } catch (e) {
+                dateStr = "Recent";
+              }
+            }
 
             return (
               <div

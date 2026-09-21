@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wallet, FileDown, PlusCircle, Clock, Send, CheckCircle2, AlertCircle, 
-  ArrowUpRight, Sparkles, TrendingUp, HelpCircle, Calendar, FileText, 
+  ArrowUpRight, TrendingUp, HelpCircle, Calendar, FileText, 
   ChevronRight, Check, X, Bookmark, User, Tag, ArrowRight, DollarSign, RefreshCw
 } from 'lucide-react';
 import { db, auth } from '../firebase';
@@ -9,7 +9,7 @@ import { collection, onSnapshot, query, where, doc, getDoc, setDoc } from 'fireb
 import { onAuthStateChanged } from 'firebase/auth';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
-import logoImage from '../assets/logo.png';
+const logoImage = "/logo.png";
 
 export default function TeacherSalary() {
   const [records, setRecords] = useState<any[]>([]);
@@ -191,7 +191,7 @@ export default function TeacherSalary() {
                       mergedMap[r.id] = r;
                   });
                   
-                  let finalReqs = Object.values(mergedMap).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+                  let finalReqs = Object.values(mergedMap).sort((a: any, b: any) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || '')));
                   
                   // Seeding a sample historical "Approved" request so they see the real timeline out of the box!
                   if (finalReqs.length === 0) {
@@ -217,7 +217,7 @@ export default function TeacherSalary() {
                   }
                   setRequests(finalReqs);
               } catch(e) {
-                  setRequests(dbReqs.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+                  setRequests(dbReqs.sort((a: any, b: any) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))));
               }
          }, (err) => console.log('Could not load salary requests', err));
          
@@ -352,7 +352,7 @@ export default function TeacherSalary() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="bg-emerald-50 text-emerald-700 text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-widest flex items-center gap-1">
-              <Sparkles className="w-3 h-3 animate-pulse" /> Fully Verified
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Fully Verified
             </span>
           </div>
           <h1 className="text-2xl md:text-3xl font-black text-primary tracking-tight uppercase flex items-center gap-2">
@@ -626,7 +626,7 @@ export default function TeacherSalary() {
 
                                           {/* Click to expand instruction */}
                                           <div className="flex justify-between items-center text-[9px] text-gray-400 font-bold pt-1">
-                                              <span>Submitted on: {new Date(req.createdAt).toLocaleDateString()}</span>
+                                              <span>Submitted on: {req.createdAt ? (typeof req.createdAt === 'object' && req.createdAt.seconds ? new Date(req.createdAt.seconds * 1000).toLocaleDateString() : new Date(req.createdAt).toLocaleDateString()) : 'N/A'}</span>
                                               <span className="text-primary hover:underline flex items-center gap-0.5">
                                                   {isSelected ? 'Click to collapse' : 'Click to view review timeline →'}
                                               </span>
