@@ -9,9 +9,16 @@ async function runFastAudit() {
     fs.mkdirSync('./screenshots', { recursive: true });
   }
 
-  const chromeExec = '/root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome';
+  const possiblePaths = [
+    '/app/applet/browsers/chromium-1243/chrome-linux64/chrome',
+    '/app/applet/browsers/chromium-1243/chrome-linux/chrome',
+    '/app/applet/browsers/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell',
+    '/root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome'
+  ];
+  const chromeExec = possiblePaths.find(p => fs.existsSync(p));
+  console.log('Using browser executable:', chromeExec || 'default playwright resolution');
   const browser = await chromium.launch({
-    executablePath: fs.existsSync(chromeExec) ? chromeExec : undefined,
+    executablePath: chromeExec,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   });
