@@ -745,10 +745,10 @@ Submitted via Digital Admission Portal.`;
 
             <div className="space-y-1 mt-3">
               <h2 className="text-xs font-bold text-[#F0A500] uppercase tracking-wider">
-                Digital Admission Portal
+                Online Admission Form
               </h2>
               <p className="text-[11px] text-slate-200/90 leading-relaxed">
-                Experience high-fidelity academic management and creative Nepalese pedagogy. Registered entries are directly processed for classroom seat-allotments.
+                Apply online for admissions from Playgroup to Class 9. Our admissions team will review your application and guide you through the enrollment process.
               </p>
             </div>
 
@@ -761,7 +761,7 @@ Submitted via Digital Admission Portal.`;
           {/* Card 2: Application Walkthrough Tracker */}
           <div className="bg-slate-900/95 text-white rounded-2xl p-5 shadow-sm relative overflow-hidden flex flex-col justify-between border border-slate-800">
             <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-[#F0A500]" /> Application Intake Steps
+              <Clock className="w-3.5 h-3.5 text-[#F0A500]" /> Admission Steps
             </h3>
 
             <div className="space-y-2.5 my-2">
@@ -770,8 +770,8 @@ Submitted via Digital Admission Portal.`;
                   1
                 </span>
                 <div>
-                  <p className="text-[11px] font-bold text-slate-100">Portal Register</p>
-                  <p className="text-[10px] text-slate-400 leading-tight">Submit secure candidate attributes today.</p>
+                  <p className="text-[11px] font-bold text-slate-100">Submit Application</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Fill student details and contact information.</p>
                 </div>
               </div>
 
@@ -780,8 +780,8 @@ Submitted via Digital Admission Portal.`;
                   2
                 </span>
                 <div>
-                  <p className="text-[11px] font-bold text-slate-200">Credential Review</p>
-                  <p className="text-[10px] text-slate-400 leading-tight">Registrar screens records within 48 hours.</p>
+                  <p className="text-[11px] font-bold text-slate-200">School Review</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Our team verifies your submission within 48 hours.</p>
                 </div>
               </div>
 
@@ -790,13 +790,13 @@ Submitted via Digital Admission Portal.`;
                   3
                 </span>
                 <div>
-                  <p className="text-[11px] font-bold text-slate-200">Interactive Meet</p>
-                  <p className="text-[10px] text-slate-400 leading-tight">Classroom integration & student onboarding.</p>
+                  <p className="text-[11px] font-bold text-slate-200">Enrollment Confirmation</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Visit the school office to confirm the seat.</p>
                 </div>
               </div>
             </div>
 
-            <p className="text-[9px] text-slate-500 font-mono pt-2 border-t border-slate-800">Prompt responses via SMS / Call</p>
+            <p className="text-[9px] text-slate-500 font-mono pt-2 border-t border-slate-800">Assistance available via phone</p>
           </div>
 
           {/* Card 3: Files Checklist & Support Desk */}

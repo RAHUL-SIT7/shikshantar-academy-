@@ -18,37 +18,37 @@ const DEFAULT_FACILITIES: Facility[] = [
   {
     id: 'classroom',
     title: 'Classes',
-    description: 'Spacious, well-ventilated, and equipped with modern teaching aids. Our classrooms provide a vibrant atmosphere for modern learning.',
+    description: 'Spacious, well-ventilated classrooms equipped with audio-visual aids and BALA learning murals to support daily study.',
     image: 'https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'computer-lab',
     title: 'Computer Lab',
-    description: 'State-of-art computer lab for practical work and digital skills. Equipped with latest generation PCs and high-speed internet.',
+    description: 'Dedicated computer laboratory equipped with modern PCs and internet access for hands-on digital learning.',
     image: 'https://images.unsplash.com/photo-1562774053-701939374585?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'playground',
     title: 'Sports & Playground',
-    description: 'A large playground for various sports and physical activities. Promoting health, teamwork, and sportsmanship among students.',
+    description: 'Spacious sports grounds for football, volleyball, badminton, and active physical education.',
     image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'science-lab',
     title: 'Science Lab',
-    description: 'Fully equipped physics, chemistry, and biology laboratories providing practical exposure and hands-on learning experiences.',
+    description: 'Physics, chemistry, and biology laboratory equipment for guided science experiments and demonstrations.',
     image: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'library',
     title: 'Library',
-    description: 'A well-stocked library with a vast collection of academic books, reference texts, and periodicals to encourage reading habits.',
+    description: "Curated collection of textbooks, reference materials, children's literature, and daily educational periodicals.",
     image: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?q=80&w=1000&auto=format&fit=crop',
   },
   {
     id: 'transport',
     title: 'Safe School Transport',
-    description: 'A fleet of dedicated school buses ensuring a safe, comfortable, and reliable daily commute for students across designated routes.',
+    description: 'Safe and punctual school bus service covering designated routes across Karjanha and nearby villages.',
     image: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=1000&auto=format&fit=crop',
   },
 ];

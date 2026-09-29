@@ -14,6 +14,7 @@ import {
   Megaphone,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Calculator,
   PieChart as PieChartIcon,
   Bell,
@@ -44,6 +45,7 @@ import {
   VolumeX,
   SmilePlus,
   Maximize2,
+  Sparkles,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { FeeEstimator } from "../components/FeeEstimator";
@@ -88,11 +90,19 @@ import {
 } from "recharts";
 import principalImageSrc from "../assets/images/regenerated_image_1780334392921.jpg";
 import principalJpgSrc from "../assets/principal.jpg";
+import galleryPrincipalImg from "../assets/gallery/principal_pappu_jha.jpg";
+import galleryTeachersImg from "../assets/gallery/teacher_team.jpg";
+import galleryBatch2082Img from "../assets/gallery/batch_2082.jpg";
+import galleryBatch2081Img from "../assets/gallery/batch_2081.jpg";
+import galleryBatch2080Img from "../assets/gallery/batch_2080.jpg";
+import galleryBatch2079Img from "../assets/gallery/batch_2079.jpg";
+import galleryTiharImg from "../assets/gallery/event_tihar.jpg";
+
 const logoImageSrc = "/logo.png";
 const logoImage = logoImageSrc || "/logo.png";
 const logoFallback = "/logo.png";
-const principalImg = principalImageSrc || principalJpgSrc;
-const principalFallbackImg = principalJpgSrc || principalImageSrc || "https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=600&auto=format&fit=crop";
+const principalImg = galleryPrincipalImg || principalImageSrc || principalJpgSrc;
+const principalFallbackImg = galleryPrincipalImg || principalJpgSrc || principalImageSrc || "https://images.unsplash.com/photo-1544717305-2782549b5136?q=80&w=600&auto=format&fit=crop";
 
 const mapDummyImage = (url: string, meta?: { name?: string; role?: string; title?: string; year?: string }): string => {
   if (!url) return '';
@@ -101,57 +111,57 @@ const mapDummyImage = (url: string, meta?: { name?: string; role?: string; title
 
   // 1. Principal Pappu Kumar Jha
   if (u.includes('hxs0xbcd') || contextStr.includes('pappu') || (contextStr.includes('principal') && !contextStr.includes('staff'))) {
-    return '/gallery/principal_pappu_jha.jpg';
+    return galleryPrincipalImg;
   }
 
   // 2. Teacher Team & Staff Group Photo
   if (u.includes('km08rjz7') || contextStr.includes('team') || contextStr.includes('faculty') || contextStr.includes('staff') || contextStr.includes('group photo')) {
-    return '/gallery/teacher_team.jpg';
+    return galleryTeachersImg;
   }
 
   // 3. Batch 2082 B.S.
   if (u.includes('dz9zdw6d') || contextStr.includes('2082')) {
-    return '/gallery/batch_2082.jpg';
+    return galleryBatch2082Img;
   }
 
   // 4. Batch 2081 B.S.
   if (u.includes('kzssh3xb') || contextStr.includes('2081')) {
-    return '/gallery/batch_2081.jpg';
+    return galleryBatch2081Img;
   }
 
   // 5. Batch 2080 B.S.
   if (u.includes('0qd3gt09') || contextStr.includes('2080')) {
-    return '/gallery/batch_2080.jpg';
+    return galleryBatch2080Img;
   }
 
   // 6. Batch 2079 B.S.
   if (u.includes('yywfn655') || contextStr.includes('2079')) {
-    return '/gallery/batch_2079.jpg';
+    return galleryBatch2079Img;
   }
 
   // 7. Celebrating Tihar / Festival
   if (u.includes('yqmyrvjy') || contextStr.includes('tihar') || contextStr.includes('deepawali')) {
-    return '/gallery/event_tihar.jpg';
+    return galleryTiharImg;
   }
 
   // Handle broken/expired firebasestorage or dummy avatars
-  if (u.includes('school-c5948.firebasestorage.app') || u.includes('ui-avatars.com')) {
+  if (u.includes('school-c5948.firebasestorage.app') || u.includes('ui-avatars.com') || u.includes('placehold') || u.includes('example.com')) {
     if (contextStr.includes('pooja') || contextStr.includes('saraswati') || contextStr.includes('sarsawati')) {
-      return '/gallery/event_tihar.jpg';
+      return galleryTiharImg;
     }
-    if (contextStr.includes('teacher') || contextStr.includes('faculty')) {
-      return '/gallery/teacher_team.jpg';
+    if (contextStr.includes('teacher') || contextStr.includes('faculty') || contextStr.includes('staff')) {
+      return galleryTeachersImg;
     }
     if (contextStr.includes('batch')) {
-      return '/gallery/batch_2082.jpg';
+      return galleryBatch2082Img;
     }
-    return '/gallery/event_tihar.jpg';
+    return galleryTiharImg;
   }
 
   if (url.includes('picsum.photos')) {
-    if (contextStr.includes('teacher') || contextStr.includes('faculty')) return '/gallery/teacher_team.jpg';
-    if (contextStr.includes('batch')) return '/gallery/batch_2082.jpg';
-    return '/gallery/event_tihar.jpg';
+    if (contextStr.includes('teacher') || contextStr.includes('faculty') || contextStr.includes('staff')) return galleryTeachersImg;
+    if (contextStr.includes('batch')) return galleryBatch2082Img;
+    return galleryTiharImg;
   }
 
   return url;
@@ -279,15 +289,15 @@ export default function Home() {
   }, []);
 
   const [content, setContent] = useState<any>({
-    tagline1: "Empowering Minds,",
+    tagline1: "Quality Education,",
     tagline2: "Shaping Futures.",
     description:
-      "Shikshantar Academy provides quality education from class Play to Ten (10) in a peaceful and nurturing environment in Karjanha Municipality, Ward No. 05, Siraha.",
+      "Shikshantar Academy is an English medium school providing quality education from Playgroup to Class 10 in a peaceful and caring environment in Bastipur, Karjanha-05, Siraha.",
     principalMessage:
-      "At Shikshantar Academy, we believe in nurturing not just academic excellence, but character, creativity, and critical thinking. Our peaceful environment and modern facilities provide the perfect setting for your child to grow and thrive.",
+      "At Shikshantar Academy, we believe in giving every child quality education, good discipline, and strong moral values. Our peaceful campus and caring teachers provide the right place for your child to learn and succeed.",
     principalImage: principalImg,
     announcement:
-      "🌟 Welcome to the new Shikshantar Academy Portal! Term 1 Examinations starting from next week. 🌟",
+      "🌟 Welcome to Shikshantar Academy! Term examinations starting soon. 🌟",
     admissionsBadge: "Admissions Open 2083 B.S.",
     contactPhone: "+977 9709867048, +977 9807790805",
     statsStudents: "200+",
@@ -298,50 +308,50 @@ export default function Home() {
 
     // Slide 1
     slide1Image: principalImg,
-    slide1Badge: "Holistic Education",
-    slide1Title: "Nurturing Minds, Building Character",
-    slide1Desc: "Empowering students in Bastipur, Siraha with world-class education, professional educators & modern resources.",
+    slide1Badge: "Quality Education",
+    slide1Title: "Good Learning & Caring Teachers",
+    slide1Desc: "Giving children in Bastipur and nearby areas a strong foundation with English medium classes, clean classrooms, and dedicated teachers.",
     slide1Link: "/facilities",
-    slide1Cta: "🏫 Explore Facilities →",
+    slide1Cta: "🏫 See Campus Facilities →",
 
     // Slide 2
     slide2Image: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1200&auto=format&fit=crop",
-    slide2Badge: "BALA Classroom Designs",
-    slide2Title: "Building as a Learning Aid (BALA)",
-    slide2Desc: "Every wall has a story to teach! Custom educational paintings, Nepali Barnamala alphabets, mathematics curves, and geographical world maps are printed onto classroom walls & corridors to spark natural inquiry in our students.",
+    slide2Badge: "Smart Classrooms",
+    slide2Title: "Learning on Walls (BALA)",
+    slide2Desc: "Our classroom walls have colorful paintings of Nepali Barnamala, English alphabets, math numbers, and maps so children learn naturally as they look around.",
     slide2Link: "/facilities",
-    slide2Cta: "🎨 Tour BALA Classrooms →",
+    slide2Cta: "🎨 See Classrooms →",
 
     // Slide 3
     slide3Image: "https://images.unsplash.com/photo-1562774053-f5a02f6ef87a?q=80&w=1200&auto=format&fit=crop",
-    slide3Badge: "English medium instruction",
-    slide3Title: "Global Standards, Local Foundations",
-    slide3Desc: "Consistently scoring high SEE success benchmarks, under active directorship of Pappu Kumar Jha and specialized teachers.",
+    slide3Badge: "English Medium",
+    slide3Title: "Strong English & Nepali Values",
+    slide3Desc: "Students learn to read, write, and speak fluent English while respecting Nepali culture, guided by Principal Pappu Kumar Jha and experienced teachers.",
     slide3Link: "tel:+9779807790805",
-    slide3Cta: "📞 Call Academic Advisors",
+    slide3Cta: "📞 Call School Office",
 
     // Program Montessori
-    progMontessoriTitle: "🧸 Montessori & Play Group Level",
-    progMontessoriDesc: "Our pre-school program introduces toddlers to continuous sensory stimulation, audio-visual play-rooms and playful motor learning. We emphasize loving attention to keep every toddler safe, happy and motivated while building basic English phonetics, shapes and numerals.",
-    progMontessoriFeat: "🎨 Dynamic creative spaces\n🧸 Sensory-toy collections\n🥪 Healthy nutrition support\n👩‍⚕️ Dedicated nurse and care staff",
+    progMontessoriTitle: "🧸 Playgroup & Nursery",
+    progMontessoriDesc: "A fun and friendly space where little children play with toys, sing rhymes, learn basic letters and numbers, and build good daily habits.",
+    progMontessoriFeat: "🎨 Fun drawing and coloring\n🧸 Safe toys and play area\n🥪 Clean snacks and water\n👩‍⚕️ Caring teacher support",
     progMontessoriImg: "https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?q=80&w=600&auto=format&fit=crop",
 
     // Program Primary
-    progPrimaryTitle: "✏️ Primary Schooling (Class 1 to 5)",
-    progPrimaryDesc: "At the primary level, we establish robust analytical roots. Following the CDC guidelines of Nepal, classes involve extensive writing, mathematical tables arithmetic, bilingual fluency exercises, environmental studies, and introductory computing logic.",
-    progPrimaryFeat: "📖 English Medium curricula\n🧮 Abacus & mental math studies\n🏆 Inter-class debate meets\n🎨 Fine Arts & crafts coaching",
+    progPrimaryTitle: "✏️ Primary Level (Class 1 to 5)",
+    progPrimaryDesc: "Building strong basics in reading, neat handwriting, English speaking, and math following the Nepal government CDC curriculum.",
+    progPrimaryFeat: "📖 English medium textbooks\n🧮 Fast math and table practice\n🏆 Classroom quizzes and reading\n🎨 Art, drawing, and neat writing",
     progPrimaryImg: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=600&auto=format&fit=crop",
 
     // Program Basic
-    progBasicTitle: "📐 Junior High / Basic School (Class 6 to 8)",
-    progBasicDesc: "Preparing young teens for challenges with conceptual mathematics, introductory Physics, Chemistry, Biology experiments, social research assignments, physical drills, and systematic computer lab projects.",
-    progBasicFeat: "🔬 Computer & science experimentation\n🧘 Active yoga class sessions\n⚽ Football & sports matches\n🤝 Cultural assemblies & events",
+    progBasicTitle: "📐 Middle School (Class 6 to 8)",
+    progBasicDesc: "Hands-on computer practice, easy science experiments, math problem solving, and sports activities for growing students.",
+    progBasicFeat: "🔬 Science lab & computer classes\n🧘 Morning yoga & physical exercise\n⚽ Football & outdoor games\n🤝 Cultural celebrations",
     progBasicImg: "https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?q=80&w=600&auto=format&fit=crop",
 
     // Program Secondary
-    progSecondaryTitle: "🚀 Secondary & SEE Preparation (Class 9 & 10)",
-    progSecondaryDesc: "Our high school program targets maximum grades in Secondary Education Examinations (SEE). Under strict coaching by veteran subject specialists, pupils undergo weekly tests, pre-board exams, counseling, and detailed revision sessions.",
-    progSecondaryFeat: "📊 Regular prep test assignments\n👨‍🏫 Professional review counsel\n🧠 In-depth Science laboratories\n🎯 Individual student grade targets",
+    progSecondaryTitle: "🚀 Secondary & SEE Exam (Class 9 & 10)",
+    progSecondaryDesc: "Dedicated preparation for Class 10 SEE board exams with weekly practice tests, subject revision, and individual teacher guidance to score top grades.",
+    progSecondaryFeat: "📊 Weekly practice tests\n👨‍🏫 Dedicated subject teachers\n🧠 Hands-on science experiments\n🎯 Regular progress reports for parents",
     progSecondaryImg: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=600&auto=format&fit=crop",
   });
 
@@ -407,12 +417,12 @@ export default function Home() {
     }
   };
 
-  // Automatic Hero Slide Rotation with 5.5-second hold duration, paused on hover
+  // Automatic Hero Slide Rotation with 4-second hold duration, paused on hover
   useEffect(() => {
     if (isHeroHovered) return;
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % 3);
-    }, 5500);
+    }, 4000);
     return () => clearInterval(timer);
   }, [isHeroHovered]);
 
@@ -2877,50 +2887,50 @@ export default function Home() {
           const heroSlides = [
             {
               id: 0,
-              tabLabel: "Principal's Vision",
-              category: "Academic Leadership",
+              tabLabel: "Principal's Welcome",
+              category: "School Leadership",
               image: principalImageSrc,
-              badge: "Academic Leadership & Vision",
-              title: "Inspiring Character, Intellect & Moral Values",
-              desc: "Under the dedicated leadership of Founder Principal Mr. Pappu Kumar Jha, Shikshantar Academy nurtures every child with quality English-medium education, disciplined guidance, and enduring moral values in Bastipur, Karjanha.",
+              badge: "School Leadership & Vision",
+              title: "Quality English Education for Every Child",
+              desc: "Under the leadership of Founder Principal Mr. Pappu Kumar Jha, Shikshantar Academy provides quality English medium schooling, good discipline, and personal care for every student in Bastipur, Karjanha.",
               link: "/about",
-              cta: "Explore Our Story",
+              cta: "About Our School",
               secondaryLink: "/admission",
-              secondaryCta: "Admission Enquiry",
+              secondaryCta: "Admission Details",
               isLogoSlide: false,
               objectPosition: "object-[center_68%] md:object-[center_62%]",
               imageClassName: "scale-110 md:scale-105",
               cardTitle: "Mr. Pappu Kumar Jha",
-              cardSubtitle: "Founder Principal & Academic Director"
+              cardSubtitle: "Founder Principal"
             },
             {
               id: 1,
-              tabLabel: "BALA Smart Campus",
-              category: "Interactive Environment",
+              tabLabel: "Smart Classrooms",
+              category: "Clean & Safe Campus",
               image: content.slide2Image || "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1200&auto=format&fit=crop",
-              badge: content.slide2Badge || "Building as a Learning Aid",
-              title: content.slide2Title || "Building as a Learning Aid (BALA)",
-              desc: content.slide2Desc || "Every wall and corridor teaches a lesson. Custom educational murals, Nepali Barnamala alphabets, mathematics curves, and geographical maps encourage natural curiosity and intuitive learning.",
+              badge: content.slide2Badge || "Smart Classrooms (BALA)",
+              title: content.slide2Title || "Learning on Walls (BALA)",
+              desc: content.slide2Desc || "Our classrooms have colorful paintings of Nepali Barnamala, English alphabets, math numbers, and maps so children learn naturally as they look around.",
               link: content.slide2Link || "/facilities",
-              cta: content.slide2Cta ? content.slide2Cta.replace(/[📜📝🎨🏛️🖼️📞→]/g, "").trim() : "Tour BALA Classrooms",
+              cta: content.slide2Cta ? content.slide2Cta.replace(/[📜📝🎨🏛️🖼️📞→]/g, "").trim() : "See Campus Facilities",
               secondaryLink: "/facilities",
               secondaryCta: "View Facilities",
               isLogoSlide: false,
               isBalaSlide: true,
               objectPosition: "object-[center_72%] md:object-right-bottom",
               cardTitle: "BALA Smart Classrooms",
-              cardSubtitle: "Curriculum-Integrated Educational Walls"
+              cardSubtitle: "Colorful Educational Walls"
             },
             {
               id: 2,
-              tabLabel: "Academy Heritage",
-              category: "Institutional Legacy",
+              tabLabel: "School Legacy",
+              category: "Bastipur, Siraha",
               image: logoImage,
-              badge: "Institutional Heritage",
-              title: "A Decade of Community Trust & Excellence",
-              desc: "Serving Bastipur, Karjanha since 2072 B.S. with committed educators, comprehensive student support, and a proven track record of 100% SEE board success.",
+              badge: "Serving Since 2072 B.S.",
+              title: "Over 10 Years of Trust in Karjanha",
+              desc: "Serving families in Bastipur and nearby villages since 2072 B.S. with caring teachers, safe school bus service, and 100% pass results in SEE exams.",
               link: "/about",
-              cta: "Discover Our Vision",
+              cta: "Read Our Story",
               secondaryLink: "/contact",
               secondaryCta: "Contact School Office",
               isLogoSlide: true,
@@ -2935,7 +2945,7 @@ export default function Home() {
           return (
             <div className="absolute inset-0 w-full h-full flex flex-col md:flex-row">
               {/* Left Column: Dignified Academic Editorial Panel */}
-              <div className="w-full h-[56%] sm:h-[52%] md:h-full md:w-[50%] lg:w-[46%] xl:w-[42%] flex flex-col justify-start pt-5 sm:pt-7 md:justify-center bg-gradient-to-br from-[#0c2b42] via-[#092236] to-[#04121e] p-6 sm:p-8 md:p-10 lg:p-12 xl:p-14 z-20 relative text-white border-b-4 md:border-b-0 md:border-r-4 border-[#F0A500] shadow-[16px_0_35px_rgba(0,0,0,0.65)]">
+              <div className="w-full h-[58%] sm:h-[54%] md:h-full md:w-[48%] lg:w-[44%] xl:w-[42%] flex flex-col justify-between md:justify-center bg-gradient-to-br from-[#0c2b42] via-[#082033] to-[#04121e] p-6 sm:p-8 md:p-10 lg:p-12 xl:p-14 z-20 relative text-white border-b-2 md:border-b-0 md:border-r-2 border-[#F0A500]/40 shadow-[14px_0_35px_rgba(0,0,0,0.55)]">
                 {/* Subtle watermark logo for institutional texture */}
                 <div 
                   className="absolute inset-0 opacity-[0.02] bg-center bg-no-repeat bg-contain pointer-events-none select-none" 
@@ -2945,52 +2955,35 @@ export default function Home() {
                 <AnimatePresence mode="wait">
                   <motion.div 
                     key={currentSlide}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.28, ease: "easeInOut" }}
-                    className="space-y-3 sm:space-y-4 md:space-y-4.5 relative z-10"
+                    exit={{ opacity: 0, y: -12 }}
+                    transition={{ duration: 0.32, ease: "easeInOut" }}
+                    className="space-y-3.5 sm:space-y-4 md:space-y-5 relative z-10 my-auto"
                   >
-                    {/* School Header Tag */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] sm:text-[11px] font-bold tracking-widest text-[#F0A500] uppercase font-poppins">
+                    {/* Prestigious Academic Eyebrow Badge */}
+                    <div className="inline-flex items-center px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-xs w-fit">
+                      <span className="text-[10px] sm:text-[11px] font-bold tracking-widest text-[#F0A500] uppercase font-mono">
                         {currentSlideData.badge}
-                      </span>
-                      <span className="text-white/30 text-xs">•</span>
-                      <span className="text-[10px] sm:text-[11px] text-slate-300 font-medium tracking-wide">
-                        Bastipur, Karjanha
                       </span>
                     </div>
 
                     {/* Main Heading */}
-                    <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl xl:text-[40px] font-display font-bold leading-tight md:leading-[1.18] text-white tracking-tight drop-shadow-md">
+                    <h1 className="text-2xl sm:text-3xl md:text-3xl lg:text-4xl xl:text-[42px] font-display font-extrabold leading-[1.16] text-white tracking-tight drop-shadow-md">
                       {currentSlideData.title}
                     </h1>
 
-                    {/* Description */}
-                    <p className="text-xs sm:text-sm md:text-sm lg:text-[15px] text-slate-200 max-w-xl leading-relaxed drop-shadow-sm font-poppins font-normal line-clamp-3 md:line-clamp-none">
+                    {/* Description - Focused & High Readability */}
+                    <p className="text-xs sm:text-sm md:text-[14.5px] text-slate-200/95 max-w-xl leading-relaxed drop-shadow-sm font-sans font-normal">
                       {currentSlideData.desc}
                     </p>
 
-                    {/* Refined Academic Highlights */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10">
-                        100% SEE Board Success
-                      </span>
-                      <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10">
-                        Playgroup to Grade 10
-                      </span>
-                      <span className="px-2.5 py-1 rounded-md bg-white/10 text-white/90 text-[11px] font-medium backdrop-blur-sm border border-white/10 hidden sm:inline-flex">
-                        Estd. 2072 B.S.
-                      </span>
-                    </div>
-
                     {/* Action Buttons */}
-                    <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <div className="flex flex-wrap items-center gap-3 pt-1 sm:pt-2">
                       {currentSlideData.link.startsWith("tel:") ? (
                         <a
                           href={currentSlideData.link}
-                          className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-lg text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
+                          className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-xl text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
                         >
                           <span>{currentSlideData.cta}</span>
                           <ArrowRight className="w-4 h-4" />
@@ -2998,7 +2991,7 @@ export default function Home() {
                       ) : (
                         <Link
                           to={currentSlideData.link}
-                          className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-lg text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
+                          className="bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 px-5 py-2.5 md:px-6 md:py-3 rounded-xl text-xs md:text-sm font-bold tracking-wide transition-all shadow-md active:scale-95 flex items-center gap-2"
                         >
                           <span>{currentSlideData.cta}</span>
                           <ArrowRight className="w-4 h-4" />
@@ -3008,7 +3001,7 @@ export default function Home() {
                       {currentSlideData.secondaryLink && (
                         <Link
                           to={currentSlideData.secondaryLink}
-                          className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 md:px-5 md:py-3 rounded-lg text-xs md:text-sm font-semibold tracking-wide transition-all backdrop-blur-sm active:scale-95"
+                          className="bg-white/5 hover:bg-white/15 text-white border border-white/20 px-4 py-2.5 md:px-5 md:py-3 rounded-xl text-xs md:text-sm font-semibold tracking-wide transition-all backdrop-blur-sm active:scale-95"
                         >
                           {currentSlideData.secondaryCta}
                         </Link>
@@ -3016,14 +3009,54 @@ export default function Home() {
                     </div>
                   </motion.div>
                 </AnimatePresence>
+
+                {/* Minimalist Professional Slide Pagination & Controls */}
+                <div className="pt-3 sm:pt-4 md:pt-6 border-t border-white/10 flex items-center justify-between gap-4 relative z-10">
+                  <div className="flex items-center gap-3">
+                    {heroSlides.map((slide, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setCurrentSlide(idx)}
+                        className="group/btn flex items-center gap-2 py-1 cursor-pointer transition-all"
+                        aria-label={`Go to slide ${idx + 1}: ${slide.tabLabel}`}
+                        title={slide.tabLabel}
+                      >
+                        <span className={`text-[11px] font-mono font-bold transition-colors ${currentSlide === idx ? "text-[#F0A500]" : "text-white/40 group-hover/btn:text-white/80"}`}>
+                          0{idx + 1}
+                        </span>
+                        <div className={`h-1 rounded-full transition-all duration-300 ${currentSlide === idx ? "w-7 sm:w-9 bg-[#F0A500] shadow-[0_0_8px_rgba(240,165,0,0.5)]" : "w-2.5 bg-white/20 group-hover/btn:bg-white/40"}`} />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Elegant Mini Prev / Next Controls */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setCurrentSlide((prev) => (prev - 1 + 3) % 3)}
+                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#F0A500] hover:text-slate-950 text-white flex items-center justify-center transition-all cursor-pointer border border-white/10 active:scale-95 shadow-sm"
+                      title="Previous Slide"
+                      aria-label="Previous Slide"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setCurrentSlide((prev) => (prev + 1) % 3)}
+                      className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#F0A500] hover:text-slate-950 text-white flex items-center justify-center transition-all cursor-pointer border border-white/10 active:scale-95 shadow-sm"
+                      title="Next Slide"
+                      aria-label="Next Slide"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              {/* Right Column: Clean Media Panel with Static Institutional Credential Plaque */}
-              <div className={`w-full h-[44%] sm:h-[48%] md:h-full md:w-[50%] lg:w-[54%] xl:w-[58%] relative overflow-hidden z-10 transition-colors duration-500 ${currentSlideData.isBalaSlide ? "bg-[#0b1522]" : "bg-slate-950"}`}>
+              {/* Right Column: Clean Media Panel with Institutional Credential Plaque */}
+              <div className={`w-full h-[42%] sm:h-[46%] md:h-full md:w-[52%] lg:w-[56%] xl:w-[58%] relative overflow-hidden z-10 transition-colors duration-500 ${currentSlideData.isBalaSlide ? "bg-[#0b1522]" : "bg-slate-950"}`}>
                 {/* Left fade blend on Desktop */}
-                <div className="absolute inset-y-0 left-0 w-20 md:w-28 bg-gradient-to-r from-[#04121e] to-transparent z-20 hidden md:block"></div>
-                {/* Bottom fade into controls */}
-                <div className="absolute inset-x-0 bottom-0 h-24 md:h-32 bg-gradient-to-t from-[#04121e] to-transparent z-20 pointer-events-none"></div>
+                <div className="absolute inset-y-0 left-0 w-20 md:w-32 bg-gradient-to-r from-[#04121e] to-transparent z-20 hidden md:block"></div>
+                {/* Bottom subtle vignette */}
+                <div className="absolute inset-x-0 bottom-0 h-16 md:h-24 bg-gradient-to-t from-[#04121e] to-transparent z-20 pointer-events-none"></div>
 
                 <AnimatePresence mode="wait">
                   <motion.div
@@ -3043,7 +3076,7 @@ export default function Home() {
                           <div className="relative z-10 flex flex-col items-center">
                             <div className="p-2.5 md:p-3 rounded-full bg-gradient-to-b from-[#F0A500] via-[#E29300] to-[#B37200] shadow-[0_20px_50px_rgba(0,0,0,0.6)] border-2 border-white/20">
                               <div className="p-1.5 rounded-full bg-[#071D33]">
-                                <div className="w-36 h-36 sm:w-48 sm:h-48 md:w-60 md:h-60 lg:w-72 lg:h-72 rounded-full bg-white overflow-hidden shadow-inner flex items-center justify-center p-3 sm:p-4 md:p-5 relative">
+                                <div className="w-32 h-32 sm:w-44 sm:h-44 md:w-56 md:h-56 lg:w-68 lg:h-68 rounded-full bg-white overflow-hidden shadow-inner flex items-center justify-center p-3 sm:p-4 md:p-5 relative">
                                   <img
                                     src={currentSlideData.image}
                                     alt={currentSlideData.title}
@@ -3066,7 +3099,7 @@ export default function Home() {
                               <div className="text-white text-xs sm:text-sm md:text-base font-bold tracking-wide font-display">
                                 SHIKSHANTAR ACADEMY
                               </div>
-                              <div className="text-[#F0A500] text-[10px] sm:text-xs font-medium tracking-widest uppercase mt-0.5 font-poppins">
+                              <div className="text-[#F0A500] text-[10px] sm:text-xs font-medium tracking-widest uppercase mt-0.5 font-mono">
                                 Bastipur, Karjanha-02, Siraha
                               </div>
                             </div>
@@ -3076,7 +3109,7 @@ export default function Home() {
                         <img
                           src={currentSlideData.image}
                           alt={currentSlideData.title}
-                          className={`w-full h-full object-cover ${currentSlideData.objectPosition || "object-center"} ${currentSlideData.imageClassName || "scale-100"} filter brightness-[0.90] sm:brightness-[0.92] select-none pointer-events-none`}
+                          className={`w-full h-full object-cover ${currentSlideData.objectPosition || "object-center"} ${currentSlideData.imageClassName || "scale-100"} filter brightness-[0.92] select-none pointer-events-none`}
                           referrerPolicy="no-referrer"
                           loading="eager"
                           onError={(e) => {
@@ -3089,12 +3122,12 @@ export default function Home() {
                       )
                     )}
 
-                    {/* Static Institutional Plaque (Glassmorphic Transparent) */}
-                    <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 md:bottom-22 z-30 max-w-[240px] sm:max-w-xs bg-black/40 backdrop-blur-md border border-white/20 p-3 rounded-xl shadow-lg text-white">
-                      <div className="text-xs sm:text-sm font-bold font-display text-white truncate">
+                    {/* Refined Institutional Plaque (Sleek, Non-Intrusive, Corner Positioned) */}
+                    <div className="absolute bottom-5 sm:bottom-7 right-4 sm:right-7 z-30 bg-slate-950/80 backdrop-blur-md border border-white/15 px-3.5 py-2 rounded-xl shadow-xl text-white max-w-[280px]">
+                      <div className="text-xs sm:text-[13px] font-bold font-display text-white truncate">
                         {currentSlideData.cardTitle}
                       </div>
-                      <div className="text-[10px] sm:text-xs text-slate-200/90 font-poppins truncate mt-0.5">
+                      <div className="text-[10px] sm:text-[11px] text-[#F0A500] font-mono truncate font-medium">
                         {currentSlideData.cardSubtitle}
                       </div>
                     </div>
@@ -3105,40 +3138,6 @@ export default function Home() {
           );
         })()}
 
-        {/* Quiet Arrow Navigation Controls */}
-        <button
-          onClick={() => setCurrentSlide((prev) => (prev - 1 + 3) % 3)}
-          className="absolute left-3 sm:left-5 top-1/2 -translate-y-1/2 p-2 sm:p-2.5 bg-black/30 hover:bg-[#F0A500]/90 text-white hover:text-slate-950 rounded-full z-30 backdrop-blur-md border border-white/20 cursor-pointer opacity-75 md:opacity-50 hover:opacity-100 transition-all shadow-lg"
-          title="Previous Slide"
-          aria-label="Previous Slide"
-        >
-          <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
-        </button>
-        <button
-          onClick={() => setCurrentSlide((prev) => (prev + 1) % 3)}
-          className="absolute right-3 sm:right-5 top-1/2 -translate-y-1/2 p-2 sm:p-2.5 bg-black/30 hover:bg-[#F0A500]/90 text-white hover:text-slate-950 rounded-full z-30 backdrop-blur-md border border-white/20 cursor-pointer opacity-75 md:opacity-50 hover:opacity-100 transition-all shadow-lg"
-          title="Next Slide"
-          aria-label="Next Slide"
-        >
-          <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
-        </button>
-
-        {/* Slide Indicator Dots (Minimal and clean) */}
-        <div className="absolute bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2">
-          {[0, 1, 2].map((idx) => (
-            <button
-              key={idx}
-              onClick={() => setCurrentSlide(idx)}
-              className={`h-2 rounded-full transition-all cursor-pointer ${
-                currentSlide === idx
-                  ? "w-8 bg-[#F0A500] shadow-sm"
-                  : "w-2 bg-white/50 hover:bg-white/80"
-              }`}
-              aria-label={`Go to slide ${idx + 1}`}
-            />
-          ))}
-        </div>
-
         {/* Wave SVG divider transitioning into Stats bar */}
         <div className="absolute bottom-0 left-0 right-0 w-full overflow-hidden leading-[0] z-20 pointer-events-none">
           <svg className="relative block w-full h-[30px] md:h-[50px] text-[#1B4F72] fill-current" viewBox="0 0 1200 120" preserveAspectRatio="none">
@@ -3147,15 +3146,15 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 3. Stats / Trust Bar Strip - "Numbers That Speak" */}
+      {/* 3. Stats / Trust Bar Strip - Simple Key School Facts */}
       <section className="bg-[#1B4F72] text-white w-full border-b border-white/5 relative z-20 py-8 select-none shadow-md">
         <div className="container mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
             {[
-              { metric: "Level Range", value: content.statsLevelRange || "PG — Class 10", icon: "🏫", desc: "Co-Ed Curriculum" },
-              { metric: "Enrolled Students", value: content.statsStudents || "200+", icon: "👥", desc: "Active Learners", isCounter: true },
-              { metric: "Qualified Mentors", value: content.statsTeachers || "12+", icon: "👨‍🏫", desc: "Expert Educators", isCounter: true },
-              { metric: "Established Year", value: content.statsEstYear || "2072 B.S.", icon: "🏆", desc: "Academic Foundation" }
+              { metric: "Classes", value: content.statsLevelRange || "PG — Class 10", icon: "🏫", desc: "Playgroup to Class 10" },
+              { metric: "Students", value: content.statsStudents || "200+", icon: "👥", desc: "Enrolled Learners", isCounter: true },
+              { metric: "Teachers & Staff", value: content.statsTeachers || "12+", icon: "👨‍🏫", desc: "Caring Teachers", isCounter: true },
+              { metric: "Established", value: content.statsEstYear || "2072 B.S.", icon: "🏆", desc: "Over 10 Years in Siraha" }
             ].map((item, idx) => (
               <div
                 key={idx}
@@ -3182,7 +3181,7 @@ export default function Home() {
       {/* Main Page Layout Wrapper */}
       <div className="w-full bg-[#FAFAF8] dark:bg-[#0b0f19] py-16 px-6 relative z-10 space-y-24">
         
-        {/* 4. About / Introduction Section - "Split Story" */}
+        {/* 4. About / Introduction Section - Plain, Friendly School Introduction */}
         <section className="container mx-auto max-w-6xl">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-10 lg:gap-16 items-center">
             {/* Left Image Block */}
@@ -3196,8 +3195,8 @@ export default function Home() {
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute bottom-4 left-4 right-4 bg-[#1B4F72]/95 backdrop-blur-md rounded-xl p-3.5 text-white border border-white/10 shadow-lg">
-                  <p className="text-[10px] font-black font-poppins uppercase tracking-wider text-[#F0A500]">Inspiring Center</p>
-                  <p className="text-xs font-semibold font-sans mt-0.5">Karjanha Municipali-05,Bastipur.</p>
+                  <p className="text-[10px] font-black font-poppins uppercase tracking-wider text-[#F0A500]">School Location</p>
+                  <p className="text-xs font-semibold font-sans mt-0.5">Bastipur, Karjanha-05, Siraha</p>
                 </div>
               </div>
             </div>
@@ -3206,7 +3205,7 @@ export default function Home() {
             <div className="md:col-span-7 space-y-6">
               <div className="space-y-2">
                 <span className="text-xs font-black uppercase tracking-widest text-[#F0A500] font-poppins bg-[#FFF3CC] dark:bg-amber-950/40 px-3 py-1 rounded-full border border-[#FFF3CC]/30">
-                  Est. 2072 B.S. · Bastipur, Siraha
+                  Estd. 2072 B.S. · Bastipur, Siraha
                 </span>
                 <h2 className="text-3xl md:text-4.5xl font-display font-bold text-[#1A1A2E] dark:text-white leading-tight">
                   Welcome to Shikshantar Academy
@@ -3214,16 +3213,16 @@ export default function Home() {
               </div>
               <p className="text-sm md:text-base text-[#6B7280] dark:text-gray-300 leading-relaxed font-sans">
                 {content.description ||
-                  "Shikshantar Academy provides quality education from class Play to Ten (10) in a peaceful and nurturing environment in Karjanha Municipality, Ward No. 05, Siraha."}
+                  "Shikshantar Academy is an English medium school providing quality education from Playgroup to Class 10 in a peaceful and caring environment in Bastipur, Karjanha-05, Siraha."}
               </p>
 
               {/* Principal Pull Quote */}
               <div className="border-l-4 border-[#F0A500] pl-5 py-2 my-6 bg-[#FFF3CC]/10 dark:bg-amber-950/10 rounded-r-lg">
                 <p className="text-base font-display italic text-gray-800 dark:text-gray-200">
-                  "We believe in nurturing not just academic excellence, but character, creativity, and critical thinking."
+                  "We focus on good learning, discipline, and caring for every student like our own family."
                 </p>
                 <p className="text-xs font-poppins font-bold text-[#1B4F72] dark:text-blue-400 mt-2 uppercase tracking-wider">
-                  — Pappu Kumar Jha, Executive Principal
+                  — Pappu Kumar Jha, Founder Principal
                 </p>
               </div>
 
@@ -3232,16 +3231,14 @@ export default function Home() {
                   to="/about"
                   className="inline-flex items-center gap-2 bg-[#1B4F72] hover:bg-[#12364E] text-white px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-200 font-poppins shadow-md scale-100 hover:scale-105"
                 >
-                  🏫 Learn Our History & Mission →
+                  🏫 Read More About Our School →
                 </Link>
               </div>
             </div>
           </div>
         </section>
 
-
-
-        {/* 5. Principal's Message Section - "Voice of Leadership" Card with custom premium animations */}
+        {/* 5. Principal's Message Section - Direct & Friendly */}
         <motion.section 
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -3339,7 +3336,7 @@ export default function Home() {
                     ★
                   </motion.span>
                   <span className="text-[#F0A500] font-black tracking-widest text-[10px] uppercase font-poppins block">
-                    SCHOOL LEADERSHIP MESSAGE
+                    MESSAGE FROM THE PRINCIPAL
                   </span>
                   <motion.span 
                     animate={{ rotate: -360 }}
@@ -3361,7 +3358,7 @@ export default function Home() {
                   
                   <span className="relative z-10 font-sans tracking-wide">
                     {content.principalMessage ||
-                      "At Shikshantar Academy, we believe in nurturing not just academic excellence, but character, creativity, and critical thinking. Our peaceful environment and modern facilities provide the perfect setting for your child to grow and thrive."}
+                      "At Shikshantar Academy, we believe in giving every child quality education, good discipline, and strong moral values. Our peaceful school environment and caring teachers provide the right place for your child to learn and succeed."}
                   </span>
 
                   <motion.span 
@@ -3393,11 +3390,11 @@ export default function Home() {
         {/* 5.5 Interactive Fee & Scholarship Estimator */}
         <FeeEstimator />
 
-        {/* 6. Learning Pathways Grade Card Catalog */}
+        {/* 6. Learning Stages: Playgroup to Class 10 */}
         <section className="container mx-auto max-w-6xl space-y-12">
           <div className="text-center max-w-xl mx-auto space-y-2">
             <span className="text-[#F0A500] font-poppins font-black text-[10px] uppercase tracking-widest">
-              ACADEMIC SPECTRUM
+              CLASSES & LEARNING STAGES
             </span>
             <motion.h2 
               initial={{ opacity: 0, y: 15 }}
@@ -3420,7 +3417,7 @@ export default function Home() {
                 }}
                 className="relative inline-block text-[#F0A500] italic font-serif px-3 py-1 font-semibold dark:text-amber-400 cursor-pointer"
               >
-                Curiosity
+                Playgroup
                 <span className="absolute bottom-1.5 left-0 w-full h-1.5 bg-amber-200/60 dark:bg-amber-950/40 -z-10 rounded-full"></span>
               </motion.span>
               <span className="text-gray-900 dark:text-gray-150">to</span>
@@ -3437,57 +3434,57 @@ export default function Home() {
                 }}
                 className="relative inline-block px-4 py-1 rounded-2xl bg-[#1B4F72] text-white font-black tracking-wide shadow-md hover:shadow-xl cursor-default text-xs md:text-sm uppercase -rotate-[1.5deg]"
               >
-                Capability
+                Class 10 (SEE)
               </motion.span>
             </motion.h2>
             <p className="text-sm text-[#6B7280] dark:text-gray-400 font-sans">
-              Explore our structured stages modeled dynamically around scientific learning pathways.
+              Clear learning stages tailored for every age group from early childhood to board exam success.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {[
               {
-                title: "Play Group & Montessori",
+                title: "Playgroup & Montessori",
                 grade: "Pre-School",
                 stripeColor: "bg-[#1B4F72]",
-                desc: "An safe visual play space establishing fundamental motor development, social interactions, and phonics.",
-                feats: ["🎨 Color Playrooms", "🧸 Sensory Stimulation", "🥪 Healthy Meals", "👨‍🏫 Caring Nurse Staff"]
+                desc: "A safe, fun, and colorful space with toys and songs where young children learn to talk, share, and enjoy school.",
+                feats: ["🎨 Color & Drawing", "🧸 Safe Learning Toys", "🥪 Clean Snacks Area", "👩‍⚕️ Caring Staff"]
               },
               {
                 title: "Nursery & Kindergarten",
-                grade: "Lower Kindergarten",
+                grade: "Kindergarten",
                 stripeColor: "bg-[#F0A500]",
-                desc: "Introduction to writing scales, alphabet identification, numbers arithmetic cards, and bilingual storytelling.",
-                feats: ["✏️ Alphabet Tracing", "🎼 Rhymes & Audios", "🃏 Number Playing Cards", "🎭 Annual Skits"]
+                desc: "Learning the English and Nepali alphabets, numbers, poems, and neat pencil writing through daily practice.",
+                feats: ["✏️ Alphabet & Writing", "🎼 Rhymes & Songs", "🔢 Number Counting", "🎭 Fun Stage Programs"]
               },
               {
-                title: "Primary (Class 1 — 5)",
-                grade: "Junior Foundation",
+                title: "Primary (Class 1 to 5)",
+                grade: "Class 1 — 5",
                 stripeColor: "bg-[#2E7D4F]",
-                desc: "Following CDM standards with intensive writing studies, abacus mental math classes, and local sciences.",
-                feats: ["📖 CDC English Curriculations", "🧮 Abacus Classrooms", "🎨 Oil Paint Arts", "🔬 Ecology Gardens"]
+                desc: "Strong foundation in English reading, Nepali grammar, math multiplication tables, and basic science.",
+                feats: ["📖 Nepal CDC Books", "🧮 Math & Tables", "🎨 Drawing & Crafts", "🌱 Nature & Science"]
               },
               {
-                title: "Basic School (Class 6 — 8)",
-                grade: "Middle Schooling",
+                title: "Middle School (Class 6 to 8)",
+                grade: "Class 6 — 8",
                 stripeColor: "bg-[#0A3D62]",
-                desc: "Fostering analytical logic with introductory Physics, Chemistry diagnostics, sociologies, and physical drills.",
-                feats: ["📐 Physics & Chem Labs", "🧘 Yoga Sessions", "🤝 Cultural Assemblies", "💻 Computing Laboratories"]
+                desc: "Hands-on computer practice, easy science experiments, social studies, and daily physical exercise.",
+                feats: ["🔬 Simple Science Labs", "🧘 Morning Yoga & Drill", "🤝 Cultural Programs", "💻 Computer Classes"]
               },
               {
-                title: "Secondary (Class 9 — 10)",
-                grade: "SEE Board Core",
+                title: "Secondary (Class 9 & 10)",
+                grade: "SEE Board Prep",
                 stripeColor: "bg-[#F1C40F]",
-                desc: "High-level diagnostic coaching designed specifically to secure highest SEE aggregates in Karjanha Province.",
-                feats: ["🏆 SEE Board Preparation", "👨‍🏫 Special Subject Coaching", "📊 Weekly Diagnostic Exams", "🎯 Target aggregate reviews"]
+                desc: "Focused study and regular practice tests to help every student score top marks in Class 10 SEE board exams.",
+                feats: ["🏆 Class 10 SEE Prep", "👨‍🏫 Subject Teachers", "📊 Weekly Test Practice", "🎯 Personal Guidance"]
               },
               {
-                title: "Extra-Curricular Clubs",
-                grade: "Beyond Studios",
+                title: "Sports & Activities",
+                grade: "Extra Activities",
                 stripeColor: "bg-[#2E7D4F]",
-                desc: "Enriching physical education logs with professional coaches, music tournaments, debates, and public speaking platforms.",
-                feats: ["⚽ Professional Football", "🏛️ Municipal Debates", "🎺 Brass Band Auditions", "🏆 General Assembly Honors"]
+                desc: "Outdoor sports, football, speech competitions, and cultural celebrations that build health and confidence.",
+                feats: ["⚽ Football & Games", "🏛️ Quiz & Speeches", "🎺 Music & Culture", "🏆 Medals & Awards"]
               }
             ].map((program, idx) => (
               <motion.div
@@ -3565,49 +3562,49 @@ export default function Home() {
 
           const uniquePhotos = [
             {
-              image: principalItem?.image || '/gallery/principal_pappu_jha.jpg',
+              image: (principalItem?.image ? mapDummyImage(principalItem.image, { name: principalItem.name, role: principalItem.role }) : '') || galleryPrincipalImg,
               caption: principalItem?.name || "Mr. Pappu Kumar Jha",
-              sizeDetail: principalItem?.role || "Principal Sir",
-              celebrationDetail: "Guiding our children with modern standards, values, and academic excellence",
+              sizeDetail: principalItem?.role || "Founder Principal",
+              celebrationDetail: "Leading our school with care, discipline, and quality education",
               id: "principal-jha",
               isBatch: false,
-              fallback: '/gallery/principal_pappu_jha.jpg'
+              fallback: galleryPrincipalImg
             },
             {
-              image: teacherTeamItem?.image || '/gallery/teacher_team.jpg',
+              image: (teacherTeamItem?.image ? mapDummyImage(teacherTeamItem.image, { name: teacherTeamItem.name, role: teacherTeamItem.role }) : '') || galleryTeachersImg,
               caption: teacherTeamItem?.name || "Teaching Faculty & Staff Team",
               sizeDetail: teacherTeamItem?.role || "Group Photo",
-              celebrationDetail: "Our team of dedicated professional educators committed to developmental learning",
+              celebrationDetail: "Our dedicated teachers working together to support every student",
               id: "faculty-staff",
               isBatch: false,
-              fallback: '/gallery/teacher_team.jpg'
+              fallback: galleryTeachersImg
             },
             {
-              image: batch2082?.image || '/gallery/batch_2082.jpg',
+              image: (batch2082?.image ? mapDummyImage(batch2082.image, { year: batch2082.year }) : '') || galleryBatch2082Img,
               caption: batch2082?.year || "Batch Year : 2082 B.S.",
               sizeDetail: "S.E.E. Batch 2082",
-              celebrationDetail: "Secondary Education Examination candidates and academic achievers",
+              celebrationDetail: "Class 10 students preparing for their SEE board examinations",
               id: "batch-2082",
               isBatch: true,
-              fallback: '/gallery/batch_2082.jpg'
+              fallback: galleryBatch2082Img
             },
             {
-              image: batch2081?.image || '/gallery/batch_2081.jpg',
+              image: (batch2081?.image ? mapDummyImage(batch2081.image, { year: batch2081.year }) : '') || galleryBatch2081Img,
               caption: batch2081?.year || "Batch Year : 2081 B.S.",
               sizeDetail: "S.E.E. Batch 2081",
-              celebrationDetail: "Graduating batch with outstanding academic milestones and board results",
+              celebrationDetail: "Class 10 graduating batch with successful board exam results",
               id: "batch-2081",
               isBatch: true,
-              fallback: '/gallery/batch_2081.jpg'
+              fallback: galleryBatch2081Img
             },
             {
-              image: tiharEvent?.image || '/gallery/event_tihar.jpg',
+              image: (tiharEvent?.image ? mapDummyImage(tiharEvent.image, { title: tiharEvent.title }) : '') || galleryTiharImg,
               caption: tiharEvent?.title || "Celebrating Tihar Festival",
-              sizeDetail: "Cultural Celebration",
-              celebrationDetail: "Traditional celebrations and cultural values shared across the academy",
+              sizeDetail: "School Celebration",
+              celebrationDetail: "Students and teachers celebrating festival traditions together",
               id: "festival-tihar",
               isBatch: false,
-              fallback: '/gallery/event_tihar.jpg'
+              fallback: galleryTiharImg
             }
           ];
 
@@ -3642,56 +3639,51 @@ export default function Home() {
               case "Enter":
               case " ":
                 e.preventDefault();
-                setExpandedImage(activePhoto.image);
+                setExpandedImage(activePhoto.image || activePhoto.fallback);
                 break;
               default:
                 break;
             }
           };
 
-          // Define five distinct premium transitioning animation properties for each slide
+          // Smooth and reliable transitions across all 5 slides
           const getTransitionProps = (idx: number) => {
             switch (idx) {
               case 0:
-                // Effect 1: Push off / Horizontal Slide Left-to-Right displacement
                 return {
-                  initial: { opacity: 0, x: "-100%", scale: 0.96 },
+                  initial: { opacity: 0, x: -30, scale: 0.98 },
                   animate: { opacity: 1, x: 0, scale: 1 },
-                  exit: { opacity: 0, x: "100%", scale: 1.04 },
-                  transition: { duration: 1.3, ease: [0.25, 1, 0.5, 1] }
+                  exit: { opacity: 0, x: 30, scale: 1.02 },
+                  transition: { duration: 0.45, ease: "easeOut" }
                 };
               case 1:
-                // Effect 2: Lens Shutter (Vertical scale & extreme contrast light opening)
                 return {
-                  initial: { opacity: 0, scaleY: 0.05, filter: "contrast(4) brightness(2.5)" },
-                  animate: { opacity: 1, scaleY: 1, filter: "contrast(1) brightness(1)" },
-                  exit: { opacity: 0, scaleY: 0.05, filter: "contrast(4) brightness(0.25)" },
-                  transition: { duration: 1.4, ease: [0.76, 0, 0.24, 1] }
+                  initial: { opacity: 0, scale: 0.95 },
+                  animate: { opacity: 1, scale: 1 },
+                  exit: { opacity: 0, scale: 1.05 },
+                  transition: { duration: 0.45, ease: "easeOut" }
                 };
               case 2:
-                // Effect 3: Slide (Smooth vertical slide upward entrance)
                 return {
-                  initial: { opacity: 0, y: "100%", scale: 0.98 },
+                  initial: { opacity: 0, y: 30, scale: 0.98 },
                   animate: { opacity: 1, y: 0, scale: 1 },
-                  exit: { opacity: 0, y: "-100%", scale: 1.02 },
-                  transition: { duration: 1.2, ease: [0.16, 1, 0.3, 1] }
+                  exit: { opacity: 0, y: -30, scale: 1.02 },
+                  transition: { duration: 0.45, ease: "easeOut" }
                 };
               case 3:
-                // Effect 4: Right shift (Sliding entry from right side shifting left-to-right off output)
                 return {
-                  initial: { opacity: 0, x: "100%", scale: 0.96 },
+                  initial: { opacity: 0, x: 30, scale: 0.98 },
                   animate: { opacity: 1, x: 0, scale: 1 },
-                  exit: { opacity: 0, x: "-100%", scale: 1.04 },
-                  transition: { duration: 1.3, ease: [0.25, 1, 0.5, 1] }
+                  exit: { opacity: 0, x: -30, scale: 1.02 },
+                  transition: { duration: 0.45, ease: "easeOut" }
                 };
               case 4:
               default:
-                // Effect 5: Blink White / Professional Camera flash light blast and smooth fade
                 return {
-                  initial: { opacity: 0, filter: "brightness(4) contrast(3)" },
-                  animate: { opacity: 1, filter: "brightness(1) contrast(1)" },
-                  exit: { opacity: 0, filter: "brightness(4) contrast(3)" },
-                  transition: { duration: 1.1, ease: "easeInOut" }
+                  initial: { opacity: 0, scale: 1.05 },
+                  animate: { opacity: 1, scale: 1 },
+                  exit: { opacity: 0, scale: 0.95 },
+                  transition: { duration: 0.45, ease: "easeOut" }
                 };
             }
           };
@@ -3767,25 +3759,25 @@ export default function Home() {
                       animate={transitionProps.animate}
                       exit={transitionProps.exit}
                       transition={transitionProps.transition}
-                      className="absolute inset-0 w-full h-full cursor-zoom-in origin-center"
+                      className="absolute inset-0 w-full h-full cursor-zoom-in origin-center bg-slate-900"
                       style={{ transformOrigin: "center" }}
-                      onClick={() => setExpandedImage(activePhoto.image)}
+                      onClick={() => setExpandedImage(activePhoto.image || activePhoto.fallback)}
                       role="tabpanel"
                       id={`gallery-slide-panel-${currentGallerySlide}`}
                       aria-label={`Slide ${currentGallerySlide + 1} of ${uniquePhotos.length}: ${activePhoto.caption}`}
                     >
                       <img
-                        src={activePhoto.image || principalImg}
+                        src={activePhoto.image || activePhoto.fallback}
                         className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-103"
                         alt={activePhoto.caption}
+                        loading="eager"
+                        decoding="async"
                         referrerPolicy="no-referrer"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
-                          if (activePhoto.fallback && target.src !== activePhoto.fallback) {
+                          if (target.src !== activePhoto.fallback) {
                             target.src = activePhoto.fallback;
-                            return;
                           }
-                          target.src = "/gallery/principal_pappu_jha.jpg";
                         }}
                       />
                     </motion.div>
@@ -3883,176 +3875,242 @@ export default function Home() {
           );
         })()}
 
-        {/* 8. Facilities / Features Section - "Why Shikshantar" */}
-        <section className="container mx-auto max-w-6xl space-y-12 px-4">
+        {/* 8. Facilities / Features Section - Why Choose Shikshantar Academy */}
+        <section className="container mx-auto max-w-6xl space-y-10 px-4">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-100px" }}
             transition={{ duration: 0.6 }}
-            className="text-center max-w-xl mx-auto space-y-3"
+            className="text-center max-w-xl mx-auto space-y-2.5"
           >
-            <h2 className="text-3xl md:text-4xl lg:text-[40px] font-display font-medium text-[#1B4F72] dark:text-white leading-none">
+            <h2 className="text-3xl md:text-4xl lg:text-[42px] font-display font-medium text-[#1B4F72] dark:text-white leading-tight">
               Why Choose Shikshantar Academy?
             </h2>
             <div className="w-14 h-1 bg-[#F0A500] mx-auto rounded-full"></div>
-            <p className="text-base text-gray-600 dark:text-gray-300 font-sans font-medium">
+            <p className="text-sm md:text-base text-gray-600 dark:text-gray-300 font-sans font-medium">
               Trusted by 600+ Families in Karjanha Municipality
             </p>
           </motion.div>
 
-          {/* Why Choose Shikshantar Academy Facilities Grid (2 Large Cards Per Row on Big Screens) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+          {/* Why Choose Shikshantar Academy Facilities Grid - Professional 3D Flip Cards with Radiant Shine Effect */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-stretch">
             {[
               {
                 emoji: "🏫",
                 title: "Modern Infrastructure",
-                desc: "Our child-friendly campus is equipped with curriculum-integrated BALA wall murals, spacious interactive classrooms, safe playgrounds, and hygienic amenities designed to inspire daily curiosity.",
-                tag: "Campus & Safety",
-                accentGlow: "from-blue-500/10 to-indigo-500/10"
+                desc: "Spacious classrooms with colorful educational wall paintings (BALA), clean drinking water, modern student desks, and secure open grounds where children study and play safely.",
+                tag: "SCHOOL & SAFETY",
+                highlights: [
+                  "BALA Wall-Art Classrooms",
+                  "Pure Filtered Drinking Water",
+                  "Secure Open Playgrounds"
+                ],
+                accentGlow: "from-blue-500/25 via-indigo-500/15 to-transparent",
+                badgeBg: "bg-blue-50 text-blue-800 dark:bg-sky-950/70 dark:text-sky-300 border-blue-200/90 dark:border-sky-800/60"
               },
               {
                 emoji: "🔬",
                 title: "Science & Computer Lab",
-                desc: "Equipped with modern desktop computers and practical science apparatus, learners build hands-on technological literacy, experimental curiosity, and analytical thinking under expert faculty mentorship.",
-                tag: "Practical Learning",
-                accentGlow: "from-cyan-500/10 to-blue-500/10"
+                desc: "Students get real practice on computers and perform simple science experiments to understand their lessons clearly and build practical knowledge.",
+                tag: "PRACTICAL LEARNING",
+                highlights: [
+                  "Hands-on PC Practicals",
+                  "Real Science Experiments",
+                  "Digital Learning from Class 1"
+                ],
+                accentGlow: "from-cyan-500/25 via-blue-500/15 to-transparent",
+                badgeBg: "bg-cyan-50 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-300 border-cyan-200/90 dark:border-cyan-800/60"
               },
               {
                 emoji: "🌐",
                 title: "English Medium",
-                desc: "All core curriculum subjects are taught in English to build global communicative confidence and analytical fluency, harmoniously balanced with rich Nepali cultural values, ethics, and moral science.",
-                tag: "Academic Excellence",
-                accentGlow: "from-emerald-500/10 to-teal-500/10"
+                desc: "All main subjects are taught in English so children speak and write fluently, while keeping deep respect for Nepali language, culture, and good manners.",
+                tag: "ACADEMIC EXCELLENCE",
+                highlights: [
+                  "Fluent English Communication",
+                  "Nepal CDC Standard Books",
+                  "Moral Values & Sanskar"
+                ],
+                accentGlow: "from-emerald-500/25 via-teal-500/15 to-transparent",
+                badgeBg: "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200/90 dark:border-emerald-800/60"
               },
               {
                 emoji: "📊",
                 title: "Regular Assessments",
-                desc: "We conduct four structured terminal examinations each academic year to closely monitor progress, backed by 24/7 digital report card access and transparent parent-teacher progress evaluations.",
-                tag: "Continuous Evaluation",
-                accentGlow: "from-amber-500/10 to-orange-500/10"
+                desc: "We conduct 4 term exams each year and share progress online so parents can easily view their child's marks and report cards from their phones.",
+                tag: "CONTINUOUS EVALUATION",
+                highlights: [
+                  "4 Terminal Examinations",
+                  "Mobile Progress Reports",
+                  "Regular Parent Updates"
+                ],
+                accentGlow: "from-amber-500/25 via-orange-500/15 to-transparent",
+                badgeBg: "bg-amber-50 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200/90 dark:border-amber-800/60"
               },
               {
                 emoji: "🏆",
                 title: "Extra-Curricular Activities",
-                desc: "Through inter-house sports tournaments, debates, creative arts, and celebratory cultural programs, students develop vital leadership qualities, teamwork, and strong character alongside academics.",
-                tag: "Holistic Growth",
-                accentGlow: "from-rose-500/10 to-pink-500/10"
+                desc: "Football, outdoor games, drawing, quiz contests, and stage performances help children build strong health, good teamwork, and self-confidence.",
+                tag: "HOLISTIC GROWTH",
+                highlights: [
+                  "Sports & Outdoor Games",
+                  "Quiz, Art & Stage Programs",
+                  "Confidence & Teamwork"
+                ],
+                accentGlow: "from-rose-500/25 via-pink-500/15 to-transparent",
+                badgeBg: "bg-rose-50 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200/90 dark:border-rose-800/60"
               },
               {
                 emoji: "💰",
                 title: "Affordable Fees",
-                desc: "We provide high-standard private schooling with transparent, honest fee structures, complemented by merit-based and need-based scholarship concessions for deserving students.",
-                tag: "Accessible Quality",
-                accentGlow: "from-violet-500/10 to-purple-500/10"
+                desc: "Quality private schooling at honest and low monthly fees, with scholarship fee discounts for top rankers and families with multiple siblings.",
+                tag: "ACCESSIBLE QUALITY",
+                highlights: [
+                  "Low & Honest Monthly Fees",
+                  "Top Ranker Scholarships",
+                  "Sibling Fee Discounts"
+                ],
+                accentGlow: "from-violet-500/25 via-purple-500/15 to-transparent",
+                badgeBg: "bg-violet-50 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300 border-violet-200/90 dark:border-violet-800/60"
               },
               {
                 emoji: "📍",
                 title: "Central Location",
                 fullWidth: true,
-                desc: "Conveniently situated in Bastipur, Karjanha-02, Siraha with dedicated bus transit connectivity, offering a secure, serene, green environment away from highway noise for distraction-free study.",
-                tag: "Peaceful Environment",
-                accentGlow: "from-sky-500/10 to-indigo-500/10"
+                desc: "Located in Bastipur, Karjanha-05, Siraha in a quiet, green area away from highway noise, with safe school bus service across nearby villages.",
+                tag: "PEACEFUL ENVIRONMENT",
+                highlights: [
+                  "Peaceful Green Bastipur Area",
+                  "Away from Highway Distraction",
+                  "Safe School Bus Routes"
+                ],
+                accentGlow: "from-sky-500/25 via-blue-500/15 to-transparent",
+                badgeBg: "bg-sky-50 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 border-sky-200/90 dark:border-sky-800/60"
               }
-            ].map((facility, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-40px" }}
-                transition={{ duration: 0.4, delay: idx * 0.05, type: "spring", stiffness: 120 }}
-                className={`group [perspective:1200px] h-[240px] sm:h-[250px] md:h-[260px] cursor-pointer select-none ${
-                  facility.fullWidth ? "col-span-1 lg:col-span-2" : "col-span-1"
-                }`}
-                onClick={() => setActiveCardIdx(activeCardIdx === idx ? null : idx)}
-              >
-                <div 
-                  className={`relative w-full h-full transition-transform duration-700 [transform-style:preserve-3d] shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.3)] rounded-[26px] sm:rounded-[28px] ${
-                    activeCardIdx === idx 
-                      ? "[transform:rotateY(180deg)]" 
-                      : "group-hover:[transform:rotateY(180deg)]"
+            ].map((facility, idx) => {
+              const isFlipped = activeCardIdx === idx;
+              return (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, y: 22 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: "-40px" }}
+                  transition={{ duration: 0.45, delay: idx * 0.05 }}
+                  className={`group [perspective:1400px] h-[310px] sm:h-[275px] md:h-[270px] lg:h-[265px] cursor-pointer select-none ${
+                    facility.fullWidth ? "col-span-1 lg:col-span-2" : "col-span-1"
                   }`}
-                  style={{ transformStyle: "preserve-3d" }}
+                  onClick={() => setActiveCardIdx(isFlipped ? null : idx)}
                 >
-                  {/* FRONT SIDE */}
-                  <div 
-                    className="absolute inset-0 bg-white dark:bg-slate-900 rounded-[26px] sm:rounded-[28px] border border-slate-200/90 dark:border-slate-800 border-l-[10px] sm:border-l-[12px] border-l-[#143D5C] dark:border-l-sky-500 px-6 sm:px-8 py-5 sm:py-6 flex flex-col justify-between transition-all duration-300 group-hover:shadow-2xl overflow-hidden"
-                    style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+                  <div
+                    className={`relative w-full h-full transition-all duration-700 [transform-style:preserve-3d] shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_10px_35px_rgba(0,0,0,0.35)] rounded-[26px] sm:rounded-[28px] ${
+                      isFlipped
+                        ? "[transform:rotateY(180deg)] shadow-[0_22px_50px_rgba(20,61,92,0.25)] dark:shadow-[0_22px_50px_rgba(0,0,0,0.7)]"
+                        : "group-hover:[transform:rotateY(180deg)] group-hover:shadow-[0_22px_50px_rgba(20,61,92,0.25)] dark:group-hover:shadow-[0_22px_50px_rgba(0,0,0,0.7)]"
+                    }`}
+                    style={{ transformStyle: "preserve-3d" }}
                   >
-                    {/* Background subtle glow effect on hover */}
-                    <div className={`absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br ${facility.accentGlow} rounded-full blur-2xl pointer-events-none group-hover:scale-150 transition-transform duration-700`} />
+                    {/* FRONT FACE (CLEAN: ONLY LOGO + TAG + TOPIC NAME + SHINE EFFECT) */}
+                    <div
+                      className="absolute inset-0 bg-white dark:bg-slate-900 rounded-[26px] sm:rounded-[28px] border border-slate-200/90 dark:border-slate-800 border-l-[10px] sm:border-l-[12px] border-l-[#143D5C] dark:border-l-sky-500 p-5 sm:p-6 md:p-7 flex flex-col justify-between overflow-hidden shadow-xs"
+                      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+                    >
+                      {/* Ambient Glowing Aura */}
+                      <div
+                        className={`absolute -top-12 -right-12 w-52 h-52 bg-gradient-to-br ${facility.accentGlow} rounded-full blur-3xl pointer-events-none group-hover:scale-150 transition-transform duration-700`}
+                      />
 
-                    {/* Top Content: 3D Icon + Badge + Bold Facility Title */}
-                    <div className="relative z-10 flex items-center gap-5 sm:gap-6 my-auto">
-                      {/* 3D Emoji / Icon with animated floating effect */}
-                      <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/60 dark:from-slate-800 dark:to-slate-700/60 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center text-3xl sm:text-4xl shadow-inner shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
-                        <span>{facility.emoji}</span>
-                      </div>
+                      {/* RADIANT METALLIC SHINE EFFECT (Continuous & On-Hover Beam Sweep) */}
+                      <div className="absolute -inset-full bg-gradient-to-r from-transparent via-white/30 dark:via-amber-400/15 to-transparent rotate-45 pointer-events-none group-hover:animate-shine transition-all duration-1000" />
+                      <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out bg-gradient-to-r from-transparent via-white/40 dark:via-sky-400/20 to-transparent pointer-events-none z-10 skew-x-12" />
 
-                      {/* Bold Facility Title + Tag */}
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <span className="inline-block text-[10.5px] font-bold uppercase tracking-wider text-blue-700 dark:text-sky-400 bg-blue-50 dark:bg-sky-950/60 border border-blue-100 dark:border-sky-900/50 px-2.5 py-0.5 rounded-full font-mono">
+                      {/* Top Row: 3D Logo / Emoji + Tag Badge */}
+                      <div className="relative z-10 flex items-center justify-between gap-4">
+                        {/* 3D Emoji Logo with Shadow & Ring */}
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-slate-50 via-blue-50/70 to-indigo-50/50 dark:from-slate-800 dark:via-slate-800 dark:to-slate-700 border border-slate-200/90 dark:border-slate-700/80 flex items-center justify-center text-3xl sm:text-4xl shadow-md group-hover:scale-110 group-hover:rotate-6 group-hover:shadow-lg transition-all duration-300 shrink-0">
+                          <span>{facility.emoji}</span>
+                        </div>
+
+                        {/* Category Tag Badge */}
+                        <span className={`text-[10.5px] sm:text-[11.5px] font-extrabold uppercase tracking-wider border px-3 sm:px-3.5 py-1 rounded-full font-mono shadow-xs ${facility.badgeBg}`}>
                           {facility.tag}
                         </span>
-                        <h3 className="text-xl sm:text-2xl lg:text-[25px] font-bold font-display text-[#0E2C44] dark:text-white leading-tight tracking-tight group-hover:text-[#1B4F72] dark:group-hover:text-amber-400 transition-colors">
+                      </div>
+
+                      {/* Middle: Topic Name (Large, Bold & Crisp) */}
+                      <div className="relative z-10 my-auto">
+                        <h3 className="text-2xl sm:text-[26px] font-bold font-display text-[#0E2C44] dark:text-white leading-tight tracking-tight group-hover:text-[#1B4F72] dark:group-hover:text-amber-400 transition-colors">
                           {facility.title}
                         </h3>
                       </div>
+
+                      {/* Bottom Bar: Action Indicator (Clean, No blinking star, No retry symbol) */}
+                      <div className="relative z-10 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                        <span className="text-xs sm:text-xs font-bold font-mono tracking-widest text-[#B8860B] dark:text-[#F0A500] uppercase">
+                          <span className="inline sm:hidden">{isTouchDevice ? "TAP TO VIEW DETAILS" : "TAP TO VIEW DETAILS"}</span>
+                          <span className="hidden sm:inline">{isTouchDevice ? "TAP TO VIEW DETAILS" : "HOVER TO VIEW DETAILS"}</span>
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-[#B8860B] dark:text-[#F0A500] group-hover:translate-x-1.5 transition-transform" />
+                      </div>
                     </div>
 
-                    {/* Bottom Row: Light Divider + Gold HOVER TO SEE DETAILS + Arrow */}
-                    <div className="relative z-10 pt-3.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-                      <span className="text-xs sm:text-xs font-bold tracking-widest text-[#B8860B] dark:text-[#F0A500] uppercase font-mono">
-                        {isTouchDevice ? "TAP TO REVEAL DETAILS" : "HOVER TO REVEAL DETAILS"}
-                      </span>
-                      <ChevronRight className="w-5 h-5 text-[#B8860B] dark:text-[#F0A500] group-hover:translate-x-1.5 transition-transform" />
-                    </div>
-                  </div>
+                    {/* BACK FACE (REVEAL: FULL DETAILS + HIGHLIGHTS + BRANDING, NEVER CLIPPED) */}
+                    <div
+                      className="absolute inset-0 bg-gradient-to-br from-[#0c2438] via-[#12395b] to-[#0a1c2c] dark:from-slate-900 dark:via-slate-950 dark:to-slate-900 rounded-[26px] sm:rounded-[28px] border border-white/20 border-l-[10px] sm:border-l-[12px] border-l-[#F0A500] p-4 sm:p-5 md:p-6 flex flex-col justify-between text-white shadow-2xl overflow-hidden"
+                      style={{
+                        transform: "rotateY(180deg)",
+                        backfaceVisibility: "hidden",
+                        WebkitBackfaceVisibility: "hidden"
+                      }}
+                    >
+                      {/* Back Specular Light Sweep */}
+                      <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out bg-gradient-to-r from-transparent via-white/15 to-transparent pointer-events-none z-10 skew-x-12" />
 
-                  {/* BACK SIDE - CONTINUOUS SINGLE FLOW PASSAGE WITH GOLD ACCENT */}
-                  <div 
-                    className="absolute inset-0 bg-gradient-to-br from-[#0c2438] via-[#12395b] to-[#0a1c2c] dark:from-slate-900 dark:to-slate-950 rounded-[26px] sm:rounded-[28px] border border-white/20 border-l-[10px] sm:border-l-[12px] border-l-[#F0A500] px-6 sm:px-8 py-5 sm:py-6 flex flex-col justify-between text-white shadow-2xl overflow-hidden"
-                    style={{ 
-                      transform: "rotateY(180deg)", 
-                      backfaceVisibility: "hidden", 
-                      WebkitBackfaceVisibility: "hidden" 
-                    }}
-                  >
-                    <div className="flex-1 flex flex-col justify-center">
-                      {/* Back Header Bar */}
-                      <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-2.5 mb-2.5">
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-xl">{facility.emoji}</span>
-                          <span className="text-sm sm:text-base font-bold font-display text-white tracking-tight">
+                      {/* Back Header Bar: Logo + Topic Name + Tag */}
+                      <div className="relative z-10 flex items-center justify-between gap-2.5 border-b border-white/15 pb-2 shrink-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-lg sm:text-xl shrink-0">{facility.emoji}</span>
+                          <span className="text-sm sm:text-base font-bold font-display text-white tracking-tight leading-tight truncate">
                             {facility.title}
                           </span>
                         </div>
-                        <span className="text-[10px] font-bold text-[#F0A500] uppercase tracking-wider bg-white/10 px-2 py-0.5 rounded-full font-mono">
+                        <span className="text-[9.5px] sm:text-[10px] font-bold text-[#F0A500] uppercase tracking-wider bg-white/10 px-2 py-0.5 rounded-full font-mono shrink-0">
                           {facility.tag}
                         </span>
                       </div>
 
-                      {/* Continuous Single-Flow Description */}
-                      <p className="text-xs sm:text-[13.5px] text-slate-100 font-sans leading-[1.65] font-normal">
+                      {/* Full Descriptive Explanation */}
+                      <p className="relative z-10 text-[11.5px] sm:text-xs md:text-[13px] text-slate-100 font-sans leading-relaxed font-normal my-1 sm:my-2">
                         {facility.desc}
                       </p>
-                    </div>
 
-                    {/* Back Footer */}
-                    <div className="text-[10.5px] font-bold uppercase tracking-widest text-slate-300/80 pt-2.5 border-t border-white/10 flex items-center justify-between font-mono">
-                      <span className="text-[#F0A500]">Shikshantar Advantage</span>
-                      <span>{isTouchDevice ? "Tap to flip back" : "Hover out to flip"}</span>
+                      {/* 3 Key Highlight Badges with Gold Checkmarks */}
+                      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-3 gap-1.5 py-0.5 sm:py-1">
+                        {facility.highlights.map((point, pIdx) => (
+                          <div
+                            key={pIdx}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/10 border border-white/10 text-[10px] sm:text-[11px] font-medium text-slate-100 shadow-2xs"
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-[#F0A500] shrink-0" />
+                            <span className="truncate">{point}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Back Footer */}
+                      <div className="relative z-10 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] sm:text-[10.5px] font-mono text-slate-300 shrink-0">
+                        <span className="font-bold text-[#F0A500] truncate">Shikshantar Academy • Bastipur</span>
+                        <span className="shrink-0">{isTouchDevice ? "Tap to flip back" : "Hover out to flip"}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
-
-
         </section>
 
-        {/* 9. Notice Board / Recent News Timeline */}
+        {/* 9. Notice Board & Parent Feedback */}
         <section className="container mx-auto max-w-6xl space-y-12 px-4">
           
           {/* Public Bulletin Noticeboard (Displayed at the top of the section) */}
@@ -4060,7 +4118,7 @@ export default function Home() {
             <div className="flex items-center gap-3 border-b border-gray-150 dark:border-slate-800 pb-3">
               <span className="w-2.5 h-6 bg-[#F0A500] rounded-full"></span>
               <h2 className="text-xl font-display font-bold text-gray-920 dark:text-white uppercase tracking-tight">
-                📢 Public Bulletin Noticeboard
+                📢 Latest School Notices
               </h2>
             </div>
 
@@ -4079,13 +4137,13 @@ export default function Home() {
                     </h4>
                   </div>
                   <p className="text-xs text-gray-600 dark:text-gray-400 font-sans mt-4 leading-relaxed font-semibold border-t border-gray-100 dark:border-slate-800 pt-2.5">
-                    Targets: {(notice.targets || []).join(", ") || "All Visitors"}
+                    For: {(notice.targets || []).join(", ") || "All Parents & Students"}
                   </p>
                 </div>
               ))}
               {notices.length === 0 && (
                 <div className="col-span-full p-8 text-center text-xs text-gray-500 font-poppins font-bold bg-white dark:bg-slate-900 rounded-xl border border-dashed">
-                   No immediate public bulletin updates, please check back later.
+                   No new notices right now. Please check back later.
                 </div>
               )}
             </div>
@@ -4095,17 +4153,17 @@ export default function Home() {
                 to="/notices"
                 className="inline-flex items-center gap-1.5 text-xs font-black font-poppins text-[#1B4F72] dark:text-blue-400 hover:underline uppercase tracking-widest"
               >
-                Access complete bulletin archives →
+                View all school notices →
               </Link>
             </div>
           </div>
 
-          {/* Guardian Voices (Displayed below the Noticeboard) */}
+          {/* Words from Parents (Testimonials) */}
           <div className="space-y-6 pt-6 border-t border-gray-100 dark:border-slate-800">
             <div className="flex items-center gap-3 border-b border-gray-150 dark:border-slate-800 pb-3">
               <span className="w-2.5 h-6 bg-[#2E7D4F] rounded-full"></span>
               <h2 className="text-xl font-display font-medium text-gray-920 dark:text-white uppercase tracking-tight">
-                {content.testiTitle || "💬 Guardian Voices"}
+                {content.testiTitle || "💬 Words from Parents"}
               </h2>
             </div>
 
@@ -4114,19 +4172,19 @@ export default function Home() {
                 ? content.guardianVoices
                 : [
                     {
-                      text: content.testi1Text || "My son's results have improved significantly since joining Shikshantar. The teachers are dedicated and the portal helps us track everything easily.",
+                      text: content.testi1Text || "My son's English speaking and math skills have improved a lot since joining Shikshantar. The teachers are very dedicated and caring.",
                       author: content.testi1Author || "Ram Prasad Sharma",
                       role: content.testi1Role || "Parent of Class 10 Student",
                       initials: content.testi1Initials || "RP"
                     },
                     {
-                      text: content.testi2Text || "Best school in Karjanha Municipality for affordable quality education. My daughter got A+ in Science and Mathematics in SEE.",
+                      text: content.testi2Text || "A very good school in Karjanha with affordable fees and clean classrooms. My daughter scored top marks in SEE exams.",
                       author: content.testi2Author || "Sunita Devi Thapa",
-                      role: content.testi2Role || "Parent of SEE Graduate 2081",
+                      role: content.testi2Role || "Parent of SEE Graduate",
                       initials: content.testi2Initials || "SD"
                     },
                     {
-                      text: content.testi3Text || "The online portal is very helpful. We can check fee receipts and results anytime from our phone. Very convenient for parents.",
+                      text: content.testi3Text || "The online portal is very easy to use. We can check fee receipts and exam report cards anytime on our mobile phone.",
                       author: content.testi3Author || "Mohan Lal Yadav",
                       role: content.testi3Role || "Parent of Class 9 Student",
                       initials: content.testi3Initials || "ML"
@@ -4177,13 +4235,13 @@ export default function Home() {
 
         {/* 10. Contact / Map Location split Layout */}
         <section className="container mx-auto max-w-6xl">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
             
-            {/* Left: Google maps container */}
-            <div className="lg:col-span-7 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Left: Google maps container (Matches height of Ask About Admission on laptop/big screens) */}
+            <div className="lg:col-span-7 flex flex-col space-y-4 h-full">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
                 <h3 className="text-xl font-display font-bold text-gray-900 dark:text-white uppercase tracking-wide">
-                  🗺️ Find Our School Location
+                  🗺️ School Location in Bastipur
                 </h3>
                 <a
                   href="https://maps.app.goo.gl/Ykri7uu78Y22NVjd6"
@@ -4194,7 +4252,7 @@ export default function Home() {
                   📍 Open in Google Maps &rarr;
                 </a>
               </div>
-              <div className="w-full h-[360px] rounded-2xl overflow-hidden border-2 border-white dark:border-slate-800 shadow-xl bg-gray-150">
+              <div className="w-full flex-1 min-h-[380px] lg:min-h-0 rounded-2xl overflow-hidden border-2 border-white dark:border-slate-800 shadow-xl bg-gray-150">
                 <iframe
                   title="Shikshantar Academy Map Location"
                   src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3568.043743360216!2d86.1814415!3d26.8611814!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x39ec1c0cf1e37b71%3A0xccf0f22f2bf31dc2!2sShikshantar%20Academy!5e0!3m2!1sen!2snp!4v1718445582931!5m2!1sen!2snp"
@@ -4207,17 +4265,17 @@ export default function Home() {
             </div>
 
             {/* Right: Quick Inquiry Form saving to Firestore */}
-            <div className="lg:col-span-12 xl:col-span-5 space-y-4 relative">
-              <h3 className="text-xl font-display font-bold text-gray-900 dark:text-white uppercase tracking-wide flex items-center gap-2">
-                <span>📋</span> Send Quick Web Enquiry
+            <div className="lg:col-span-5 flex flex-col space-y-4 relative h-full">
+              <h3 className="text-xl font-display font-bold text-gray-900 dark:text-white uppercase tracking-wide flex items-center gap-2 shrink-0">
+                <span>📋</span> Ask About Admission
               </h3>
               
-              <div className="relative rounded-[32px] group transition-all duration-300">
+              <div className="relative rounded-[32px] group transition-all duration-300 flex-1 flex flex-col">
                 {/* Outer Glow Bloom aura */}
                 <div className="absolute inset-2 bg-gradient-to-r from-[#0a3d62] via-[#0284c7] to-[#F0A500] opacity-35 lg:opacity-0 lg:group-hover:opacity-30 blur-2xl transition-all duration-500 rounded-3xl -z-10 group-hover:scale-102 pointer-events-none" />
 
                 {/* Boundary box with rotating gradient for lightning border effect */}
-                <div className="relative w-full h-full rounded-[32px] overflow-hidden p-[2.5px] bg-gray-150 dark:bg-slate-800 transition-colors duration-300 group-hover:bg-transparent flex flex-col">
+                <div className="relative w-full h-full rounded-[32px] overflow-hidden p-[2.5px] bg-gray-150 dark:bg-slate-800 transition-colors duration-300 group-hover:bg-transparent flex flex-col flex-1">
                   {/* Spinning lightning border */}
                   <div className="absolute inset-[-180%] bg-[conic-gradient(from_0deg,#0a3d62,#0284c7,#F0A500,#fbbf24,#0ea5e9,#0a3d62)] animate-[spin_5s_linear_infinite] opacity-60 lg:opacity-25 lg:group-hover:opacity-100 transition-opacity duration-300 z-0 pointer-events-none" />
 
@@ -4252,17 +4310,17 @@ export default function Home() {
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-lg font-black text-gray-900 dark:text-white font-poppins uppercase tracking-wide">
-                              Enquiry Registered!
+                              Enquiry Received!
                             </h4>
                             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
-                              Thank you for contacting Shikshantar Academy Bastipur. Our registrar has queued your query.
+                              Thank you for reaching out to Shikshantar Academy. Our school office will contact you soon.
                             </p>
                           </div>
 
                           {/* Digital Carbon Check-In Sheet */}
                           <div className="bg-slate-50 dark:bg-slate-950/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-4 text-left space-y-3 relative overflow-hidden">
                             <div className="absolute top-0 right-0 bg-[#F0A500] text-slate-950 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-bl-lg">
-                              ONLINE LOG
+                              SAVED
                             </div>
                             
                             <div className="space-y-2 text-xs">
@@ -4306,7 +4364,7 @@ export default function Home() {
                               }}
                               className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-150"
                             >
-                              Dismiss & Clean Form
+                              Send Another Query
                             </button>
                           </div>
                         </motion.div>
@@ -4321,7 +4379,7 @@ export default function Home() {
                           {/* Progress bar indicating parent walkthrough */}
                           <div className="space-y-1">
                             <div className="flex justify-between items-center text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                              <span>Form Completion</span>
+                              <span>Form Progress</span>
                               <span className="text-[#F0A500] font-mono">{completionPct}%</span>
                             </div>
                             <div className="w-full bg-slate-100 dark:bg-slate-800/80 h-1 rounded-full overflow-hidden">
@@ -4390,7 +4448,7 @@ export default function Home() {
                             {/* Entity 3: Target Class */}
                             <div className="space-y-1.5 group relative">
                               <label className="text-[10px] font-black uppercase text-gray-400 dark:text-slate-400 tracking-wider font-poppins flex items-center justify-between">
-                                <span>Grade Seeking Admission *</span>
+                                <span>Class Seeking Admission *</span>
                                 {enquiryGrade && (
                                   <span className="text-emerald-500 font-mono text-[9px] font-bold">✓ Selected</span>
                                 )}
@@ -4403,8 +4461,8 @@ export default function Home() {
                                   onChange={(e) => setEnquiryGrade(e.target.value)}
                                   className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-gray-200 dark:border-slate-800 bg-[#FAFAF8] dark:bg-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#1B4F72]/20 focus:border-[#1B4F72] text-gray-800 dark:text-white transition-all appearance-none"
                                 >
-                                  <option value="">-- Choose Target Grade --</option>
-                                  {["Playgroup", "Nursery", "L.KG", "U.KG", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8", "Class 9"].map((item) => (
+                                  <option value="">-- Choose Class --</option>
+                                  {["Playgroup", "Nursery", "L.KG", "U.KG", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8", "Class 9", "Class 10"].map((item) => (
                                     <option key={item} value={item}>{item}</option>
                                   ))}
                                 </select>
@@ -4418,7 +4476,7 @@ export default function Home() {
                               {/* Entity 4: Phone Number */}
                               <div className="space-y-1.5 group relative">
                                 <label className="text-[10px] font-black uppercase text-gray-400 dark:text-slate-400 tracking-wider font-poppins flex items-center justify-between">
-                                  <span>Phone Number *</span>
+                                  <span>Mobile Phone Number *</span>
                                   {enquiryPhone.replace(/\D/g, "").length === 10 && (
                                     <span className="text-emerald-500 font-mono text-[9px] font-bold">✓ Valid</span>
                                   )}
@@ -4442,7 +4500,7 @@ export default function Home() {
                               {/* Entity 5: Parent Email */}
                               <div className="space-y-1.5 group relative">
                                 <label className="text-[10px] font-black uppercase text-gray-400 dark:text-slate-400 tracking-wider font-poppins flex items-center justify-between">
-                                  <span>Parent Email (Optional)</span>
+                                  <span>Email Address (Optional)</span>
                                   {enquiryEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(enquiryEmail) && (
                                     <span className="text-emerald-500 font-mono text-[9px] font-bold">✓ Valid</span>
                                   )}
@@ -4463,7 +4521,7 @@ export default function Home() {
                             {/* Entity 6: Message */}
                             <div className="space-y-1.5">
                               <label className="text-[10px] font-black uppercase text-gray-400 dark:text-slate-400 tracking-wider font-poppins flex justify-between">
-                                <span>Message / Questions (Optional)</span>
+                                <span>Questions / Message (Optional)</span>
                                 <span className="font-mono text-[9px] text-gray-400">{enquiryMessage.length}/300</span>
                               </label>
                               <textarea
@@ -4471,7 +4529,7 @@ export default function Home() {
                                 maxLength={300}
                                 value={enquiryMessage}
                                 onChange={(e) => setEnquiryMessage(e.target.value)}
-                                placeholder="Specify any classes or facilities inquiry..."
+                                placeholder="Ask about fees, bus routes, or admission dates..."
                                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-800 bg-[#FAFAF8] dark:bg-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#1B4F72]/20 focus:border-[#1B4F72] text-gray-800 dark:text-white transition-all placeholder-slate-400"
                               />
                             </div>
@@ -4484,10 +4542,10 @@ export default function Home() {
                               {enquiryLoading ? (
                                 <>
                                   <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                                  Registering Academic Query...
+                                  Sending Enquiry...
                                 </>
                               ) : (
-                                "📞 Register Academic Query"
+                                "📞 Send Admission Enquiry"
                               )}
                             </button>
                           </form>
@@ -4507,12 +4565,12 @@ export default function Home() {
         <section className="container mx-auto max-w-6xl mt-6 pb-12 px-4">
           <div className="bg-gradient-to-r from-amber-50 to-orange-50/50 dark:from-slate-900/40 dark:to-slate-900/10 border border-amber-150/60 dark:border-slate-800/80 rounded-[32px] p-6 md:p-8 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="space-y-1 text-center md:text-left flex-1">
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest font-mono">🌐 Stay Connected & Follow Us</span>
+              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest font-mono">🌐 Stay Connected</span>
               <h4 className="text-base md:text-lg font-display font-bold text-slate-800 dark:text-white">
-                Our Official Social Media & Web Links
+                Official School Links & Social Pages
               </h4>
               <p className="text-xs text-gray-500 dark:text-gray-400 max-w-lg font-sans font-medium">
-                Click on the official logos below to visit our active portals, read school highlights, or follow our official posts.
+                Click any link below to follow our school activities, see festival photos, or contact us on WhatsApp.
               </p>
             </div>
             

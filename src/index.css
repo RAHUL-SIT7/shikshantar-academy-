@@ -37,45 +37,33 @@
 }
 
 @layer base {
-  html, body, #root {
+  html {
     width: 100%;
+    min-height: 100%;
     margin: 0;
     padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-behavior: smooth;
   }
 
-  /* Desktop viewport locking (lg and up) */
-  @media (min-width: 1024px) {
-    html, body, #root {
-      height: 100%;
-      max-height: 100vh;
-      max-height: 100dvh;
-      overflow: hidden;
-      overscroll-behavior-y: none;
-    }
+  body {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
-  /* Mobile & Tablet native scrolling (below lg) */
-  @media (max-width: 1023px) {
-    html {
-      height: auto;
-      min-height: 100%;
-      overflow-x: clip;
-      overflow-y: auto;
-      scroll-behavior: smooth;
-    }
-    body {
-      height: auto;
-      min-height: 100%;
-      overflow-x: clip;
-      overflow-y: auto;
-    }
-    #root {
-      height: auto;
-      min-height: 100%;
-      display: flex;
-      flex-direction: column;
-      overflow-x: clip;
-    }
+  #root {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
   }
   
   .custom-scrollbar {

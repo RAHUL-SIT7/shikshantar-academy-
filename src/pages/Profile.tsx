@@ -60,7 +60,7 @@ export default function Profile() {
           const bills = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           setStudentBills(bills);
         } catch (e) {
-          console.error("Error fetching student bills", e);
+          console.warn("Could not fetch student bills:", e);
         }
       }
     };
@@ -105,7 +105,7 @@ export default function Profile() {
             }
           }
         } catch (e) {
-          console.error("Error fetching student profile", e);
+          console.warn("Could not fetch profile details:", e);
         }
       }
       setLoading(false);

@@ -1,8 +1,7 @@
 import { auth, db } from '../firebase';
 import { 
   EmailAuthProvider, 
-  reauthenticateWithCredential, 
-  signInWithEmailAndPassword 
+  reauthenticateWithCredential 
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
@@ -146,25 +145,7 @@ export async function verifyCurrentAdminPassword(password: string): Promise<{
     }
   }
 
-  // Attempt direct test sign-in verification check as fallback without overwriting active session
-  if (adminEmail) {
-    for (const pwd of passwordVariants) {
-      try {
-        const testCred = await signInWithEmailAndPassword(auth, adminEmail, pwd);
-        if (testCred.user) {
-          return {
-            success: true,
-            adminName,
-            adminEmail,
-            adminUid: testCred.user.uid
-          };
-        }
-      } catch (e) {
-        // continue
-      }
-    }
-  }
-
+  // If reauthentication on currentUser fails, reject strictly without session switching
   return {
     success: false,
     error: `Incorrect password entered for ${adminName} (${adminEmail || 'logged-in admin'}). Security authorization denied.`

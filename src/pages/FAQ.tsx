@@ -9,13 +9,13 @@ const initialFAQs = [
   {
     id: 1, category: "Admissions",
     question: "Why choose Shikshantar Academy?",
-    answer: "Shikshantar Academy offers a holistic educational environment that balances academic rigor with moral development, ensuring students are well-prepared for both board examinations and real-world challenges. Our institution fosters a nurturing culture where every child is encouraged to explore their potential through modern, interactive, and value-based learning methodologies.",
+    answer: "Shikshantar Academy provides quality English-medium education, dedicated teachers, and a supportive environment in Bastipur, Siraha. We emphasize strong academic fundamentals, practical learning, and good moral values.",
     published: true, order: 0
   },
   {
     id: 101, category: "Academics",
-    question: "How does Shikshantar Academy cover curriculum and student development details?",
-    answer: "We provide comprehensive coverage of our curriculum by integrating traditional academic subjects with practical life skills, ensuring a well-rounded educational experience from Playgroup to Grade 10. Our approach involves continuous assessment, personalized mentorship, and regular communication with parents to track student progress and address individual learning needs effectively.",
+    question: "How does Shikshantar Academy deliver the curriculum?",
+    answer: "We follow the national curriculum prescribed by the CDC (Nepal) from Playgroup to Class 10. Our classes combine classroom teaching, hands-on science and computer labs, and regular terminal evaluations with parent feedback.",
     published: true, order: 0
   },
   {
@@ -27,101 +27,101 @@ const initialFAQs = [
   {
     id: 3, category: "Admissions",
     question: "What is the age requirement for Play Group admission?",
-    answer: "Children must be at least 3.5 years old (by Shrawan 1 of the academic year) to be eligible for Play Group admission. For Class 1, children must be at least 5 years old.",
+    answer: "Children should be at least 3.5 years old by the start of the academic year for Play Group. For Class 1, children must be at least 5 years old.",
     published: true, order: 3
   },
   {
     id: 4, category: "Admissions",
-    question: "Is there an entrance exam for admission?",
-    answer: "For Play Group to Class 5, there is no entrance exam. For Class 6 and above, a basic assessment in Nepali, English, and Mathematics is conducted. This is not a competitive exam but helps us understand the student's current level.",
+    question: "Is there an entrance assessment for admission?",
+    answer: "For Playgroup to Class 5, no formal entrance exam is required. For Class 6 and above, a basic assessment in English, Nepali, and Mathematics is conducted to understand the student's foundation level.",
     published: true, order: 4
   },
   // FEES
   {
     id: 5, category: "Fee & Payment",
     question: "What is the monthly fee structure?",
-    answer: "Fee structure for academic year 2083 B.S.: Play Group to Class 9 fees vary. Please check with administration. Annual exam fee is charged separately once per year.",
+    answer: "Monthly fees vary by grade from Playgroup to Class 10. Please check the Fees & Scholarships section on the website or contact the fee office for the detailed class-wise fee card.",
     published: true, order: 1
   },
   {
     id: 6, category: "Fee & Payment",
     question: "What payment methods are accepted?",
-    answer: "We only accept Cash payments at the school fee office.",
+    answer: "School fees are accepted in cash or official bank deposits at the school administration office.",
     published: true, order: 2
   },
   {
     id: 7, category: "Fee & Payment",
-    question: "What happens if fee is not paid on time?",
-    answer: "Fees are due by the 15th of each month (B.S.). After 30 days of non-payment, the account is marked as defaulter. Parents will be contacted via phone. Students will not be allowed to sit for terminal exams if 3 or more months of fees are unpaid.",
+    question: "When are monthly school fees due?",
+    answer: "Monthly fees should be cleared by the 15th of each Nepali calendar month (B.S.). Term clearance is required before terminal examinations.",
     published: true, order: 3
   },
   {
     id: 8, category: "Fee & Payment",
-    question: "Is there any scholarship or fee concession available?",
-    answer: "Yes, Shikshantar Academy offers merit scholarships for students scoring above 90% in the Final Exam. Need-based concessions are also available for families facing financial hardship. Contact the school office with supporting documents to apply.",
+    question: "Are scholarships or fee discounts available?",
+    answer: "Yes, Shikshantar Academy offers merit scholarships for top academic rankers and need-based fee support for families facing financial hardship. Applications can be submitted at the school office.",
     published: true, order: 4
   },
   // ACADEMICS
   {
     id: 9, category: "Academics",
     question: "What medium of instruction is used?",
-    answer: "Shikshantar Academy follows English medium instruction for most subjects. Nepali language and Social Studies are taught in Nepali. We follow the national curriculum prescribed by CDC, Nepal.",
+    answer: "Classes are taught primarily in English medium, while Nepali language and Social Studies are taught in Nepali in accordance with the Curriculum Development Centre (CDC) of Nepal.",
     published: true, order: 1
   },
   {
     id: 10, category: "Academics",
-    question: "How many exams are held per year?",
-    answer: "We conduct 4 examinations per academic year: First Terminal Examination, Second Terminal Examination, Third Terminal Examination, and Final Examination. Results are published on the student portal after each exam.",
+    question: "How many terminal examinations are conducted per year?",
+    answer: "We conduct four examinations per academic year: First Terminal, Second Terminal, Third Terminal, and Final Examination. Results and progress cards are provided after each term.",
     published: true, order: 2
   },
   {
     id: 11, category: "Academics",
-    question: "How can students check their exam results?",
-    answer: "Students can log into the Shikshantar Academy portal using their student ID and password. Results are published by the admin after each examination. A downloadable report card is also available once results are published.",
+    question: "How can parents and students view exam results?",
+    answer: "Students and parents can log into the student portal using their Student ID to view grades and download report cards once published.",
     published: true, order: 3
   },
   {
     id: 12, category: "Academics",
-    question: "What is the grading system used?",
-    answer: "We follow the Nepal government grading system: A+ (90-100%), A (80-89%), B+ (70-79%), B (60-69%), C+ (50-59%), C (40-49%), D (30-39%), NG/Fail (below 30%). Minimum pass marks is 35 out of 100.",
+    question: "What grading scale is followed?",
+    answer: "We follow the Nepal government CDC grading system (A+, A, B+, B, C+, C, D, and NG) with letter grades based on percentage performance.",
     published: true, order: 4
   },
   // SCHOOL LIFE
   {
     id: 13, category: "School Life",
-    question: "What are the school timings?",
-    answer: "School hours: Monday to Friday, 9:30 AM to 4:00 PM (local time). Saturday and Sunday are holidays. During winter months (Poush-Magh), school may open at 10:00 AM. Parents will be notified of any timing changes via the Notice Board on the portal.",
+    question: "What are the regular school timings?",
+    answer: "Regular school hours run from 9:30 AM to 4:00 PM (Sunday to Friday). Any seasonal adjustments during winter are communicated in advance via the Notice Board.",
     published: true, order: 1
   },
   {
     id: 14, category: "School Life",
-    question: "What facilities does the school provide?",
-    answer: "Shikshantar Academy provides: well-equipped classrooms, a computer lab, a library, a science lab (for Class 8+), a playground, clean drinking water, and separate washroom facilities for boys and girls.",
+    question: "What campus facilities are available?",
+    answer: "Facilities include ventilated classrooms with BALA visual aids, computer lab, science laboratory, sports ground, library, safe drinking water, and separate restrooms.",
     published: true, order: 2
   },
   {
     id: 15, category: "School Life",
-    question: "How are parents informed about school notices?",
-    answer: "All important notices are posted on the school portal's Notice Board. Parents can view notices by logging in with their child's account or by visiting the school. For urgent notices, WhatsApp messages are sent to guardian phone numbers on record.",
+    question: "How does the school communicate urgent notices?",
+    answer: "Notices are posted on the digital Notice Board on the portal and communicated to guardians via phone or WhatsApp for important announcements.",
     published: true, order: 3
   },
   // TECHNICAL/PORTAL
   {
     id: 16, category: "Portal & Technical",
-    question: "How do I get my student login credentials?",
-    answer: "Student login credentials (Student ID and default password) are provided by the school admin at the time of admission or at the start of the academic year. Contact the school office if you have not received your login details.",
+    question: "How do I receive student portal login credentials?",
+    answer: "Login credentials (Student ID and password) are provided upon enrollment by the administration office. Please contact the office if you need login assistance.",
     published: true, order: 1
   },
   {
     id: 17, category: "Portal & Technical",
-    question: "I forgot my password. What should I do?",
-    answer: "If you have forgotten your password, please contact the school admin directly. The admin can reset your password from the Administrative User Management section. You will be given a new temporary password to log in and change it.",
+    question: "How can I reset a forgotten password?",
+    answer: "Please contact the school office or administrator to reset your student password and receive a temporary login code.",
     published: true, order: 2
   },
   {
     id: 18, category: "Portal & Technical",
-    question: "Can parents access the student portal?",
-    answer: "Currently, parents can access the portal using their child's student credentials. A dedicated parent login feature is planned for the next academic year. Parents can view their child's results, fee status, and school notices this way.",
+    question: "Can parents log in to check fee dues and results?",
+    answer: "Yes, parents can log in using their child's Student ID to view terminal results, fee statements, and school announcements from any device.",
     published: true, order: 3
   }
 ];

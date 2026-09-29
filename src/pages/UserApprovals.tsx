@@ -155,10 +155,9 @@ export default function UserApprovals() {
     return () => { unsubUsers(); unsubAuth(); };
   }, []);
 
-  // Self-healing effect for super admin profile and background user migration
+  // Self-healing effect for super admin profile if missing
   useEffect(() => {
-    let active = true;
-    const runMigration = async () => {
+    const runSelfHeal = async () => {
       if (!auth.currentUser || isUsersLoading) return;
       
       const currentUserRole = localStorage.getItem('userRole');
@@ -182,36 +181,9 @@ export default function UserApprovals() {
           console.error("Failed to self-heal admin document:", err);
         }
       }
-      
-      // 2. Migrate any orphaned user profiles from (default) database to custom database
-      if (currentUserRole === 'admin') {
-        try {
-          const { getFirestore: getFirestoreSecondary } = await import('firebase/firestore');
-          const secondaryDb = getFirestoreSecondary(secondaryApp); // This points to (default)
-          const defaultUsersSnap = await getDocs(collection(secondaryDb, 'users'));
-          
-          if (!defaultUsersSnap.empty && active) {
-            let migratedCount = 0;
-            for (const docSnap of defaultUsersSnap.docs) {
-              const userId = docSnap.id;
-              // If user is in default DB but not in the custom DB list, migrate it
-              if (!usersList.some(u => u.id === userId)) {
-                await setDoc(doc(db, 'users', userId), docSnap.data());
-                migratedCount++;
-              }
-            }
-            if (migratedCount > 0) {
-              console.log(`Successfully migrated ${migratedCount} users from (default) DB to custom DB.`);
-            }
-          }
-        } catch (err) {
-          console.error("Migration from default DB error:", err);
-        }
-      }
     };
 
-    runMigration();
-    return () => { active = false; };
+    runSelfHeal();
   }, [auth.currentUser, isUsersLoading, usersList]);
 
   const handleUpdateUser = async (e: React.FormEvent) => {
@@ -1153,91 +1125,91 @@ export default function UserApprovals() {
   };
 
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto">
+    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto min-w-0">
       {/* Header & Stats */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-primary flex items-center gap-2">
-            <Shield className="w-8 h-8 text-orange-500" />
-            Administrative User Management
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end gap-5 w-full min-w-0">
+        <div className="min-w-0 max-w-2xl">
+          <h1 className="text-2xl sm:text-3xl font-black text-primary flex items-center gap-2.5 flex-wrap">
+            <Shield className="w-8 h-8 text-orange-500 shrink-0" />
+            <span>Administrative User Management</span>
           </h1>
-          <p className="text-gray-500 font-medium">Control system access, roles, and administrative privileges.</p>
+          <p className="text-gray-500 font-medium text-sm sm:text-base mt-1">Control system access, roles, and administrative privileges.</p>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 w-full md:w-auto">
-          <div className="bg-white px-4 py-3 rounded-2xl border border-gray-100 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] flex flex-col items-center justify-center min-w-[110px] cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all" onClick={() => { setRoleFilter('all'); setClassFilter('all'); }}>
-            <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center mb-1">
-              <Users className="w-4 h-4 text-gray-400" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 w-full xl:w-auto shrink-0">
+          <div className="bg-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-gray-100 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] flex flex-col items-center justify-center cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all min-h-[76px]" onClick={() => { setRoleFilter('all'); setClassFilter('all'); }}>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gray-50 flex items-center justify-center mb-1">
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400" />
             </div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total</p>
-            <p className="text-2xl font-black text-gray-800 leading-none mt-1">{stats.total}</p>
+            <p className="text-xl sm:text-2xl font-black text-gray-800 leading-none mt-1">{stats.total}</p>
           </div>
-          <div className="bg-gradient-to-br from-red-50 to-orange-50 px-4 py-3 rounded-2xl border border-red-100/50 shadow-sm flex flex-col items-center justify-center min-w-[110px] cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all" onClick={() => setRoleFilter('pending')}>
-            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center mb-1">
-              <UserCheck className="w-4 h-4 text-red-500" />
+          <div className="bg-gradient-to-br from-red-50 to-orange-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-red-100/50 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all min-h-[76px]" onClick={() => setRoleFilter('pending')}>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-red-100 flex items-center justify-center mb-1">
+              <UserCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
             </div>
             <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest">Pending</p>
-            <p className="text-2xl font-black text-red-600 leading-none mt-1">{stats.pending}</p>
+            <p className="text-xl sm:text-2xl font-black text-red-600 leading-none mt-1">{stats.pending}</p>
           </div>
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 px-4 py-3 rounded-2xl border border-blue-100/50 shadow-sm flex flex-col items-center justify-center min-w-[110px] cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all" onClick={() => setRoleFilter('teacher')}>
-            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center mb-1">
-              <User className="w-4 h-4 text-blue-500" />
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-blue-100/50 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all min-h-[76px]" onClick={() => setRoleFilter('teacher')}>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-100 flex items-center justify-center mb-1">
+              <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500" />
             </div>
             <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Teachers</p>
-            <p className="text-2xl font-black text-blue-600 leading-none mt-1">{stats.teachers}</p>
+            <p className="text-xl sm:text-2xl font-black text-blue-600 leading-none mt-1">{stats.teachers}</p>
           </div>
-          <div className="bg-gradient-to-br from-orange-50 to-amber-50 px-4 py-3 rounded-2xl border border-orange-100/50 shadow-sm flex flex-col items-center justify-center min-w-[110px] cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all" onClick={() => setRoleFilter('admin')}>
-            <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center mb-1">
-              <ShieldCheck className="w-4 h-4 text-orange-500" />
+          <div className="bg-gradient-to-br from-orange-50 to-amber-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-orange-100/50 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all min-h-[76px]" onClick={() => setRoleFilter('admin')}>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-orange-100 flex items-center justify-center mb-1">
+              <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-500" />
             </div>
             <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Admins</p>
-            <p className="text-2xl font-black text-orange-600 leading-none mt-1">{stats.admins}</p>
+            <p className="text-xl sm:text-2xl font-black text-orange-600 leading-none mt-1">{stats.admins}</p>
           </div>
-          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 px-4 py-3 rounded-2xl border border-emerald-100/50 shadow-sm flex flex-col items-center justify-center min-w-[110px] cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all" onClick={() => { setRoleFilter('student'); setClassFilter('all'); }}>
-            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center mb-1">
-              <Users className="w-4 h-4 text-emerald-600" />
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-emerald-100/50 shadow-sm flex flex-col items-center justify-center cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all col-span-2 sm:col-span-1 min-h-[76px]" onClick={() => { setRoleFilter('student'); setClassFilter('all'); }}>
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-100 flex items-center justify-center mb-1">
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600" />
             </div>
             <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Students</p>
-            <p className="text-2xl font-black text-emerald-700 leading-none mt-1">{stats.students}</p>
+            <p className="text-xl sm:text-2xl font-black text-emerald-700 leading-none mt-1">{stats.students}</p>
           </div>
         </div>
       </div>
 
       {status.type && (
-        <div className={`fixed top-8 left-1/2 -translate-x-1/2 z-[200] p-4 min-w-[300px] rounded-xl flex items-center justify-between text-sm font-bold shadow-2xl animate-in slide-in-from-top duration-300 ${ status.type === 'success' ? 'bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]' : 'bg-red-50 text-red-700 border border-red-200' }`}>
+        <div className={`fixed top-8 left-1/2 -translate-x-1/2 z-[200] p-4 min-w-[300px] max-w-[90vw] rounded-xl flex items-center justify-between text-sm font-bold shadow-2xl animate-in slide-in-from-top duration-300 ${ status.type === 'success' ? 'bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]' : 'bg-red-50 text-red-700 border border-red-200' }`}>
           <div className="flex items-center gap-2">
-            {status.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5 flex-shrink-0" />}
-            <span>{status.message}</span>
+            {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+            <span className="break-words">{status.message}</span>
           </div>
-          <button type="button" onClick={() => setStatus({type: null, message: ''})} className="ml-4 p-1 hover:bg-black/5 rounded"><X className="w-4 h-4"/></button>
+          <button type="button" onClick={() => setStatus({type: null, message: ''})} className="ml-4 p-1 hover:bg-black/5 rounded shrink-0"><X className="w-4 h-4"/></button>
         </div>
       )}
 
       {/* Main Container */}
-      <section className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100/50 overflow-hidden">
+      <section className="bg-white rounded-2xl sm:rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100/80 overflow-hidden w-full min-w-0">
         {/* Filters Bar */}
-        <div className="p-5 text-primary border-b border-gray-50 flex flex-col md:flex-row gap-4 justify-between items-center bg-gray-50/50">
-          <div className="relative w-full md:w-96">
+        <div className="p-4 sm:p-5 text-primary border-b border-gray-100 flex flex-col lg:flex-row gap-3.5 justify-between items-stretch lg:items-center bg-gray-50/50 w-full min-w-0">
+          <div className="relative w-full lg:w-96 min-w-0">
             <Search className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input 
               type="text" 
               placeholder="Search by name, email, ID or phone..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-white border-none rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm text-gray-700 font-medium placeholder:text-gray-400"
+              className="w-full pl-11 pr-4 py-2.5 sm:py-3 bg-white border border-gray-200/80 rounded-xl sm:rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm text-gray-700 font-medium placeholder:text-gray-400"
             />
           </div>
-          <div className="flex gap-2 w-full md:w-auto relative z-10">
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto relative z-10">
             {selectedUsers.length > 0 && (
               <div className="relative">
                 <button 
                   onClick={() => setBulkActionOpen(!bulkActionOpen)}
-                  className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-indigo-100 transition-all shadow-sm h-full"
+                  className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm hover:bg-indigo-100 transition-all shadow-sm h-full"
                 >
                   <span>Bulk Actions ({selectedUsers.length})</span>
                   <ChevronDown className="w-4 h-4" />
                 </button>
                 {bulkActionOpen && (
-                  <div className="absolute right-0 left-auto md:left-0 md:right-auto mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden">
+                  <div className="absolute right-0 sm:left-0 sm:right-auto mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-30">
                     <button onClick={handleBulkApprove} className="w-full text-left px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                        <CheckCircle2 className="w-4 h-4 text-green-500"/> Approve Selected
                     </button>
@@ -1259,20 +1231,20 @@ export default function UserApprovals() {
             )}
             <button 
               onClick={() => setIsCreatingUser(true)}
-              className="flex items-center gap-2 bg-primary text-white px-5 py-3 rounded-2xl font-bold text-sm hover:bg-primary-dark transition-all shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50"
+              className="flex items-center gap-2 bg-primary text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm hover:bg-primary-dark transition-all shadow-md shadow-primary/20 hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50"
             >
               <UserPlus className="w-4 h-4" />
-              <span className="hidden sm:inline">Add New User</span>
+              <span>Add New User</span>
             </button>
-            <div className="flex items-center gap-2 bg-white px-4 py-3 border-none shadow-sm rounded-2xl focus-within:ring-2 focus-within:ring-blue-500/20">
-              <Filter className="w-4 h-4 text-gray-400" />
+            <div className="flex items-center gap-2 bg-white px-3.5 py-2.5 sm:py-3 border border-gray-200/80 shadow-sm rounded-xl sm:rounded-2xl focus-within:ring-2 focus-within:ring-blue-500/20">
+              <Filter className="w-4 h-4 text-gray-400 shrink-0" />
               <select 
                 value={roleFilter}
                 onChange={(e) => {
                   setRoleFilter(e.target.value);
                   if (e.target.value !== 'student') setClassFilter('all');
                 }}
-                className="text-sm font-bold text-gray-700 focus:outline-none bg-transparent appearance-none pr-4 cursor-pointer"
+                className="text-xs sm:text-sm font-bold text-gray-700 focus:outline-none bg-transparent appearance-none pr-3 cursor-pointer"
               >
                 <option value="all">All Roles</option>
                 <option value="pending">Pending Approvals</option>
@@ -1282,11 +1254,11 @@ export default function UserApprovals() {
               </select>
             </div>
             {roleFilter === 'student' && (
-              <div className="flex items-center gap-2 bg-white px-4 py-3 border-none shadow-sm rounded-2xl focus-within:ring-2 focus-within:ring-emerald-500/20 animate-in fade-in slide-in-from-right-4">
+              <div className="flex items-center gap-2 bg-white px-3.5 py-2.5 sm:py-3 border border-emerald-200 shadow-sm rounded-xl sm:rounded-2xl focus-within:ring-2 focus-within:ring-emerald-500/20 animate-in fade-in slide-in-from-right-4">
                 <select 
                   value={classFilter}
                   onChange={(e) => setClassFilter(e.target.value)}
-                  className="text-sm font-bold text-emerald-700 focus:outline-none bg-transparent appearance-none pr-4 cursor-pointer"
+                  className="text-xs sm:text-sm font-bold text-emerald-700 focus:outline-none bg-transparent appearance-none pr-3 cursor-pointer"
                 >
                   <option value="all">All Classes</option>
                   {['Play Group', 'Nursery', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map(cls => {
@@ -1361,10 +1333,10 @@ export default function UserApprovals() {
           </div>
         )}
 
-        {/* Table Area */}
-        <div className="overflow-x-auto custom-scrollbar min-h-[400px]">
+        {/* Table / Cards Area */}
+        <div className="w-full min-w-0">
           {isUsersLoading ? (
-            <div className="w-full">
+            <div className="w-full p-6">
                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                  <div className="border-b border-gray-100 bg-gray-50 px-6 py-4 flex gap-4">
                     <div className="w-1/4 h-4 bg-gray-200 rounded animate-pulse"></div>
@@ -1387,181 +1359,308 @@ export default function UserApprovals() {
                </div>
             </div>
           ) : (
-            <div className="overflow-x-auto custom-scrollbar w-full">
-              <table className="w-full text-left whitespace-nowrap min-w-[600px]">
-                <thead>
-                <tr className="text-primary text-[11px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">
-                  <th className="p-4 px-6 w-12 text-center">
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
-                      checked={selectedUsers.length > 0 && selectedUsers.length === getFilteredUsers().length}
-                      onChange={toggleSelectAll}
-                    />
-                  </th>
-                  <th className="p-4 px-6 uppercase tracking-wider">User Information</th>
-                  <th className="p-4 px-6 uppercase tracking-wider">Contact & ID</th>
-                  <th className="p-4 px-6 uppercase tracking-wider">System Role</th>
-                  <th className="p-4 px-6 text-right uppercase tracking-wider">Management</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
+            <>
+              {/* Mobile View: Clean Card Layout (<sm) */}
+              <div className="block sm:hidden divide-y divide-gray-100 w-full">
                 {getFilteredUsers().length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="p-20 text-center text-gray-400">
-                       <Users className="w-12 h-12 mx-auto mb-4 opacity-10" />
-                       <p className="font-bold">No users found matching your filters</p>
-                    </td>
-                  </tr>
-                ) : getFilteredUsers().map(user => (
-                  <tr key={user.id} className={`hover:bg-blue-50/30 transition-colors group ${selectedUsers.includes(user.id) ? 'bg-indigo-50/20' : ''}`}>
-                    <td className="p-4 px-6 w-12 text-center">
-                       <input 
-                         type="checkbox" 
-                         className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
-                         checked={selectedUsers.includes(user.id)}
-                         onChange={() => toggleSelectUser(user.id)}
-                       />
-                    </td>
-                    <td className="p-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${ user.role === 'admin' ? 'bg-orange-500' : user.role === 'teacher' ? 'bg-blue-500' : 'bg-emerald-500' }`}>
-                          {user.fullName ? user.fullName.charAt(0) : user.email?.charAt(0).toUpperCase()}
+                  <div className="p-8 text-center text-gray-400">
+                    <Users className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    <p className="font-bold text-sm">No users found matching your filters</p>
+                  </div>
+                ) : (
+                  getFilteredUsers().map(user => (
+                    <div key={user.id} className={`p-4 space-y-3 transition-colors ${selectedUsers.includes(user.id) ? 'bg-indigo-50/25' : 'bg-white'}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer mt-0.5 shrink-0"
+                            checked={selectedUsers.includes(user.id)}
+                            onChange={() => toggleSelectUser(user.id)}
+                          />
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm shadow-sm shrink-0 ${ user.role === 'admin' ? 'bg-orange-500' : user.role === 'teacher' ? 'bg-blue-500' : 'bg-emerald-500' }`}>
+                            {user.fullName ? user.fullName.charAt(0) : user.email?.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-gray-800 text-sm truncate flex items-center gap-1">
+                              {user.fullName || 'New User'}
+                              {user.role === 'admin' && <ShieldCheck className="w-3.5 h-3.5 text-orange-500 shrink-0" />}
+                            </p>
+                            <p className="text-xs text-gray-400 truncate flex items-center gap-1"><Mail className="w-3 h-3 shrink-0" /> {user.email}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-gray-800 text-[0.9rem] flex items-center gap-1">
-                            {user.fullName || 'New User'}
-                            {user.role === 'admin' && <ShieldCheck className="w-3 h-3 text-orange-500" />}
-                          </p>
-                          <p className="text-xs text-gray-400 flex items-center gap-1"><Mail className="w-3 h-3" /> {user.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 px-6">
-                      <div className="text-xs space-y-1">
-                        <p className="font-bold text-gray-600 flex items-center gap-1"><Smartphone className="w-3 h-3 text-gray-400" /> {user.phone || '--'}</p>
-                        <p className="text-gray-400">
-                          {user.role === 'student' ? 'Student ID' : 'Staff ID'}: <span className="text-blue-600 font-mono font-bold uppercase">{user.studentId || 'N/A'}</span>
-                        </p>
-                      </div>
-                    </td>
-                    <td className="p-4 px-6">
-                      <div className="flex flex-col gap-1">
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider w-fit border ${ user.status === 'pending' ? 'bg-red-50 text-red-700 border-red-200' : user.role === 'admin' ? 'bg-orange-50 text-orange-700 border-orange-200' : user.role === 'teacher' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200' }`}>
-                          {user.status === 'pending' ? 'PENDING APPROVAL' : user.role}
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider shrink-0 border ${ user.status === 'pending' ? 'bg-red-50 text-red-700 border-red-200' : user.role === 'admin' ? 'bg-orange-50 text-orange-700 border-orange-200' : user.role === 'teacher' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200' }`}>
+                          {user.status === 'pending' ? 'PENDING' : user.role}
                         </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between text-xs text-gray-600 gap-2 bg-gray-50/80 p-2.5 rounded-xl">
+                        <div>
+                          <span className="text-gray-400 font-medium">{user.role === 'student' ? 'Student ID' : 'Staff ID'}:</span>{' '}
+                          <span className="text-blue-600 font-mono font-bold uppercase">{user.studentId || 'N/A'}</span>
+                        </div>
+                        {user.phone && (
+                          <div className="flex items-center gap-1 text-gray-500">
+                            <Smartphone className="w-3 h-3" /> {user.phone}
+                          </div>
+                        )}
                         {user.class && (
-                          <span className="text-[10px] text-gray-400 font-bold ml-1">
-                            {user.role === 'teacher' 
-                              ? `Class ${user.class} (Class Teacher)` 
-                              : `Class ${getStudentCurrentClass(user, academicYear)}`}
-                          </span>
+                          <div className="text-emerald-700 font-bold">
+                            Class {user.role === 'teacher' ? `${user.class} (Teacher)` : getStudentCurrentClass(user, academicYear)}
+                          </div>
                         )}
                       </div>
-                    </td>
-                    <td className="p-4 px-6 text-right">
-                       <div className="flex justify-end items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={() => setViewingUser(user)}
-                            className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-500 hover:text-emerald-700 rounded-lg transition-all"
-                            title="View Profile"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          
-                          <button 
-                            onClick={() => setEditingUser(user)}
-                            className="p-1.5 bg-gray-100 hover:bg-blue-100 text-gray-500 hover:text-blue-700 rounded-lg transition-all"
-                            title="Edit Details"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          
-                          {user.role === 'student' && user.status === 'active' && (
-                            <button 
-                              onClick={() => {
-                                const activeClass = getStudentCurrentClass(user, academicYear);
-                                if (confirm(`Are you sure you want to promote ${user.fullName || 'this student'} to the next class?`)) {
-                                  handlePromoteStudent(user.id, activeClass);
-                                }
-                              }}
-                              className="p-1.5 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg transition-all ml-1 shadow-sm flex items-center gap-1 text-[10px] font-black uppercase tracking-wider"
-                              title={`Promote to Next Class (Current: ${getStudentCurrentClass(user, academicYear)})`}
-                            >
-                              <BadgeCheck className="w-3.5 h-3.5 text-emerald-500" /> Promote
-                            </button>
-                          )}
-                          
-                          <div className="w-px h-4 bg-gray-200 mx-1"></div>
-                          
-                          {user.status === 'pending' ? (
-                            <button
-                              onClick={async () => {
-                                try {
-                                  if (user.role === 'student') {
-                                    const dupCheck = checkDuplicateStudentRoll(
-                                      usersList.filter(u => u.id !== user.id && u.status === 'active'),
-                                      user.class || '',
-                                      user.studentId || user.rollNumber || user.rollNo || ''
-                                    );
-                                    if (dupCheck.isDuplicate) {
-                                      setStatus({
-                                        type: 'error',
-                                        message: `Cannot approve: ${dupCheck.message}`
-                                      });
-                                      setTimeout(() => setStatus({ type: null, message: '' }), 6000);
-                                      return;
-                                    }
-                                  }
-                                  const updateFields: any = { status: 'active' };
-                                  await updateDoc(doc(db, 'users', user.id), updateFields);
-                                  if (user.role === 'student' && user.class) {
-                                     await generateInitialFee(user.id, user.class, user.scholarshipStatus || 'Not Provided', Number(user.scholarshipAmount) || 0);
-                                  }
-                                  setStatus({ type: 'success', message: 'User approved securely.' });
-                                } catch (e) {
-                                  setStatus({ type: 'error', message: 'Failed to approve.' });
-                                }
-                              }}
-                              className="px-3 py-1 bg-green-500 text-white font-bold text-xs rounded-lg hover:bg-green-600 transition-colors"
-                            >
-                              Approve
-                            </button>
-                          ) : user.role === 'admin' ? (
-                             <div className="flex gap-1 items-center">
-                              {isPrimaryAdmin && user.id !== auth.currentUser?.uid ? (
-                                 <select 
-                                   value={user.adminTier || 'primary'}
-                                   onChange={(e) => setAdminTier(user.id, e.target.value as 'primary' | 'secondary')}
-                                   className="px-2 py-1 bg-orange-50 text-orange-700 font-bold text-[10px] uppercase rounded-lg border border-orange-200 outline-none cursor-pointer"
-                                 >
-                                   <option value="primary">1° Admin</option>
-                                   <option value="secondary">2° Admin</option>
-                                 </select>
-                              ) : (
-                                 <div className="px-3 py-1 bg-orange-50 text-orange-600 font-bold text-[10px] uppercase tracking-wider rounded-lg border border-orange-100">
-                                   {(user.adminTier || 'primary') === 'primary' ? '1° Admin' : '2° Admin'}
-                                 </div>
-                              )}
-                            </div>
-                          ) : null}
 
-                          { (user.role !== 'admin' || (isPrimaryAdmin && user.id !== auth.currentUser?.uid)) && (
-                            <button 
-                              onClick={() => setUserToDelete({ id: user.id, name: user.fullName || user.email || '', role: user.role, adminTier: user.adminTier })}
-                              className="p-1.5 bg-red-50 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all ml-2 shadow-sm"
-                              title={user.role === 'student' ? "Delete Student Account" : "Delete Account"}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                       </div>
-                    </td>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1">
+                        <button 
+                          onClick={() => setViewingUser(user)}
+                          className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-600 hover:text-emerald-700 rounded-lg transition-all text-xs font-bold flex items-center gap-1 px-2.5"
+                          title="View Profile"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View
+                        </button>
+                        <button 
+                          onClick={() => setEditingUser(user)}
+                          className="p-1.5 bg-gray-100 hover:bg-blue-100 text-gray-600 hover:text-blue-700 rounded-lg transition-all text-xs font-bold flex items-center gap-1 px-2.5"
+                          title="Edit Details"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Edit
+                        </button>
+                        {user.role === 'student' && user.status === 'active' && (
+                          <button 
+                            onClick={() => {
+                              const activeClass = getStudentCurrentClass(user, academicYear);
+                              if (confirm(`Are you sure you want to promote ${user.fullName || 'this student'} to the next class?`)) {
+                                handlePromoteStudent(user.id, activeClass);
+                              }
+                            }}
+                            className="p-1.5 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg transition-all text-xs font-bold flex items-center gap-1 px-2.5 shadow-sm"
+                          >
+                            <BadgeCheck className="w-3.5 h-3.5" /> Promote
+                          </button>
+                        )}
+                        {user.status === 'pending' ? (
+                          <button
+                            onClick={async () => {
+                              try {
+                                if (user.role === 'student') {
+                                  const dupCheck = checkDuplicateStudentRoll(
+                                    usersList.filter(u => u.id !== user.id && u.status === 'active'),
+                                    user.class || '',
+                                    user.studentId || user.rollNumber || user.rollNo || ''
+                                  );
+                                  if (dupCheck.isDuplicate) {
+                                    setStatus({ type: 'error', message: `Cannot approve: ${dupCheck.message}` });
+                                    setTimeout(() => setStatus({ type: null, message: '' }), 6000);
+                                    return;
+                                  }
+                                }
+                                await updateDoc(doc(db, 'users', user.id), { status: 'active' });
+                                if (user.role === 'student' && user.class) {
+                                  await generateInitialFee(user.id, user.class, user.scholarshipStatus || 'Not Provided', Number(user.scholarshipAmount) || 0);
+                                }
+                                setStatus({ type: 'success', message: 'User approved securely.' });
+                              } catch (e) {
+                                setStatus({ type: 'error', message: 'Failed to approve.' });
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-green-600 text-white font-bold text-xs rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                          >
+                            Approve
+                          </button>
+                        ) : null}
+                        { (user.role !== 'admin' || (isPrimaryAdmin && user.id !== auth.currentUser?.uid)) && (
+                          <button 
+                            onClick={() => setUserToDelete({ id: user.id, name: user.fullName || user.email || '', role: user.role, adminTier: user.adminTier })}
+                            className="p-1.5 bg-red-50 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all shadow-sm"
+                            title={user.role === 'student' ? "Delete Student Account" : "Delete Account"}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Desktop / Tablet View: Table (hidden <sm, block sm+) */}
+              <div className="hidden sm:block overflow-x-auto custom-scrollbar w-full">
+                <table className="w-full text-left whitespace-nowrap min-w-[680px]">
+                  <thead>
+                  <tr className="text-primary text-[11px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 bg-gray-50/30">
+                    <th className="p-4 px-6 w-12 text-center">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                        checked={selectedUsers.length > 0 && selectedUsers.length === getFilteredUsers().length}
+                        onChange={toggleSelectAll}
+                      />
+                    </th>
+                    <th className="p-4 px-6 uppercase tracking-wider">User Information</th>
+                    <th className="p-4 px-6 uppercase tracking-wider">Contact & ID</th>
+                    <th className="p-4 px-6 uppercase tracking-wider">System Role</th>
+                    <th className="p-4 px-6 text-right uppercase tracking-wider">Management</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {getFilteredUsers().length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-20 text-center text-gray-400">
+                         <Users className="w-12 h-12 mx-auto mb-4 opacity-10" />
+                         <p className="font-bold">No users found matching your filters</p>
+                      </td>
+                    </tr>
+                  ) : getFilteredUsers().map(user => (
+                    <tr key={user.id} className={`hover:bg-blue-50/30 transition-colors group ${selectedUsers.includes(user.id) ? 'bg-indigo-50/20' : ''}`}>
+                      <td className="p-4 px-6 w-12 text-center">
+                         <input 
+                           type="checkbox" 
+                           className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                           checked={selectedUsers.includes(user.id)}
+                           onChange={() => toggleSelectUser(user.id)}
+                         />
+                      </td>
+                      <td className="p-4 px-6">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-sm shrink-0 ${ user.role === 'admin' ? 'bg-orange-500' : user.role === 'teacher' ? 'bg-blue-500' : 'bg-emerald-500' }`}>
+                            {user.fullName ? user.fullName.charAt(0) : user.email?.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-gray-800 text-[0.9rem] flex items-center gap-1">
+                              {user.fullName || 'New User'}
+                              {user.role === 'admin' && <ShieldCheck className="w-3 h-3 text-orange-500" />}
+                            </p>
+                            <p className="text-xs text-gray-400 flex items-center gap-1"><Mail className="w-3 h-3" /> {user.email}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4 px-6">
+                        <div className="text-xs space-y-1">
+                          <p className="font-bold text-gray-600 flex items-center gap-1"><Smartphone className="w-3 h-3 text-gray-400" /> {user.phone || '--'}</p>
+                          <p className="text-gray-400">
+                            {user.role === 'student' ? 'Student ID' : 'Staff ID'}: <span className="text-blue-600 font-mono font-bold uppercase">{user.studentId || 'N/A'}</span>
+                          </p>
+                        </div>
+                      </td>
+                      <td className="p-4 px-6">
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider w-fit border ${ user.status === 'pending' ? 'bg-red-50 text-red-700 border-red-200' : user.role === 'admin' ? 'bg-orange-50 text-orange-700 border-orange-200' : user.role === 'teacher' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200' }`}>
+                            {user.status === 'pending' ? 'PENDING APPROVAL' : user.role}
+                          </span>
+                          {user.class && (
+                            <span className="text-[10px] text-gray-400 font-bold ml-1">
+                              {user.role === 'teacher' 
+                                ? `Class ${user.class} (Class Teacher)` 
+                                : `Class ${getStudentCurrentClass(user, academicYear)}`}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 px-6 text-right">
+                         <div className="flex justify-end items-center gap-1.5 opacity-100 transition-opacity">
+                            <button 
+                              onClick={() => setViewingUser(user)}
+                              className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-500 hover:text-emerald-700 rounded-lg transition-all"
+                              title="View Profile"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            
+                            <button 
+                              onClick={() => setEditingUser(user)}
+                              className="p-1.5 bg-gray-100 hover:bg-blue-100 text-gray-500 hover:text-blue-700 rounded-lg transition-all"
+                              title="Edit Details"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            
+                            {user.role === 'student' && user.status === 'active' && (
+                              <button 
+                                onClick={() => {
+                                  const activeClass = getStudentCurrentClass(user, academicYear);
+                                  if (confirm(`Are you sure you want to promote ${user.fullName || 'this student'} to the next class?`)) {
+                                    handlePromoteStudent(user.id, activeClass);
+                                  }
+                                }}
+                                className="p-1.5 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white rounded-lg transition-all ml-1 shadow-sm flex items-center gap-1 text-[10px] font-black uppercase tracking-wider"
+                                title={`Promote to Next Class (Current: ${getStudentCurrentClass(user, academicYear)})`}
+                              >
+                                <BadgeCheck className="w-3.5 h-3.5 text-emerald-500" /> Promote
+                              </button>
+                            )}
+                            
+                            <div className="w-px h-4 bg-gray-200 mx-1"></div>
+                            
+                            {user.status === 'pending' ? (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    if (user.role === 'student') {
+                                      const dupCheck = checkDuplicateStudentRoll(
+                                        usersList.filter(u => u.id !== user.id && u.status === 'active'),
+                                        user.class || '',
+                                        user.studentId || user.rollNumber || user.rollNo || ''
+                                      );
+                                      if (dupCheck.isDuplicate) {
+                                        setStatus({
+                                          type: 'error',
+                                          message: `Cannot approve: ${dupCheck.message}`
+                                        });
+                                        setTimeout(() => setStatus({ type: null, message: '' }), 6000);
+                                        return;
+                                      }
+                                    }
+                                    const updateFields: any = { status: 'active' };
+                                    await updateDoc(doc(db, 'users', user.id), updateFields);
+                                    if (user.role === 'student' && user.class) {
+                                       await generateInitialFee(user.id, user.class, user.scholarshipStatus || 'Not Provided', Number(user.scholarshipAmount) || 0);
+                                    }
+                                    setStatus({ type: 'success', message: 'User approved securely.' });
+                                  } catch (e) {
+                                    setStatus({ type: 'error', message: 'Failed to approve.' });
+                                  }
+                                }}
+                                className="px-3 py-1 bg-green-500 text-white font-bold text-xs rounded-lg hover:bg-green-600 transition-colors"
+                              >
+                                Approve
+                              </button>
+                            ) : user.role === 'admin' ? (
+                               <div className="flex gap-1 items-center">
+                                {isPrimaryAdmin && user.id !== auth.currentUser?.uid ? (
+                                   <select 
+                                     value={user.adminTier || 'primary'}
+                                     onChange={(e) => setAdminTier(user.id, e.target.value as 'primary' | 'secondary')}
+                                     className="px-2 py-1 bg-orange-50 text-orange-700 font-bold text-[10px] uppercase rounded-lg border border-orange-200 outline-none cursor-pointer"
+                                   >
+                                     <option value="primary">1° Admin</option>
+                                     <option value="secondary">2° Admin</option>
+                                   </select>
+                                ) : (
+                                   <div className="px-3 py-1 bg-orange-50 text-orange-600 font-bold text-[10px] uppercase tracking-wider rounded-lg border border-orange-100">
+                                     {(user.adminTier || 'primary') === 'primary' ? '1° Admin' : '2° Admin'}
+                                   </div>
+                                )}
+                              </div>
+                            ) : null}
+
+                            { (user.role !== 'admin' || (isPrimaryAdmin && user.id !== auth.currentUser?.uid)) && (
+                              <button 
+                                onClick={() => setUserToDelete({ id: user.id, name: user.fullName || user.email || '', role: user.role, adminTier: user.adminTier })}
+                                className="p-1.5 bg-red-50 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-all ml-1 shadow-sm"
+                                title={user.role === 'student' ? "Delete Student Account" : "Delete Account"}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                         </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </>
           )}
         </div>
       </section>

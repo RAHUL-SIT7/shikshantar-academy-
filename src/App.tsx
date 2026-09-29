@@ -72,6 +72,16 @@ export const THEMES: Record<string, any> = {
     accentHover: "#D4AC0D",
     preview: ["#0A3D62", "#F1C40F"],
   },
+  classic: {
+    name: "Shikshantar Classic",
+    emoji: "🎓",
+    primary: "#0A3D62",
+    primaryDark: "#041C2E",
+    primaryLight: "#1265A1",
+    accent: "#F1C40F",
+    accentHover: "#D4AC0D",
+    preview: ["#0A3D62", "#F1C40F"],
+  },
   oxford_gold: {
     name: "Oxford Blue",
     emoji: "🏛️",
@@ -191,9 +201,7 @@ export default function App() {
   }, []);
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState<string>(() => {
-    return localStorage.getItem("userRole") || "student";
-  });
+  const [userRole, setUserRole] = useState<string>("guest");
   const [loading, setLoading] = useState(true);
   const [activeTheme, setActiveTheme] = useState(
     localStorage.getItem("appTheme") || "shikshantar_elite",
@@ -410,15 +418,11 @@ export default function App() {
           );
         } catch (err) {
           console.error("Error fetching authoritative role:", err);
-          // If network timeout, fall back safely without privilege escalation
-          const localRole = localStorage.getItem("userRole");
-          if (localRole && ['admin', 'teacher', 'student'].includes(localRole)) {
-            setUserRole(localRole);
-          } else {
-            setUserRole("student");
-          }
+          // FAIL CLOSED: Do not trust localStorage for role determination or grant privileged access
+          setIsAuthenticated(false);
+          setUserRole("guest");
+          localStorage.removeItem("userRole");
         }
-        setIsAuthenticated(true);
       } else {
         setIsAuthenticated(false);
         setUserRole("guest");

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { formatBSDate, getBSYearMonthDate } from '../lib/nepaliDate';
-import { Menu, X, Home, Building, Image, Calendar, User, FileText, LogOut, LogIn, Info, Settings, Upload, CreditCard, Shield, Bell, Megaphone, Check, Users, MapPin, Phone, HelpCircle, GraduationCap, Award, Wallet, Sun, Moon, ChevronUp, Facebook, Globe, Mail, SmilePlus } from 'lucide-react';
+import { Menu, X, Home, Building, Image, Calendar, User, FileText, LogOut, LogIn, Info, Settings, Upload, CreditCard, Shield, Bell, Megaphone, Check, Users, MapPin, Phone, HelpCircle, GraduationCap, Award, Wallet, Sun, Moon, ChevronUp, Facebook, Globe, Mail, SmilePlus, LayoutDashboard } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { useNotices } from '../contexts/NoticeContext';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
@@ -12,6 +12,8 @@ import CalculatorWidget from './CalculatorWidget';
 import DOMPurify from 'isomorphic-dompurify';
 import NoticePopup from './NoticePopup';
 import Breadcrumbs from './Breadcrumbs';
+import PublicHeader from './PublicHeader';
+import Footer from './Footer';
 import { safeDispatchEvent } from '../lib/safeEvents';
 const logoImageSrc = "/logo.png";
 
@@ -47,6 +49,23 @@ export default function Layout({
   const [isBellOpen, setIsBellOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('sidebar_collapsed') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('sidebar_collapsed', String(next));
+      } catch (e) {}
+      return next;
+    });
+  };
 
   const {
     notices: recentNotices,
@@ -68,6 +87,69 @@ export default function Layout({
   const [scrollProgress, setScrollProgress] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+  const mainRef = React.useRef<HTMLDivElement>(null);
+  const desktopProfileRef = React.useRef<HTMLDivElement>(null);
+  const desktopBellRef = React.useRef<HTMLDivElement>(null);
+  const mobileProfileRef = React.useRef<HTMLDivElement>(null);
+  const mobileBellRef = React.useRef<HTMLDivElement>(null);
+
+  // Outside click listener for notification and profile dropdowns
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (isProfileOpen) {
+        if (
+          (desktopProfileRef.current && desktopProfileRef.current.contains(target)) ||
+          (mobileProfileRef.current && mobileProfileRef.current.contains(target))
+        ) {
+          // Inside profile dropdown
+        } else {
+          setIsProfileOpen(false);
+        }
+      }
+      if (isBellOpen) {
+        if (
+          (desktopBellRef.current && desktopBellRef.current.contains(target)) ||
+          (mobileBellRef.current && mobileBellRef.current.contains(target))
+        ) {
+          // Inside bell dropdown
+        } else {
+          setIsBellOpen(false);
+        }
+      }
+    };
+
+    if (isProfileOpen || isBellOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      document.addEventListener('touchstart', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [isProfileOpen, isBellOpen]);
+
+  // Determine if current route is an internal portal/ERP page vs public guest page
+  const portalRoutes = [
+    '/admin',
+    '/user-approvals',
+    '/admin-admissions',
+    '/account-admin',
+    '/salary-admin',
+    '/iemis',
+    '/settings',
+    '/profile',
+    '/teacher-salary',
+    '/account',
+    '/result'
+  ];
+
+  const isPortalRoute = isAuthenticated && portalRoutes.some(route => 
+    location.pathname === route || location.pathname.startsWith(route + '/')
+  );
 
   // Contact Us / Social Links State
   const [socialData, setSocialData] = useState({
@@ -128,9 +210,6 @@ export default function Layout({
   };
 
   const [currentTime, setCurrentTime] = useState(getNPTDate());
-  const location = useLocation();
-  const navigate = useNavigate();
-  const mainRef = React.useRef<HTMLDivElement>(null);
   
   const role = userRole || 'student';
   const studentId = localStorage.getItem('studentId') || '';
@@ -163,38 +242,37 @@ export default function Layout({
     if (mainRef.current) {
       mainRef.current.scrollTop = 0;
     }
-    if (window.innerWidth < 1024) {
-      window.scrollTo({ top: 0, behavior: 'instant' as any });
-    }
+    window.scrollTo({ top: 0, behavior: 'instant' as any });
     setScrollProgress(0);
     setShowScrollTop(false);
     setIsHeaderScrolled(false);
+    setIsMenuOpen(false);
+    setIsBellOpen(false);
+    setIsProfileOpen(false);
   }, [location.pathname]);
 
-  // Handle global page-level scroll for mobile and tablet devices
+  // Handle global page-level scroll for all screen sizes
   useEffect(() => {
     const handleGlobalScroll = () => {
-      if (window.innerWidth < 1024) {
-        const scrollTop = window.scrollY || document.documentElement.scrollTop;
-        const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
-        
-        if (scrollHeight > 0) {
-          setScrollProgress((scrollTop / scrollHeight) * 100);
-        } else {
-          setScrollProgress(0);
-        }
-        
-        if (scrollTop > 200) {
-          setShowScrollTop(true);
-        } else {
-          setShowScrollTop(false);
-        }
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+      
+      if (scrollHeight > 0) {
+        setScrollProgress((scrollTop / scrollHeight) * 100);
+      } else {
+        setScrollProgress(0);
+      }
+      
+      if (scrollTop > 200) {
+        setShowScrollTop(true);
+      } else {
+        setShowScrollTop(false);
+      }
 
-        if (scrollTop > 10) {
-          setIsHeaderScrolled(true);
-        } else {
-          setIsHeaderScrolled(false);
-        }
+      if (scrollTop > 10) {
+        setIsHeaderScrolled(true);
+      } else {
+        setIsHeaderScrolled(false);
       }
     };
 
@@ -610,6 +688,220 @@ export default function Layout({
     }
   };
 
+  const renderNotificationDropdown = () => (
+    <div 
+      className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/80 dark:bg-slate-900/90">
+        <div className="flex items-center gap-2">
+          <Bell className="w-4 h-4 text-amber-500" />
+          <span className="text-xs font-black tracking-wider uppercase text-slate-700 dark:text-slate-200">
+            NOTIFICATIONS
+          </span>
+          {unreadUrgentCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-red-500 text-white">
+              {unreadUrgentCount}
+            </span>
+          )}
+        </div>
+        {unreadUrgentCount > 0 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              markAllAsRead();
+            }}
+            className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+          >
+            Mark all read
+          </button>
+        )}
+      </div>
+
+      {/* Notice Items List */}
+      <div className="max-h-[340px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 custom-scrollbar">
+        {recentNotices.length > 0 ? (
+          recentNotices.map((notice) => {
+            const isRead = (notice.readBy && notice.readBy.includes(currentUid)) || localReads.includes(notice.id);
+            const isUrgent = (notice.priority || '').toUpperCase() === 'URGENT';
+            const isHigh = (notice.priority || '').toUpperCase() === 'HIGH';
+
+            return (
+              <div
+                key={notice.id}
+                onClick={(e) => {
+                  markAsRead(notice.id, 'notice', e, false);
+                  setIsBellOpen(false);
+                  navigate('/notices');
+                }}
+                className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group text-left ${
+                  !isRead ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
+                    isUrgent 
+                      ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300' 
+                      : isHigh
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                      : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                  }`}>
+                    {notice.priority ? notice.priority.toUpperCase() : 'NORMAL'}
+                  </span>
+                  {!isRead && (
+                    <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                  )}
+                </div>
+                <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                  {notice.title}
+                </div>
+                {notice.date && (
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium mt-1">
+                    {notice.date.split('T')[0]}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="p-8 text-center text-slate-400 dark:text-slate-500">
+            <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
+            <p className="text-xs font-semibold">No notifications right now</p>
+          </div>
+        )}
+
+        {/* Admin Pending Items */}
+        {role === 'admin' && pendingAdmissions.map((adm) => (
+          <div
+            key={adm.id}
+            onClick={(e) => {
+              markAsRead(adm.id, 'admission', e, false);
+              setIsBellOpen(false);
+              navigate('/admin-admissions');
+            }}
+            className="p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group bg-emerald-50/30 dark:bg-emerald-950/20 text-left"
+          >
+            <span className="inline-block px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 mb-1">
+              ADMISSION
+            </span>
+            <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-emerald-600 transition-colors">
+              New Admission: {adm.studentName || `${adm.studentFirstName || ''} ${adm.studentLastName || ''}`.trim() || 'Student Application'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer Link */}
+      <button
+        onClick={() => {
+          setIsBellOpen(false);
+          navigate('/notices');
+        }}
+        className="py-3 px-4 text-center font-bold text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors border-t border-slate-100 dark:border-slate-800 block w-full cursor-pointer"
+      >
+        Open Notice Board
+      </button>
+    </div>
+  );
+
+  const renderProfileDropdown = () => (
+    <div 
+      className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col py-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {!isAuthenticated ? (
+        <>
+          {/* Guest Header */}
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 text-left">
+            <div className="text-xs font-black text-slate-800 dark:text-slate-100">
+              Guest User
+            </div>
+            <div className="text-[10px] text-amber-500 font-extrabold uppercase tracking-wider mt-0.5">
+              Guest Portal
+            </div>
+          </div>
+
+          <div className="p-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsProfileOpen(false);
+                navigate('/login');
+              }}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+                <LogIn className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <div className="leading-tight font-black">Portal Login</div>
+                <div className="text-[10px] text-slate-400 font-normal">Admin, Teacher, Student</div>
+              </div>
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Authenticated User Header */}
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 text-left">
+            <div className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+              {userName || `Logged in as ${role}`}
+            </div>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-primary text-white">
+                {role.toUpperCase()}
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">Portal</span>
+            </div>
+          </div>
+
+          <div className="p-1.5 space-y-0.5 text-left">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsProfileOpen(false);
+                navigate('/profile');
+              }}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left cursor-pointer"
+            >
+              <User className="w-4 h-4 text-slate-400" />
+              <span>My Profile</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsProfileOpen(false);
+                navigate(role === 'admin' ? '/' : role === 'teacher' ? '/teacher-salary' : '/account');
+              }}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left cursor-pointer"
+            >
+              <LayoutDashboard className="w-4 h-4 text-amber-500" />
+              <span>Portal Dashboard</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsProfileOpen(false);
+                setShowLogoutConfirm(true);
+              }}
+              className="w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/25 flex items-center gap-3 transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800 mt-1"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Logout</span>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   if (mainContentBlocked && popupNotice && showNoticePopup) {
     return (
       <NoticePopup
@@ -622,12 +914,133 @@ export default function Layout({
   }
 
   return (
-    <div className={`min-h-screen lg:h-screen lg:h-[100dvh] lg:max-h-screen lg:max-h-[100dvh] w-full flex lg:flex-row flex-col bg-[#f3f4f6] dark:bg-[#0b0f19] text-[#1f2937] dark:text-[#f8fafc] font-sans print:h-auto print:bg-white print:relative print:inset-auto lg:overflow-hidden ${(isMenuOpen || isBellOpen || isProfileOpen) ? 'h-screen max-h-screen overflow-hidden' : 'overflow-visible'}`}>
-      {/* Sidebar Navigation */}
-      <aside className="w-[245px] bg-[var(--primary)] dark:bg-slate-950 border-r border-white/5 text-white flex-col py-5 hidden lg:flex shrink-0 print:hidden h-full max-h-full overflow-hidden">
-        {/* School Logo & Title Block */}
-        <div className="px-5 pb-2 flex flex-col items-center text-center shrink-0">
-          <div className="w-16 h-16 rounded-full bg-white p-1 mb-3.5 shadow-lg flex items-center justify-center">
+    <div className={`min-h-screen lg:h-screen lg:h-[100dvh] lg:max-h-screen lg:max-h-[100dvh] w-full flex flex-col bg-[#f3f4f6] dark:bg-[#0b0f19] text-[#1f2937] dark:text-[#f8fafc] font-sans print:h-auto print:bg-white print:relative print:inset-auto lg:overflow-hidden ${isMenuOpen ? 'h-screen max-h-screen overflow-hidden' : 'overflow-visible'}`}>
+      
+      {/* Spacer for Fixed Mobile Header */}
+      <div className="h-[56px] lg:hidden shrink-0 w-full" />
+
+      {/* Mobile Header (Fixed Top on small screens) */}
+      <div className="lg:hidden bg-primary text-white px-2.5 py-2 flex justify-between items-center shrink-0 print:hidden shadow-md fixed top-0 left-0 right-0 z-50 h-[56px] w-full">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="w-9 h-9 rounded-full bg-white p-0.5 flex items-center justify-center shrink-0">
+            <img 
+              src={logoUrl} 
+              alt="Logo" 
+              className="w-full h-full object-contain rounded-full" 
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src !== logoFallback) {
+                  target.src = logoFallback;
+                }
+              }}
+            />
+          </div>
+          <div className="min-w-0">
+            <div className="font-extrabold tracking-tight text-xs sm:text-sm whitespace-nowrap">SHIKSHANTAR</div>
+            <div className="text-[0.55rem] sm:text-[0.6rem] opacity-85 leading-none mb-0.5 whitespace-nowrap text-white/90 font-semibold">
+              Academy | Siraha
+            </div>
+            <div className="text-[0.55rem] sm:text-[0.6rem] text-amber-300 font-extrabold uppercase tracking-wide leading-none whitespace-nowrap">
+              {isAuthenticated ? `${role === 'admin' ? 'Admin' : role === 'teacher' ? 'Teacher' : 'Student'} Portal` : 'Guest Portal'}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 relative shrink-0">
+           <div className="flex flex-col text-right mr-0.5 sm:mr-1 shrink-0 justify-center leading-none border-r border-white/20 pr-1.5">
+              <span className="text-[0.6rem] sm:text-[0.65rem] font-bold text-white leading-none mb-0.5">
+                 {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit' })}
+              </span>
+              <span className="text-[0.5rem] sm:text-[0.55rem] text-white/80 font-mono tracking-tight leading-none">
+                 {formatBSDate(currentTime)}
+              </span>
+           </div>
+           <button 
+              onClick={toggleThemeMode} 
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center pointer-events-auto shrink-0 cursor-pointer"
+              title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle Theme"
+           >
+              {themeMode === 'dark' ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-gray-200" />}
+           </button>
+           
+           {/* Notification Bell (Mobile & Tablet) */}
+           <div ref={mobileBellRef} className="relative">
+             <button 
+               onClick={() => {
+                 setIsBellOpen(!isBellOpen);
+                 setIsProfileOpen(false);
+               }} 
+               className="relative p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+               aria-label="Notifications"
+               title="Notifications"
+             >
+                <Bell className="w-5 h-5" />
+                {unreadUrgentCount > 0 && (
+                   <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-red-500 rounded-full text-[9px] font-bold flex items-center justify-center border border-primary text-white">
+                      {unreadUrgentCount}
+                   </span>
+                )}
+             </button>
+             {isBellOpen && (
+               <div className="fixed sm:absolute top-[52px] right-2 sm:right-0 w-[calc(100vw-16px)] max-w-[360px] z-50">
+                 {renderNotificationDropdown()}
+               </div>
+             )}
+           </div>
+           
+           {/* Profile Avatar Button (Mobile & Tablet) */}
+           <div ref={mobileProfileRef} className="relative">
+             <button 
+               onClick={() => {
+                 setIsProfileOpen(!isProfileOpen);
+                 setIsBellOpen(false);
+               }} 
+               className="w-7.5 h-7.5 rounded-full bg-white/20 flex items-center justify-center border border-white/30 overflow-hidden hover:ring-2 hover:ring-white/50 transition-all shadow-sm shrink-0 cursor-pointer"
+               aria-label="User Profile"
+               title="User Profile"
+             >
+                {avatarUrl ? (
+                   <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                   <User className="w-3.5 h-3.5 text-white" />
+                )}
+             </button>
+             {isProfileOpen && (
+               <div className="fixed sm:absolute top-[52px] right-2 sm:right-0 w-60 z-50">
+                 {renderProfileDropdown()}
+               </div>
+             )}
+           </div>
+           
+           <button 
+             onClick={() => {
+               setIsMenuOpen(!isMenuOpen);
+               setIsBellOpen(false);
+               setIsProfileOpen(false);
+             }} 
+             className="p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+             aria-label="Menu"
+             title="Menu (☰)"
+           >
+             {isMenuOpen ? <X className="w-5 h-5"/> : <Menu className="w-5 h-5"/>}
+           </button>
+        </div>
+      </div>
+
+      {/* Desktop Header — Full Width, Sticky Top with Logo + School Name + ☰ Toggle + All Controls */}
+      <header className={`bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-2.5 sm:py-3 flex justify-between items-center shrink-0 z-40 hidden lg:flex print:hidden sticky top-0 transition-all duration-300 ${isHeaderScrolled ? 'shadow-md border-b border-orange-500/30' : 'shadow-[0_1px_3px_rgba(0,0,0,0.05)] border-b dark:border-slate-800'}`}>
+        {/* Left: ☰ Toggle, School Logo, School Name, Page Title */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button 
+            onClick={toggleSidebar} 
+            className="p-2 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer mr-0.5 focus:outline-hidden"
+            title={isSidebarCollapsed ? "Expand Sidebar (☰)" : "Collapse Sidebar (☰)"}
+            aria-label="Toggle Sidebar"
+          >
+            <Menu className="w-5 h-5 text-gray-700 dark:text-gray-200" />
+          </button>
+          
+          <div className="w-12 h-12 rounded-full bg-white p-0.5 shadow-sm border border-gray-200 dark:border-slate-700 flex items-center justify-center shrink-0">
             <img 
               src={logoUrl} 
               alt="Shikshantar Academy Logo" 
@@ -642,465 +1055,199 @@ export default function Layout({
               }}
             />
           </div>
-          <h1 className="text-[1.15rem] tracking-[0.5px] font-extrabold text-white leading-tight">SHIKSHANTAR</h1>
-          <span className="text-[0.75rem] opacity-90 block uppercase font-black tracking-wider text-amber-400 mt-0.5">Academy Siraha</span>
-        </div>
-        
-        {/* Bold line below the logo & school name */}
-        <div className="border-b-2 border-white/25 mx-5 my-4 shrink-0" />
-        
-        {/* User Profile Info */}
-        <div className="px-5 flex items-center gap-3 py-1 shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/25 overflow-hidden shadow-inner">
-            {avatarUrl ? (
-               <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-            ) : (
-               <User className="w-5 h-5 text-white/90" />
-            )}
+
+          <div className="flex flex-col leading-tight min-w-0 mr-3 select-none">
+            <div className="text-[1.05rem] lg:text-[1.28rem] font-black tracking-tight text-gray-900 dark:text-white font-display whitespace-nowrap">
+              SHIKSHANTAR
+            </div>
+            <div className="text-[0.68rem] lg:text-[0.80rem] font-black text-amber-500 uppercase tracking-widest leading-none whitespace-nowrap mt-0.5">
+              ACADEMY SIRAHA
+            </div>
           </div>
-          <div className="overflow-hidden">
-            <div className="text-[0.82rem] font-extrabold truncate text-white">
-               {isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}
-            </div>
-            <div className="text-[0.68rem] opacity-75 font-medium truncate capitalize text-slate-300">
-               {isAuthenticated ? role : 'Guest Portal'}
-            </div>
+
+          <div className="hidden xl:flex items-center gap-2 pl-4 border-l border-gray-200 dark:border-slate-800 text-sm font-bold text-gray-700 dark:text-gray-200">
+            <LayoutDashboard className="w-4 h-4 text-primary" />
+            <span>{navigation.find(n => n.href === location.pathname)?.name || (location.pathname === '/' ? 'Home' : 'Portal')}</span>
           </div>
         </div>
 
-        {/* Bold line above the menu, indicating this section */}
-        <div className="border-b-2 border-white/25 mx-5 my-4 shrink-0" />
-
-        {/* Highlighted Menu Section with a different background color */}
-        <div className="flex-1 flex flex-col min-h-0 bg-slate-950/65 dark:bg-slate-950/80 rounded-2xl mx-3.5 mb-4 p-1.5 border border-white/10 shadow-inner">
-          <nav className="flex-1 overflow-y-auto custom-scrollbar overflow-x-hidden">
-            <ul className="list-none p-0 m-0 pb-4">
-              {navigation.map((item, index) => {
-                const Icon = item.icon;
-                const showGroupHeader = index === 0 || navigation[index - 1].group !== item.group;
-                return (
-                  <React.Fragment key={item.name}>
-                    {showGroupHeader && (
-                      <li className={`px-4 py-2 text-[0.65rem] font-extrabold uppercase tracking-[1px] text-white/50 sticky top-0 z-10 bg-[var(--primary)]/95 backdrop-blur-sm ${index !== 0 ? 'mt-3 border-t border-white/5 pt-3' : ''}`}>
-                        {item.group as string}
-                      </li>
-                    )}
-                    <li>
-                      <Link
-                        to={item.href}
-                        className={`px-4 py-2.5 text-[0.82rem] font-semibold cursor-pointer flex items-center gap-3 transition-all rounded-xl mx-1 my-0.5 ${ 
-                          location.pathname === item.href 
-                            ? 'bg-amber-500 text-slate-950 font-black shadow-md' 
-                            : 'text-white/80 hover:bg-white/10 hover:text-white' 
-                        }`}
-                      >
-                        <Icon className="w-4 h-4 shrink-0" />
-                        <span className="whitespace-nowrap">{item.name}</span>
-                      </Link>
-                    </li>
-                  </React.Fragment>
-                );
-              })}
-            </ul>
-          </nav>
-        </div>
-        
-        <div className="shrink-0 px-5 py-3 border-t border-white/10 mt-auto bg-slate-950/20">
-          <div className="text-[0.65rem] text-white/60 uppercase tracking-wider font-bold">Academic Year</div>
-          <div className="text-[0.85rem] font-bold text-white shadow-sm mt-0.5">{academicYearString}</div>
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
-      <div 
-        ref={mainRef}
-        onScroll={handleScroll}
-        className={`flex-1 flex flex-col min-w-0 min-h-0 h-auto lg:h-full lg:max-h-full print:h-auto print:overflow-visible relative ${(isMenuOpen || isBellOpen || isProfileOpen) ? 'overflow-hidden lg:overflow-hidden' : 'overflow-visible lg:overflow-y-auto lg:overflow-x-hidden custom-scrollbar'}`}
-      >
-        {/* Spacer for Fixed Mobile Header */}
-        <div className="h-[56px] lg:hidden shrink-0 w-full" />
-
-        {/* Mobile Header */}
-        <div className="lg:hidden bg-primary text-white px-2.5 py-2 flex justify-between items-center shrink-0 print:hidden shadow-md fixed top-0 left-0 right-0 z-50 h-[56px] w-full">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-white p-0.5 flex items-center justify-center shrink-0">
-              <img 
-                src={logoUrl} 
-                alt="Logo" 
-                className="w-full h-full object-contain rounded-full" 
-                onError={(e) => {
-                  const target = e.currentTarget;
-                  if (target.src !== logoFallback) {
-                    target.src = logoFallback;
-                  }
-                }}
-              />
-            </div>
-            <div className="min-w-0">
-              <div className="font-extrabold tracking-tight text-xs sm:text-sm whitespace-nowrap">SHIKSHANTAR</div>
-              <div className="text-[0.55rem] sm:text-[0.6rem] opacity-85 leading-none mb-0.5 whitespace-nowrap text-white/90 font-semibold">
-                Academy | Siraha
-              </div>
-              <div className="text-[0.55rem] sm:text-[0.6rem] text-amber-300 font-extrabold uppercase tracking-wide leading-none whitespace-nowrap">
-                {isAuthenticated ? `${role === 'admin' ? 'Admin' : role === 'teacher' ? 'Teacher' : 'Student'} Portal` : 'Guest Portal'}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 relative shrink-0">
-             {/* Mobile Right Date/Time */}
-             <div className="flex flex-col text-right mr-0.5 sm:mr-1 shrink-0 justify-center leading-none border-r border-white/20 pr-1.5">
-                <span className="text-[0.6rem] sm:text-[0.65rem] font-bold text-white leading-none mb-0.5">
-                   {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit' })}
-                </span>
-                <span className="text-[0.5rem] sm:text-[0.55rem] text-white/80 font-mono tracking-tight leading-none">
-                   {formatBSDate(currentTime)}
-                </span>
-             </div>
+        {/* Right: Theme Toggle, Bell, User Role, Clock/Date, Avatar Profile */}
+        <div className="flex items-center gap-2 md:gap-4 lg:gap-6 shrink-0">
+          <button 
+            onClick={toggleThemeMode} 
+            className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors flex items-center justify-center text-gray-700 dark:text-gray-200 cursor-pointer"
+            title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label="Toggle Theme"
+          >
+             {themeMode === 'dark' ? <Sun className="w-5 h-5 text-yellow-500" /> : <Moon className="w-5 h-5 text-gray-600" />}
+          </button>
+          
+          <div ref={desktopBellRef} className="relative">
              <button 
-                onClick={toggleThemeMode} 
-                className="p-1 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center pointer-events-auto shrink-0"
-                title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+               onClick={() => {
+                 setIsBellOpen(!isBellOpen);
+                 setIsProfileOpen(false);
+               }} 
+               className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors relative cursor-pointer"
+               aria-label="Notifications"
+               title="Notifications"
              >
-                {themeMode === 'dark' ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-gray-200" />}
-             </button>
-             <button onClick={() => setIsBellOpen(!isBellOpen)} className="relative p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0">
-                <Bell className="w-5 h-5" />
+                <Bell className="w-5 h-5 text-gray-700 dark:text-gray-200" />
                 {unreadUrgentCount > 0 && (
-                   <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-red-500 rounded-full text-[9px] font-bold flex items-center justify-center border border-primary text-white">
+                   <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center border-2 border-white dark:border-slate-900 text-white">
                       {unreadUrgentCount}
                    </span>
                 )}
              </button>
-             
-             <button onClick={() => setIsProfileOpen(!isProfileOpen)} className="w-7.5 h-7.5 rounded-full bg-white/20 flex items-center justify-center border border-white/30 overflow-hidden hover:ring-2 hover:ring-white/50 transition-all shadow-sm shrink-0">
-                {avatarUrl ? (
-                   <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                   <User className="w-3.5 h-3.5 text-white" />
-                )}
-             </button>
-             
-             {isProfileOpen && (
-               <div className="fixed top-[52px] right-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-100 dark:border-slate-800 z-[60] overflow-hidden flex flex-col py-1 text-gray-800 dark:text-gray-200 lg:hidden animate-in fade-in duration-150">
-                   {isAuthenticated ? (
-                     <>
-                       <Link 
-                         to="/profile" 
-                         onClick={() => setIsProfileOpen(false)} 
-                         className="px-4 py-2.5 text-sm font-bold hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-gray-800 dark:text-gray-200"
-                       >
-                           <User className="w-4 h-4 text-gray-400" />
-                           My Profile
-                       </Link>
-                       <button 
-                         onClick={() => { setShowLogoutConfirm(true); setIsProfileOpen(false); }} 
-                         className="px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-3 text-left w-full transition-colors border-t border-gray-100 dark:border-slate-800"
-                       >
-                           <LogOut className="w-4 h-4" />
-                           Logout
-                       </button>
-                     </>
-                   ) : (
-                     <button 
-                       onClick={() => { navigate('/login'); setIsProfileOpen(false); }} 
-                       className="px-4 py-2.5 text-sm font-bold text-green-600 hover:bg-green-50 dark:hover:bg-green-950/30 flex items-center gap-3 text-left w-full transition-colors"
-                     >
-                         <LogIn className="w-4 h-4" />
-                         Login
-                     </button>
-                   )}
+             {isBellOpen && (
+               <div className="absolute top-12 right-0 w-88 max-w-[380px] z-50 pointer-events-auto">
+                 {renderNotificationDropdown()}
                </div>
              )}
+          </div>
+          
+          <div className="text-right">
+            <div className="text-[0.8rem] font-bold flex items-center justify-end gap-2 text-[#1f2937] dark:text-gray-100">
+              <span className="px-2.5 py-0.5 rounded-full bg-primary text-white text-[10px] uppercase font-black tracking-widest shadow-sm">
+                 {isAuthenticated ? role.toUpperCase() : 'GUEST'}
+              </span>
+            </div>
+            <div className="text-[11px] text-[#6b7280] dark:text-gray-400 font-mono mt-1 font-semibold flex flex-col items-end">
+              <span className="text-[14px] text-gray-800 dark:text-gray-200 tracking-wider mb-0.5">{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', second:'2-digit' })}</span>
+              <span>{formatBSDate(currentTime)}<span className="hidden lg:inline"> | {academicYearString}</span></span>
+            </div>
+          </div>
 
-             <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0">
-               {isMenuOpen ? <X className="w-5 h-5"/> : <Menu className="w-5 h-5"/>}
+          <div ref={desktopProfileRef} className="relative border-l border-gray-200 dark:border-slate-800 pl-3 md:pl-4 lg:pl-6 ml-1 md:ml-2">
+             <button 
+               onClick={() => {
+                 setIsProfileOpen(!isProfileOpen);
+                 setIsBellOpen(false);
+               }} 
+               className="w-10 h-10 rounded-full bg-[#f3f4f6] dark:bg-slate-800 flex items-center justify-center border border-[#e5e7eb] dark:border-slate-700 overflow-hidden shadow-sm hover:ring-2 hover:ring-primary/20 transition-all font-bold cursor-pointer"
+               aria-label="User Profile"
+               title="User Profile"
+             >
+               {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+               ) : (
+                  <User className="w-5 h-5 text-[#6b7280] dark:text-gray-300" />
+               )}
              </button>
+
+             {isProfileOpen && (
+               <div className="absolute top-12 right-0 w-60 z-50 pointer-events-auto">
+                 {renderProfileDropdown()}
+               </div>
+             )}
           </div>
         </div>
+      </header>
 
-     {isBellOpen && (
-       <div className="fixed top-[52px] right-2 w-72 sm:w-80 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-800 z-[60] lg:hidden overflow-hidden flex flex-col animate-in fade-in duration-150 max-h-[calc(100dvh-70px)]">
-         <div className="p-3 bg-gray-100 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center">
-            <span className="font-bold text-[0.8rem] text-gray-700 dark:text-gray-200 uppercase tracking-wide">Notifications</span>
-            {unreadUrgentCount > 0 && (
-               <button 
-                 type="button"
-                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); markAllAsRead(); }}
-                 className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 uppercase tracking-tighter bg-blue-50 dark:bg-blue-950/40 px-2 py-1 rounded-md"
-               >
-                  Mark all read
-               </button>
-            )}
-         </div>
-         <div className="max-h-80 overflow-y-auto pt-4 pb-2 px-1 custom-scrollbar">
-             {combinedBellItems.length > 0 ? combinedBellItems.map(n => (
-               <div key={n.id} onClick={(e) => { 
-                  setIsBellOpen(false); 
-                  const notificationType = n.isAdmission ? 'admission' : n.isEnquiry ? 'enquiry' : n.isAlumni ? 'alumni' : 'notice';
-                  navigate(n.href || '/notices'); 
-                  markAsRead(n.id, notificationType, e, false); 
-               }} className="block p-3 border-b border-gray-50 hover:text-primary cursor-pointer group relative">
-                  <div className="flex justify-between items-center mb-1.5 pr-8">
-                     <span className={`text-[9px] leading-tight font-bold px-1.5 py-0.5 rounded uppercase flex items-center h-4 border border-current/10 ${n.priority === 'Urgent' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{n.isAdmission ? 'Admission' : n.priority}</span>
-                     {(!n.readBy || !n.readBy.includes(auth.currentUser?.uid || studentId || 'guest')) && !localReads.includes(n.id) && <span className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white"></span>}
-                  </div>
-                  <p className="font-bold text-[0.8rem] text-gray-800 dark:text-gray-200 line-clamp-2 pr-10 leading-snug">{n.title}</p>
-                  
-                  {(!n.readBy || !n.readBy.includes(auth.currentUser?.uid || studentId || 'guest')) && !localReads.includes(n.id) && (
-                      <button 
-                         type="button"
-                         onClick={(e) => {
-                             const notificationType = n.isAdmission ? 'admission' : n.isEnquiry ? 'enquiry' : n.isAlumni ? 'alumni' : 'notice';
-                             markAsRead(n.id, notificationType, e);
-                          }}
-                         className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-white hover:bg-blue-600 text-blue-500 hover:text-white rounded-full transition-all z-10 border border-blue-100 shadow-sm"
-                         title="Mark as read"
-                      >
-                         <Check className="w-4 h-4" />
-                      </button>
-                  )}
-               </div>
-            )) : <div className="p-8 text-center text-sm text-gray-500 flex flex-col items-center gap-2">
-                   <Bell className="w-8 h-8 opacity-20" />
-                   No notifications
-                 </div>}
-         </div>
-         <div className="p-2 text-primary text-center border-t border-gray-100">
-            <Link to="/notices" onClick={() => setIsBellOpen(false)} className="text-sm font-bold text-blue-600 hover:text-blue-800 w-full text-center block outline-none">Open Notice Board</Link>
-         </div>
-      </div>
-    )}
-
-        {/* Mobile Menu */}
-        {isMenuOpen && (
-          <div className="lg:hidden bg-[var(--primary)] dark:bg-slate-950 text-white fixed top-[56px] bottom-0 left-0 right-0 md:left-auto md:right-0 md:w-[350px] h-[calc(100dvh-56px)] z-[100] border-t md:border-t-0 md:border-l border-white/10 shadow-2xl overflow-y-auto overscroll-y-contain pb-32 md:pb-40 custom-scrollbar">
-            {/* Mobile WhatsApp Quick Action Card */}
-            <div className="px-5 pt-4 pb-2">
-              <button
-                onClick={() => {
-                  setIsMenuOpen(false);
-                  safeDispatchEvent('openWhatsAppDesk');
-                }}
-                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-lg transition-all active:scale-[0.98] border border-emerald-400/30"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-white text-emerald-600 flex items-center justify-center shrink-0 shadow-sm">
-                    <svg className="w-4.5 h-4.5 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">
-                      <path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L3 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7 .9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z" />
-                    </svg>
-                  </div>
-                  <div className="text-left">
-                    <div className="text-xs font-bold leading-tight">Chat with Us on WhatsApp</div>
-                    <div className="text-[10px] text-emerald-100 font-medium">Admissions & Accounts Desk</div>
-                  </div>
-                </div>
-                <span className="text-[10px] uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full font-bold">
-                  Open
-                </span>
-              </button>
-            </div>
-
-            <ul className="list-none p-0 m-0 mt-2">
-              {navigation.map((item, index) => {
-                const Icon = item.icon;
-                const showGroupHeader = index === 0 || navigation[index - 1].group !== item.group;
-                return (
-                   <React.Fragment key={item.name}>
-                    {showGroupHeader && (
-                      <li className={`px-6 py-2 text-[0.7rem] font-bold uppercase tracking-[1px] text-white/50 bg-[var(--primary)] dark:bg-slate-950 sticky top-0 z-10 ${index !== 0 ? 'mt-2 border-t border-white/10 pt-4' : ''}`}>
-                        {item.group as string}
-                      </li>
-                    )}
-                    <li>
-                      <Link
-                        to={item.href}
-                        onClick={() => setIsMenuOpen(false)}
-                        className={`flex items-center gap-3 px-6 py-3.5 text-[0.95rem] transition-all border-l-4 ${ 
-                          location.pathname === item.href 
-                            ? 'bg-amber-500 text-slate-950 font-bold border-amber-600' 
-                            : 'border-transparent active:bg-white/5' 
-                        }`}
-                      >
-                        <Icon className="w-5 h-5 opacity-80" />
-                        {item.name}
-                      </Link>
-                    </li>
-                  </React.Fragment>
-                );
-              })}
-               {isAuthenticated ? (
-                  <li className="mt-4 border-t border-white/10 pt-2">
-                    <button onClick={() => { setShowLogoutConfirm(true); setIsMenuOpen(false); }} className="w-full flex items-center gap-3 text-left px-6 py-3.5 text-[0.95rem] text-[#fca5a5] border-l-4 border-transparent active:bg-white/5">
-                      <LogOut className="w-5 h-5 opacity-80" />
-                      Logout
-                    </button>
-                  </li>
-              ) : (
-                <li className="mt-4 border-t border-white/10 pt-2">
-                  <Link to="/login" onClick={() => setIsMenuOpen(false)} className="flex items-center gap-3 px-6 py-3.5 text-[0.95rem] border-l-4 border-transparent active:bg-white/5">
-                    <LogIn className="w-5 h-5 opacity-80" />
-                    Login to Portal
-                  </Link>
-                </li>
-              )}
-              {/* Extra spacing block specifically to guarantee scrolling capacity on tablets/mobiles */}
-              <li className="h-20 md:h-28 shrink-0" aria-hidden="true" />
-            </ul>
-          </div>
-        )}
-
-        {/* Header */}
-        <header className={`bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-5 flex justify-between items-center shrink-0 z-30 hidden lg:flex print:hidden sticky top-0 transition-all duration-300 ${isHeaderScrolled ? 'shadow-md border-b border-orange-500/30' : 'shadow-[0_1px_3px_rgba(0,0,0,0.05)] border-b dark:border-slate-800'}`}>
-          {role === 'admin' && location.pathname === '/' ? (
-             <div className="flex items-center gap-3">
-               <img src={logoUrl} alt="Logo" className="w-10 h-10 object-contain rounded-full border border-gray-200 shadow-sm" fetchPriority="high" />
-               <div className="flex flex-col justify-center">
-                  <h1 className="text-base font-bold text-primary dark:text-white leading-none mb-1">Shikshantar Academy | Siraha</h1>
-                  <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest leading-none">Admin Control Panel</p>
-               </div>
-             </div>
-          ) : (
-            <div className="text-[1.2rem] font-bold text-[#1f2937] dark:text-white">
-              {navigation.find(n => n.href === location.pathname)?.name || 'Portal'}
-            </div>
-          )}
-          <div className="flex items-center gap-2 md:gap-4 lg:gap-6">
-            <button 
-              onClick={toggleThemeMode} 
-              className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors flex items-center justify-center text-gray-700 dark:text-gray-200"
-              title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+      {/* Main Body Row: Sidebar + Content Area */}
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 w-full overflow-hidden relative">
+        
+        {/* Desktop Sidebar Navigation */}
+        <aside 
+          className={`bg-[var(--primary)] dark:bg-slate-950 border-r border-white/5 text-white flex-col py-4 hidden lg:flex shrink-0 print:hidden h-full max-h-full overflow-hidden transition-[width] duration-300 ease-in-out ${
+            isSidebarCollapsed ? 'w-[72px]' : 'w-[245px]'
+          }`}
+        >
+          {/* User Profile Info */}
+          <div className={`flex items-center gap-3 py-1 shrink-0 ${isSidebarCollapsed ? 'justify-center px-2' : 'px-5'}`}>
+            <div 
+              className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/25 overflow-hidden shadow-inner cursor-pointer"
+              title={userName || (isAuthenticated ? `Logged in as ${role}` : 'Guest User')}
             >
-               {themeMode === 'dark' ? <Sun className="w-5 h-5 text-yellow-500" /> : <Moon className="w-5 h-5 text-gray-600" />}
-            </button>
-            <div className="relative">
-               <button onClick={() => setIsBellOpen(!isBellOpen)} className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors relative">
-                  <Bell className="w-5 h-5 text-gray-700 dark:text-gray-200" />
-                  {unreadUrgentCount > 0 && (
-                     <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center border-2 border-white dark:border-slate-900 text-white">
-                        {unreadUrgentCount}
-                     </span>
-                  )}
-               </button>
-               {isBellOpen && (
-                 <div className="absolute top-12 right-0 w-80 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-800 z-50 overflow-hidden flex flex-col">
-                    <div className="p-3 bg-gray-100 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center">
-                       <span className="font-bold text-[0.8rem] text-gray-700 dark:text-gray-200 uppercase tracking-wide">Notifications</span>
-                       {unreadUrgentCount > 0 && (
-                          <button 
-                            type="button"
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); markAllAsRead(); }}
-                            className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 uppercase tracking-wider bg-blue-50 dark:bg-blue-950/40 px-2 py-1 rounded-md"
-                          >
-                             Mark all read
-                          </button>
-                       )}
-                    </div>
-                    <div className="max-h-80 overflow-y-auto pt-4 pb-2 px-1 custom-scrollbar">
-                       {combinedBellItems.length > 0 ? combinedBellItems.map(n => (
-                          <div key={n.id} onClick={(e) => { setIsBellOpen(false); navigate(n.href || '/notices'); const notificationType = n.isAdmission ? 'admission' : n.isEnquiry ? 'enquiry' : n.isAlumni ? 'alumni' : 'notice'; markAsRead(n.id, notificationType, e, false); }} className="block p-3 border-b border-gray-50 dark:border-slate-800 hover:text-primary dark:hover:text-blue-400 cursor-pointer group relative animate-in fade-in duration-150">
-                             <div className="flex justify-between items-center mb-2 pr-10">
-                                <span className={`text-[9px] leading-none font-bold px-1.5 py-0.5 rounded uppercase flex items-center h-4 border border-current/10 ${
-                                  n.priority === 'Urgent' ? 'bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400' : 
-                                  n.priority === 'Enquiry' ? 'bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400' :
-                                  n.priority === 'Alumni' ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400' : 'bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
-                               }`}>{n.priority}</span>
-                                {(!n.readBy || !n.readBy.includes(auth.currentUser?.uid || studentId || 'guest')) && !localReads.includes(n.id) && <span className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-900"></span>}
-                             </div>
-                             <p className="font-bold text-[0.8rem] text-gray-800 dark:text-gray-200 line-clamp-2 pr-10 leading-snug">{n.title}</p>
-
-                             {(!n.readBy || !n.readBy.includes(auth.currentUser?.uid || studentId || 'guest')) && !localReads.includes(n.id) && (
-                                <button 
-                                   type="button"
-                                   onClick={(e) => {
-                             const notificationType = n.isAdmission ? 'admission' : n.isEnquiry ? 'enquiry' : n.isAlumni ? 'alumni' : 'notice';
-                             markAsRead(n.id, notificationType, e);
-                          }}
-                                   className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-white dark:bg-slate-800 hover:bg-blue-600 text-blue-500 hover:text-white rounded-full transition-all scale-90 hover:scale-100 z-10 border border-blue-100 dark:border-slate-700 shadow-sm"
-                                   title="Mark as read"
-                                >
-                                   <Check className="w-4 h-4" />
-                                </button>
-                             )}
-                          </div>
-                       )) : <div className="p-8 text-center text-sm text-gray-500 flex flex-col items-center gap-2">
-                              <Bell className="w-8 h-8 opacity-20" />
-                              No recent notifications
-                            </div>}
-                    </div>
-                    <div className="p-3 text-primary text-center border-t border-gray-100 dark:border-slate-800">
-                       <Link to="/notices" onClick={() => setIsBellOpen(false)} className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 w-full text-center block outline-none">Open Notice Board</Link>
-                    </div>
-                 </div>
-               )}
-            </div>
-            
-            <div className="text-right">
-              <div className="text-[0.8rem] font-bold flex items-center justify-end gap-2 text-[#1f2937] dark:text-gray-100">
-                {isAuthenticated ? (
-                   <span className="px-2.5 py-0.5 rounded-full bg-primary text-white text-[10px] uppercase font-black tracking-widest shadow-sm">
-                      {role.toUpperCase()}
-                   </span>
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full bg-gray-500 text-white text-[10px] uppercase font-black tracking-widest shadow-sm">
-                     GUEST USER
-                  </span>
-                )}
-              </div>
-              <div className="text-[11px] text-[#6b7280] dark:text-gray-400 font-mono mt-1 font-semibold flex flex-col items-end">
-                <span className="text-[14px] text-gray-800 dark:text-gray-200 tracking-wider mb-0.5">{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', second:'2-digit' })}</span>
-                <span>{formatBSDate(currentTime)}<span className="hidden lg:inline"> | {academicYearString}</span></span>
-              </div>
-            </div>
-            <div className="relative border-l border-gray-200 dark:border-slate-800 pl-3 md:pl-4 lg:pl-6 ml-1 md:ml-2">
-              <button 
-                onClick={() => setIsProfileOpen(!isProfileOpen)} 
-                className="w-10 h-10 rounded-full bg-[#f3f4f6] dark:bg-slate-800 flex items-center justify-center border border-[#e5e7eb] dark:border-slate-700 overflow-hidden shadow-sm hover:ring-2 hover:ring-primary/20 transition-all font-bold"
-              >
-                {avatarUrl ? (
-                   <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                   <User className="w-5 h-5 text-[#6b7280] dark:text-gray-300" />
-                )}
-              </button>
-
-              {isProfileOpen && (
-                <div className="absolute top-12 right-0 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-gray-100 dark:border-slate-800 z-50 overflow-hidden flex flex-col py-1 animate-in slide-in-from-top-2 duration-150">
-                    {isAuthenticated ? (
-                      <>
-                        <Link 
-                          to="/profile" 
-                          onClick={() => setIsProfileOpen(false)} 
-                          className="px-4 py-2.5 text-sm font-bold text-gray-750 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors"
-                        >
-                            <User className="w-4 h-4 text-gray-400" />
-                            My Profile
-                        </Link>
-                        <button 
-                          onClick={() => { setShowLogoutConfirm(true); setIsProfileOpen(false); }} 
-                          className="px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-3 text-left w-full transition-colors border-t border-gray-100 dark:border-slate-800"
-                        >
-                            <LogOut className="w-4 h-4" />
-                            Logout
-                        </button>
-                      </>
-                    ) : (
-                      <button 
-                        onClick={() => { navigate('/login'); setIsProfileOpen(false); }} 
-                        className="px-4 py-2.5 text-sm font-bold text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 flex items-center gap-3 text-left w-full transition-colors"
-                      >
-                          <LogIn className="w-4 h-4" />
-                          Login
-                      </button>
-                    )}
-                </div>
+              {avatarUrl ? (
+                 <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                 <User className="w-5 h-5 text-white/90" />
               )}
             </div>
+            {!isSidebarCollapsed && (
+              <div className="overflow-hidden min-w-0">
+                <div className="text-[0.82rem] font-extrabold truncate text-white">
+                   {isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}
+                </div>
+                <div className="text-[0.68rem] opacity-75 font-medium truncate capitalize text-slate-300">
+                   {isAuthenticated ? role : 'Guest Portal'}
+                </div>
+              </div>
+            )}
           </div>
-        </header>
 
-        {/* Scrollable Content */}
-        <main className="flex-1 flex flex-col min-h-0 overflow-visible print:overflow-visible print:p-0 relative bg-[#F8FAFC] dark:bg-[#0b0f19]">
-          {/* Sticky Scroll Progress Bar */}
+          {/* Line separator above the menu */}
+          <div className={`border-b-2 border-white/25 my-3 shrink-0 ${isSidebarCollapsed ? 'mx-3' : 'mx-5'}`} />
+
+          {/* Highlighted Menu Section with custom scrollbar */}
+          <div className={`flex-1 flex flex-col min-h-0 bg-slate-950/65 dark:bg-slate-950/80 rounded-2xl mb-3 p-1.5 border border-white/10 shadow-inner ${isSidebarCollapsed ? 'mx-2' : 'mx-3.5'}`}>
+            <nav className="flex-1 overflow-y-auto custom-scrollbar overflow-x-hidden">
+              <ul className="list-none p-0 m-0 pb-4">
+                {navigation.map((item, index) => {
+                  const Icon = item.icon;
+                  const showGroupHeader = index === 0 || navigation[index - 1].group !== item.group;
+                  return (
+                    <React.Fragment key={item.name}>
+                      {showGroupHeader && (
+                        isSidebarCollapsed ? (
+                          index !== 0 ? <li className="my-2 border-t border-white/10 mx-1" /> : null
+                        ) : (
+                          <li className={`px-4 py-2 text-[0.65rem] font-extrabold uppercase tracking-[1px] text-white/50 sticky top-0 z-10 bg-[var(--primary)]/95 backdrop-blur-sm ${index !== 0 ? 'mt-3 border-t border-white/5 pt-3' : ''}`}>
+                            {item.group as string}
+                          </li>
+                        )
+                      )}
+                      <li>
+                        <Link
+                          to={item.href}
+                          title={item.name}
+                          className={`text-[0.82rem] font-semibold cursor-pointer flex items-center transition-all rounded-xl my-0.5 ${
+                            isSidebarCollapsed 
+                              ? 'justify-center p-2.5 mx-auto w-10 h-10' 
+                              : 'px-4 py-2.5 gap-3 mx-1'
+                          } ${ 
+                            location.pathname === item.href 
+                              ? 'bg-amber-500 text-slate-950 font-black shadow-md' 
+                              : 'text-white/80 hover:bg-white/10 hover:text-white' 
+                          }`}
+                        >
+                          <Icon className="w-4 h-4 shrink-0" />
+                          {!isSidebarCollapsed && (
+                            <span className="whitespace-nowrap truncate">{item.name}</span>
+                          )}
+                        </Link>
+                      </li>
+                    </React.Fragment>
+                  );
+                })}
+              </ul>
+            </nav>
+          </div>
+          
+          {/* Academic Year Footer */}
+          <div className={`shrink-0 py-3 border-t border-white/10 mt-auto bg-slate-950/20 ${isSidebarCollapsed ? 'px-2 text-center' : 'px-5'}`}>
+            {!isSidebarCollapsed ? (
+              <>
+                <div className="text-[0.65rem] text-white/60 uppercase tracking-wider font-bold">Academic Year</div>
+                <div className="text-[0.85rem] font-bold text-white shadow-sm mt-0.5">{academicYearString}</div>
+              </>
+            ) : (
+              <div className="text-[0.65rem] font-bold text-amber-400" title={`Academic Year: ${academicYearString}`}>
+                2083
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {/* Main Content Area: Automatically gains/loses width dynamically */}
+        <div 
+          ref={mainRef}
+          onScroll={handleScroll}
+          className="flex-1 flex flex-col min-w-0 min-h-0 h-auto lg:h-full lg:max-h-full print:h-auto print:overflow-visible relative overflow-visible lg:overflow-y-auto lg:overflow-x-hidden custom-scrollbar"
+        >
+          {/* Scrollable Content */}
+          <main className="flex-1 flex flex-col min-h-0 overflow-visible print:overflow-visible print:p-0 relative bg-[#F8FAFC] dark:bg-[#0b0f19]">
           <div className="sticky top-0 left-0 right-0 h-[3px] bg-slate-100/10 dark:bg-slate-800/10 z-50 print:hidden w-full">
             <motion.div 
               className="h-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-400"
@@ -1109,7 +1256,7 @@ export default function Layout({
             />
           </div>
 
-          <div className={`px-0 pb-24 sm:pb-5 w-full max-w-full min-w-0 flex-1 shrink-0 flex flex-col ${location.pathname === '/' ? 'pt-0' : 'pt-3'}`}>
+          <div className="px-0 pb-8 sm:pb-6 w-full max-w-full min-w-0 flex-1 shrink-0 flex flex-col pt-3">
             <Breadcrumbs userRole={userRole} />
             <div className="w-full max-w-[1680px] mx-auto flex-1 px-3 sm:px-6 lg:px-8">
               <motion.div
@@ -1124,166 +1271,133 @@ export default function Layout({
             </div>
           </div>
 
-          {/* Professional Footer */}
-          <footer className="bg-[#0f172a] text-white pt-10 pb-24 md:pb-12 lg:pb-10 shrink-0 print:hidden mt-auto border-t-[4px] border-primary relative overflow-hidden">
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 Mix-blend-overlay pointer-events-none"></div>
-
-            <div className="max-w-6xl mx-auto px-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 relative z-10">
-              {/* Branding Section */}
-              <div className="flex flex-col gap-4 md:col-span-2 lg:col-span-1">
-                <div className="flex flex-col items-start gap-3">
-                  <div className="w-16 h-16 bg-white rounded-full p-1.5 shadow-md shrink-0 flex items-center justify-center">
-                    <img 
-                      src={logoUrl} 
-                      alt="Shikshantar Academy Logo" 
-                      className="w-full h-full object-contain rounded-full" 
-                      fetchPriority="high" 
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (target.src !== logoFallback) {
-                          target.src = logoFallback;
-                        }
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-lg tracking-wide leading-tight">SHIKSHANTAR</h3>
-                    <p className="text-xs uppercase opacity-80 tracking-widest font-semibold">Academy | Siraha</p>
-                  </div>
-                </div>
-                <p className="text-sm opacity-80 leading-relaxed max-w-sm mt-2">
-                  Empowering the next generation through quality education, character building, and excellence in all academic endeavors.
-                </p>
-              </div>
-
-              {/* Quick Links */}
-              <div>
-                <h4 className="font-bold text-sm uppercase tracking-widest opacity-80 mb-4 border-b border-white/20 pb-2 inline-block">Quick Links</h4>
-                <ul className="space-y-2 text-sm opacity-90 font-medium">
-                  <li><Link to="/about" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> About Us</Link></li>
-                  <li><Link to="/admission" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> Admission Form</Link></li>
-                  <li><Link to="/notices" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> Notice Board</Link></li>
-                  <li><Link to="/gallery" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> Photo Gallery</Link></li>
-                  <li><Link to="/alumni" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> Alumni / Success</Link></li>
-                  <li><Link to="/faq" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> FAQ</Link></li>
-                  <li><Link to="/contact" className="hover:bg-white hover:text-[#1a2744] px-3 py-1.5 rounded-lg -ml-3 transition-colors flex items-center gap-2 w-fit"><span className="w-1.5 h-1.5 bg-[var(--accent)] rounded-full inline-block"></span> Contact Us</Link></li>
-
-                </ul>
-              </div>
-
-              {/* Contact Info */}
-              <div>
-                <h4 className="font-bold text-sm uppercase tracking-widest opacity-60 mb-4 border-b border-white/20 pb-2 inline-block">Contact Us</h4>
-                <ul className="space-y-3 justify-center text-sm opacity-90 mb-6">
-                  <li className="flex items-start gap-3">
-                    <Building className="w-5 h-5 text-[var(--accent)] shrink-0" />
-                    <span>Location: Karjanha Municipality, Ward No. 05, Siraha, Madhesh Province, Nepal.</span>
-                  </li>
-                  <li className="flex items-center gap-3">
-                    <Megaphone className="w-5 h-5 text-[var(--accent)] shrink-0" />
-                    <span>Postal Code: 56500</span>
-                  </li>
-                  <li className="flex items-center gap-3">
-                    <Mail className="w-5 h-5 text-[var(--accent)] shrink-0" />
-                    <a 
-                      href={typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? "mailto:academyshikshantar@gmail.com" : "https://mail.google.com/mail/?view=cm&fs=1&to=academyshikshantar@gmail.com"}
-                      target={typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? undefined : "_blank"}
-                      rel={typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? undefined : "noopener noreferrer"}
-                      className="hover:underline hover:text-[var(--accent)] transition-colors break-all"
-                    >
-                      academyshikshantar@gmail.com
-                    </a>
-                  </li>
-                  <li className="flex items-center gap-3 flex-wrap">
-                    <Check className="w-5 h-5 text-[var(--accent)] shrink-0" />
-                    <span>Dedicated to Bright Futures</span>
-                    <div className="flex items-center gap-2 ml-1">
-                      {socialData.facebookUrl && (
-                        <a 
-                          href={socialData.facebookUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="p-1.5 bg-white/10 hover:bg-[#1877F2] text-white rounded-full transition-all inline-flex items-center justify-center hover:scale-105" 
-                          title="Facebook"
-                          id="footer-facebook-btn"
-                        >
-                          <Facebook className="w-4 h-4" />
-                        </a>
-                      )}
-                      {(socialData.whatsappNumber || '+9779713688926') && (
-                        <a 
-                          href={`https://wa.me/${(socialData.whatsappNumber || '+9779713688926').replace(/[^0-9]/g, '')}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="p-1.5 bg-white/10 hover:bg-[#25D366] text-white rounded-full transition-all inline-flex items-center justify-center hover:scale-105" 
-                          title="WhatsApp"
-                          id="footer-whatsapp-btn"
-                        >
-                          <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.513 2.262 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.5-5.729-1.448L0 24zm6.59-4.017c1.52.902 3.022 1.378 4.819 1.379 5.51.001 9.985-4.475 9.988-9.986.002-2.67-1.035-5.18-2.915-7.06C16.651 2.436 14.145 1.399 11.48 1.4 5.973 1.4 1.498 5.875 1.495 11.387c-.001 1.902.5 3.752 1.448 5.333L1.93 21.93l5.064-1.329zM16.92 14.34c-.297-.15-1.758-.868-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
-                          </svg>
-                        </a>
-                      )}
-                      {socialData.websiteUrl && (
-                        <a 
-                          href={socialData.websiteUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="p-1.5 bg-white/10 hover:bg-gray-800 text-white rounded-full transition-all inline-flex items-center justify-center hover:scale-105" 
-                          title="Website"
-                          id="footer-website-btn"
-                        >
-                          <Globe className="w-4 h-4" />
-                        </a>
-                      )}
-
-                    </div>
-                  </li>
-                </ul>
-                <a 
-                  href="https://maps.app.goo.gl/Ykri7uu78Y22NVjd6" 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="inline-flex items-center gap-2 bg-white text-[var(--primary)] px-5 py-2.5 rounded-lg text-sm font-bold shadow-md hover:bg-gray-100 transition-colors active:scale-95"
-                >
-                  <MapPin className="w-4 h-4" />
-                  Find Us
-                </a>
-              </div>
-            </div>
-
-            <div className="max-w-6xl mx-auto px-5 mt-10 pt-4 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 relative z-10">
-              <p className="text-xs opacity-60 font-medium">
-                &copy; {new Date().getFullYear()} Shikshantar Academy, Siraha. All rights reserved.
-              </p>
-
-              {/* Brand Social Icons at Bottom */}
-              <div className="flex flex-wrap items-center gap-3">
-                {socialData.instagramUrl && (
-                  <a href={socialData.instagramUrl} target="_blank" rel="noopener noreferrer" className="p-2 bg-white/10 hover:bg-[#E1306C] text-white rounded-full transition-all" title="Instagram">
-                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.051.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/>
-                    </svg>
-                  </a>
-                )}
-                {socialData.tiktokUrl && (
-                  <a href={socialData.tiktokUrl} target="_blank" rel="noopener noreferrer" className="p-2 bg-white/10 hover:bg-black text-white rounded-full transition-all" title="TikTok">
-                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                      <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.92-1.88 2.63-5.31 3.49-8.15 2.23-2.33-1.01-3.87-3.41-3.85-5.93.01-2.58 1.66-4.98 4.13-5.75 1.14-.37 2.37-.3 3.53.11v4.07c-.72-.37-1.57-.45-2.33-.22-1.01.27-1.72 1.2-1.74 2.24-.03 1.34 1.15 2.45 2.48 2.42 1.15-.01 2.11-.88 2.22-2.02.03-.51.01-1.02.01-1.53V0z"/>
-                    </svg>
-                  </a>
-                )}
-              </div>
-            </div>
-          </footer>
+          {/* Persistent Global Footer */}
+          <Footer />
         </main>
       </div>
-      
-      {/* Click outside logic for bell dropdown (Simplified) */}
-      {isBellOpen && (
-         <div className="fixed inset-0 z-10" onClick={() => setIsBellOpen(false)}></div>
-      )}
+    </div>
+
+      {/* Mobile Sliding Drawer Menu */}
+      <AnimatePresence>
+        {isMenuOpen && (
+          <div className="fixed inset-0 z-[60] lg:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMenuOpen(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 bottom-0 left-0 w-[280px] bg-[var(--primary)] dark:bg-slate-950 text-white flex flex-col z-10 shadow-2xl overflow-hidden"
+            >
+              {/* Mobile Drawer Header */}
+              <div className="p-4 flex items-center justify-between border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-full bg-white p-0.5 shadow flex items-center justify-center">
+                    <img src={logoUrl} alt="Logo" className="w-full h-full object-contain rounded-full" onError={(e) => { e.currentTarget.src = logoFallback; }} />
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-sm text-white">SHIKSHANTAR</div>
+                    <div className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Academy Siraha</div>
+                  </div>
+                </div>
+                <button onClick={() => setIsMenuOpen(false)} className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* User Info & Quick Portal Actions */}
+              <div className="px-4 py-3 bg-white/5 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center border border-white/20 overflow-hidden shrink-0">
+                    {avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-white" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-white truncate">{isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}</div>
+                    <div className="text-[10px] text-amber-300 font-extrabold uppercase tracking-wider">{isAuthenticated ? `${role} Portal` : 'Guest Portal'}</div>
+                  </div>
+                </div>
+
+                {/* Quick Action Buttons inside Drawer */}
+                <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center gap-1.5">
+                  {isAuthenticated ? (
+                    <>
+                      <Link
+                        to="/profile"
+                        onClick={() => setIsMenuOpen(false)}
+                        className="flex-1 py-1.5 px-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        <span>Profile</span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          setShowLogoutConfirm(true);
+                        }}
+                        className="py-1.5 px-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Logout</span>
+                      </button>
+                    </>
+                  ) : (
+                    <Link
+                      to="/login"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-colors shadow-sm"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      <span>Portal Login</span>
+                    </Link>
+                  )}
+                </div>
+              </div>
+
+              {/* Navigation Links */}
+              <nav className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
+                {navigation.map((item, index) => {
+                  const Icon = item.icon;
+                  const showGroupHeader = index === 0 || navigation[index - 1].group !== item.group;
+                  return (
+                    <React.Fragment key={item.name}>
+                      {showGroupHeader && (
+                        <div className={`px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-white/50 ${index !== 0 ? 'mt-2 pt-2 border-t border-white/10' : ''}`}>
+                          {item.group as string}
+                        </div>
+                      )}
+                      <Link
+                        to={item.href}
+                        onClick={() => setIsMenuOpen(false)}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-3 transition-colors ${
+                          location.pathname === item.href
+                            ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                            : 'text-white/80 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span>{item.name}</span>
+                      </Link>
+                    </React.Fragment>
+                  );
+                })}
+              </nav>
+
+              {/* Academic Year Footer */}
+              <div className="p-3 border-t border-white/10 bg-slate-950/40 text-center shrink-0">
+                <div className="text-[10px] text-white/60 uppercase font-bold">Academic Year</div>
+                <div className="text-xs font-bold text-amber-300">{academicYearString}</div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
 
 

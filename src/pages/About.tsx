@@ -49,13 +49,13 @@ const cardHoverProps = {
 
 export default function About() {
   const defaultContent = {
-    aboutUs: 'Established in the heart of Karjanha Municipality, Ward No. 05, Siraha, Shikshantar Academy is a distinguished educational institution committed to academic excellence and character development. From Playgroup through Class Ten, we cultivate an enriching environment that transforms students into confident, capable, and compassionate individuals.',
-    mission: 'To deliver a transformative educational experience in a safe, progressive, and nurturing environment, empowering students to maximize their academic potential, embrace critical thinking, and emerge as responsible global citizens.',
-    vision: 'To serve as a center of educational excellence across Madhesh Province and beyond, inspiring a lifelong passion for learning, unyielding creativity, and principled leadership in every student.',
-    history: 'Founded with a profound vision to elevate the educational landscape of Siraha, Shikshantar Academy has steadily evolved into a prestigious institution of learning. Through our unwavering dedication to pedagogical excellence, we have consistently nurtured top-tier talent and secured our standing as a trusted partner for parents investing in their children\'s future.',
-    principalMessage: 'At Shikshantar Academy, we believe in nurturing not just academic excellence, but character, creativity, and critical thinking. Our peaceful environment and modern facilities provide the perfect setting for your child to grow and thrive. We are dedicated to cultivating a community of lifelong learners, encouraging critical inquiry, and equipping each young mind with the principles of integrity, empathy, and resilience necessary to succeed in a globalized society.',
+    aboutUs: 'Located in Karjanha-05, Bastipur, Siraha, Shikshantar Academy provides quality English-medium education from Playgroup to Class 10. We focus on academic fundamentals, discipline, and moral values in a safe and supportive learning environment.',
+    mission: 'To provide accessible, high-quality education in a safe environment, helping every student build strong academic foundations, practical skills, and good moral character.',
+    vision: 'To be a trusted school in Madhesh Province, inspiring curious minds, disciplined learning, and active community leadership.',
+    history: 'Established in 2072 B.S. in Bastipur, Siraha, Shikshantar Academy was founded to bring quality English-medium schooling to local families. Over the past decade, our students and teachers have consistently achieved top marks in board examinations and district activities.',
+    principalMessage: 'At Shikshantar Academy, we believe education should build character, knowledge, and practical skills. Our peaceful campus and caring teachers provide a supportive setting where every child can grow with confidence, discipline, and respect.',
     principalName: 'Pappu Kumar Jha',
-    principalTitle: 'Principal & Academic Director'
+    principalTitle: 'Founder Principal'
   };
 
   const [content, setContent] = useState(defaultContent);
@@ -393,7 +393,7 @@ export default function About() {
             </div>
             <div>
               <p className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Our Heritage</p>
-              <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">Our Legendary Journey</h2>
+              <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">Our School Journey</h2>
             </div>
           </div>
           <div className="inline-flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950 border border-indigo-100/60 dark:border-indigo-900 text-indigo-700 dark:text-indigo-450 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider w-max">
@@ -417,20 +417,20 @@ export default function About() {
           </div>
           
           <div className="lg:col-span-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-150 dark:border-slate-800 rounded-3xl p-6 space-y-4">
-            <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">Quick Milestones</h4>
+            <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">Milestones</h4>
             
             <div className="space-y-3">
               <div className="flex gap-3">
                 <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">2072 BS</span>
-                <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">Established with basic facilities and dedicated local academic mentors.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">Founded in Bastipur with dedicated local educators.</p>
               </div>
               <div className="flex gap-3">
                 <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">2078 BS</span>
-                <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">Upgraded classrooms with digital study resources and specialized laboratories.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">Added science apparatus and dedicated computer facilities.</p>
               </div>
               <div className="flex gap-3">
                 <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">2083 BS</span>
-                <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">Inaugurated full digital ERP system and English medium pre-primary wings.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">Enhanced digital portal access and expanded early childhood wing.</p>
               </div>
             </div>
           </div>
@@ -461,7 +461,7 @@ export default function About() {
                 className="p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:bg-white dark:hover:bg-slate-900 hover:border-amber-200 dark:hover:border-amber-800/60 hover:shadow-md transition-all duration-300"
               >
                 <h4 className="font-black text-slate-800 dark:text-white text-xs sm:text-sm mb-1 uppercase tracking-wider text-amber-600 dark:text-amber-500">Excellence</h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Maintaining the highest academic and extracurricular benchmarks in Madhesh province.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Encouraging every student to do their best in academics and activities.</p>
               </motion.div>
               
               <motion.div 
@@ -469,7 +469,7 @@ export default function About() {
                 className="p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:bg-white dark:hover:bg-slate-900 hover:border-indigo-200 dark:hover:border-indigo-800/60 hover:shadow-md transition-all duration-300"
               >
                 <h4 className="font-black text-slate-800 dark:text-white text-xs sm:text-sm mb-1 uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Integrity</h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Inspiring moral clarity, unyielding honesty, and ethical leadership in every pupil.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Instilling honesty, fairness, and moral responsibility in daily conduct.</p>
               </motion.div>
               
               <motion.div 
@@ -477,15 +477,15 @@ export default function About() {
                 className="p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:bg-white dark:hover:bg-slate-900 hover:border-emerald-200 dark:hover:border-emerald-800/60 hover:shadow-md transition-all duration-300"
               >
                 <h4 className="font-black text-slate-800 dark:text-white text-xs sm:text-sm mb-1 uppercase tracking-wider text-emerald-600 dark:text-emerald-500">Respect</h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Fostering deep mutual respect, appreciating cultural diversity, and celebrating equality.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Fostering mutual respect, polite communication, and care for peers and elders.</p>
               </motion.div>
               
               <motion.div 
                 whileHover={{ scale: 1.025, y: -2 }} 
                 className="p-4 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:bg-white dark:hover:bg-slate-900 hover:border-blue-200 dark:hover:border-blue-800/60 hover:shadow-md transition-all duration-300"
               >
-                <h4 className="font-black text-slate-800 dark:text-white text-xs sm:text-sm mb-1 uppercase tracking-wider text-blue-600 dark:text-blue-400">Innovation</h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Embracing progressive learning with modern computer labs, BALA visual aids, and smart tools.</p>
+                <h4 className="font-black text-slate-800 dark:text-white text-xs sm:text-sm mb-1 uppercase tracking-wider text-blue-600 dark:text-blue-400">Inquiry</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold leading-relaxed">Nurturing curiosity, question-asking, and practical hands-on discovery.</p>
               </motion.div>
             </div>
           </motion.section>
@@ -512,7 +512,7 @@ export default function About() {
               <div>
                 <Quote className="w-10 h-10 text-indigo-400 opacity-60 mb-3 animate-pulse" />
                 <blockquote className="text-lg sm:text-xl font-bold italic leading-relaxed text-slate-150">
-                  "At Shikshantar Academy, our administrative and educational pillars unite to ensure no child is left behind. We provide every facility to make study productive, inspiring, and rewarding."
+                  "Our teachers and school administration work together to support every student with care, discipline, and attention."
                 </blockquote>
               </div>
               

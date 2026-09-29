@@ -1,260 +1,62 @@
 {
   "entities": {
-    "User": {
-      "title": "User",
-      "description": "User profile and role information.",
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile and role metadata",
       "type": "object",
       "properties": {
-        "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
-        "phone": { "type": "string" },
         "fullName": { "type": "string" },
-        "studentId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "adminTier": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "pending", "blocked", "rejected"] },
         "class": { "type": "string" },
-        "section": { "type": "string" },
-        "rollNo": { "type": "string" },
-        "parentPhone": { "type": "string" }
+        "studentId": { "type": "string" }
       },
-      "required": ["email", "role"]
-    },
-    "Notice": {
-      "title": "Notice",
-      "description": "School announcement.",
-      "type": "object",
-      "properties": {
-        "title": { "type": "string" },
-        "message": { "type": "string" },
-        "date": { "type": "string", "format": "date" },
-        "validUntil": { "type": "string", "format": "date" },
-        "priority": { "type": "string", "enum": ["Normal", "Urgent"] },
-        "targets": { "type": "array", "items": { "type": "string" } },
-        "status": { "type": "string", "enum": ["Draft", "Published", "Archived"] },
-        "isPinned": { "type": "boolean" },
-        "timestamp": { "type": "object" },
-        "readBy": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["title", "message", "date", "status", "targets"]
-    },
-    "Admission": {
-      "title": "Admission",
-      "description": "Enrollment application.",
-      "type": "object",
-      "properties": {
-        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
-        "submittedAt": { "type": "object" }
-      },
-      "required": ["status", "submittedAt"]
-    },
-    "Exam": {
-      "title": "Exam",
-      "description": "Details of an examination.",
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "type": { "type": "string" },
-        "class": { "type": "string" },
-        "academicYear": { "type": "string" },
-        "published": { "type": "boolean" }
-      },
-      "required": ["name", "type", "class", "academicYear", "published"]
-    },
-    "Result": {
-      "title": "Result",
-      "description": "Individual subject result for a student.",
-      "type": "object",
-      "properties": {
-        "studentId": { "type": "string" },
-        "examId": { "type": "string" },
-        "subject": { "type": "string" },
-        "marks": { "type": "number" },
-        "fullMarks": { "type": "number", "default": 100 }
-      },
-      "required": ["studentId", "examId", "subject", "marks"]
-    },
-    "ResultSummary": {
-      "title": "Result Summary",
-      "description": "Aggregated result for a student in an exam.",
-      "type": "object",
-      "properties": {
-        "studentId": { "type": "string" },
-        "examId": { "type": "string" },
-        "total": { "type": "number" },
-        "percentage": { "type": "number" },
-        "grade": { "type": "string" },
-        "rank": { "type": "number" }
-      },
-      "required": ["studentId", "examId", "total", "percentage", "grade", "rank"]
-    },
-    "Settings": {
-      "title": "Settings",
-      "description": "Global application configuration.",
-      "type": "object",
-      "properties": {
-        "fields": { "type": "array", "items": { "type": "object" } },
-        "home_content": { "type": "object" }
-      }
-    },
-    "FeeStructure": {
-      "title": "Fee Structure",
-      "description": "Fee categorization per class and year.",
-      "type": "object",
-      "properties": {
-        "class": { "type": "string" },
-        "tuitionFee": { "type": "number" },
-        "busFee": { "type": "number" },
-        "examFee": { "type": "number" },
-        "annualFee": { "type": "number" }
-      },
-      "required": ["class", "tuitionFee", "busFee", "examFee", "annualFee"]
-    },
-    "StudentFee": {
-      "title": "Student Fee",
-      "description": "Monthly fee record for a student.",
-      "type": "object",
-      "properties": {
-        "studentId": { "type": "string" },
-        "month": { "type": "string" },
-        "totalFee": { "type": "number" },
-        "paidAmount": { "type": "number" },
-        "dueAmount": { "type": "number" },
-        "status": { "type": "string", "enum": ["paid", "due"] }
-      },
-      "required": ["studentId", "month", "totalFee", "paidAmount", "dueAmount", "status"]
-    },
-    "Transaction": {
-      "title": "Transaction",
-      "description": "A payment transaction.",
-      "type": "object",
-      "properties": {
-        "date": { "type": "string" },
-        "receipt": { "type": "string" },
-        "studentId": { "type": "string" },
-        "studentName": { "type": "string" },
-        "class": { "type": "string" },
-        "amount": { "type": "number" },
-        "method": { "type": "string" },
-        "collectedBy": { "type": "string" },
-        "createdBy": { "type": "string" },
-        "creatorUid": { "type": "string" },
-        "status": { "type": "string", "enum": ["SUCCESS", "REFUNDED", "OVERRIDE_SUCCESS"] },
-        "months": { "type": "array", "items": { "type": "string" } },
-        "remarks": { "type": "string" }
-      },
-      "required": ["date", "receipt", "studentId", "amount", "method", "status"]
+      "required": ["role"]
     },
     "RemitBill": {
-      "title": "Remit Bill",
-      "description": "Pre-payment demand bills configured class-wise.",
+      "title": "RemitBill",
+      "description": "Institutional fee bill invoice document",
       "type": "object",
       "properties": {
         "billNo": { "type": "string" },
         "studentId": { "type": "string" },
-        "studentName": { "type": "string" },
-        "class": { "type": "string" },
-        "billingPeriod": { "type": "string" },
-        "totalAmount": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "paid", "partial", "void", "cancelled"] }
-      },
-      "required": ["billNo", "studentId", "studentName", "class", "billingPeriod", "totalAmount", "status"]
-    },
-    "BillItem": {
-      "title": "Bill Item",
-      "description": "Itemized monthly fee line item for a student and specific Nepali month.",
-      "type": "object",
-      "properties": {
-        "studentId": { "type": "string" },
-        "studentName": { "type": "string" },
-        "class": { "type": "string" },
+        "studentUid": { "type": "string" },
         "academicYear": { "type": "string" },
-        "month": { "type": "string" },
-        "monthId": { "type": "string" },
-        "monthIndex": { "type": "number" },
-        "chargeName": { "type": "string" },
-        "rate": { "type": "number" },
-        "amount": { "type": "number" },
-        "remitBillId": { "type": "string" },
-        "billNo": { "type": "string" },
-        "status": { "type": "string", "enum": ["active", "pending", "paid", "void", "cancelled"] }
+        "totalAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "dueAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["UNPAID", "PARTIAL", "PAID", "VOID"] }
       },
-      "required": ["studentId", "academicYear", "month", "monthId", "amount", "status"]
+      "required": ["billNo", "studentId", "totalAmount"]
     },
-    "LedgerAuditLog": {
-      "title": "Ledger Audit Log",
-      "description": "Immutable audit trail tracking every transaction modification, edit, refund, undo, deletion, and manual adjustment.",
+    "CashLedgerEntry": {
+      "title": "CashLedgerEntry",
+      "description": "Physical cash desk receipt / voucher transaction entry",
       "type": "object",
       "properties": {
-        "timestamp": { "type": "object" },
-        "timestampStr": { "type": "string" },
-        "date": { "type": "string" },
-        "dateBS": { "type": "string" },
-        "transactionId": { "type": "string" },
-        "receipt": { "type": "string" },
+        "receiptNo": { "type": "string" },
         "studentId": { "type": "string" },
-        "studentName": { "type": "string" },
-        "studentClass": { "type": "string" },
-        "actionType": { "type": "string", "enum": ["AMOUNT_MODIFIED", "STATUS_REFUNDED", "PAYMENT_UNDONE", "TRANSACTION_DELETED", "MANUAL_OVERRIDE", "FEE_ADJUSTED", "PAYMENT_ENTRY"] },
-        "previousValue": { "type": "string" },
-        "newValue": { "type": "string" },
-        "reason": { "type": "string" },
-        "adminName": { "type": "string" },
-        "adminEmail": { "type": "string" },
-        "adminUid": { "type": "string" }
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["PAYMENT", "REFUND", "ADVANCE_IN", "ADVANCE_OUT", "CANCELLATION"] },
+        "academicYear": { "type": "string" }
       },
-      "required": ["timestampStr", "actionType", "previousValue", "newValue", "reason", "adminName"]
+      "required": ["receiptNo", "amount", "type"]
     }
   },
   "firestore": {
     "/users/{userId}": {
-      "schema": "User",
-      "description": "Individual user profile documents."
-    },
-    "/notices/{noticeId}": {
-      "schema": "Notice",
-      "description": "School announcements."
-    },
-    "/admissions/{admissionId}": {
-      "schema": "Admission",
-      "description": "Student admission applications."
-    },
-    "/exams/{examId}": {
-      "schema": "Exam",
-      "description": "Examinations."
-    },
-    "/results/{resultId}": {
-      "schema": "Result",
-      "description": "Marks per subject."
-    },
-    "/resultSummary/{summaryId}": {
-      "schema": "ResultSummary",
-      "description": "Summarized marks per exam."
-    },
-    "/settings/{settingId}": {
-      "schema": "Settings",
-      "description": "Global app configurations."
-    },
-    "/feeStructure/{feeId}": {
-      "schema": "FeeStructure",
-      "description": "Class fee structures."
-    },
-    "/studentFees/{feeId}": {
-      "schema": "StudentFee",
-      "description": "Student fee payments."
-    },
-    "/transactions/{txId}": {
-      "schema": "Transaction",
-      "description": "Fee payment transactions."
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Collection storing application user profiles and access roles"
     },
     "/remitBills/{billId}": {
-      "schema": "RemitBill",
-      "description": "Distributed pre-payment class-wise billing receipts."
+      "schema": { "$ref": "#/entities/RemitBill" },
+      "description": "Collection storing student remit bills and invoices"
     },
-    "/billItems/{itemId}": {
-      "schema": "BillItem",
-      "description": "Itemized student monthly billing line items."
-    },
-    "/ledger_audit_logs/{logId}": {
-      "schema": "LedgerAuditLog",
-      "description": "Audit records of transaction modifications, previous and new values, reasons, and administrator names."
+    "/cash_ledger/{entryId}": {
+      "schema": { "$ref": "#/entities/CashLedgerEntry" },
+      "description": "Collection storing cash ledger records for administrative finance desk"
     }
   }
 }

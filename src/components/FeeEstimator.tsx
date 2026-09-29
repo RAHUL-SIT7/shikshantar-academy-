@@ -195,10 +195,10 @@ export const FeeEstimator: React.FC = () => {
             <Coins className="w-3.5 h-3.5 text-amber-400" /> Academic Session {feeData.academicYear} Fee Calculator
           </span>
           <h2 className="text-2xl sm:text-4xl font-black font-display text-white tracking-tight leading-tight">
-            Interactive <span className="text-amber-400">Fee & Scholarship</span> Estimator
+            Check School <span className="text-amber-400">Fees & Scholarships</span>
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed max-w-2xl mx-auto">
-            Calculated automatically using Shikshantar Academy’s official tuition, exam, computer, and bus route fee structures.
+            Choose your child's class, exam rank, and bus route below to see exact monthly fees and savings.
           </p>
         </div>
 
@@ -211,7 +211,7 @@ export const FeeEstimator: React.FC = () => {
             {/* Step 1: Grade Level Selection */}
             <div>
               <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-300 mb-2.5 font-poppins">
-                <GraduationCap className="w-4 h-4 text-amber-400" /> 1. Select Grade / Class
+                <GraduationCap className="w-4 h-4 text-amber-400" /> 1. Select Class
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {feeData.academic.map((g) => {
@@ -241,23 +241,23 @@ export const FeeEstimator: React.FC = () => {
             <div className="bg-slate-900/40 p-4 rounded-xl border border-white/5 space-y-3">
               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                 <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-300 font-poppins">
-                  <Award className="w-4 h-4 text-amber-400" /> 2. Rank Obtained in Last Terminal Exam
+                  <Award className="w-4 h-4 text-amber-400" /> 2. Class Position / Rank (Scholarship)
                 </label>
                 <span className={`font-black text-xs px-2.5 py-1 rounded-lg border transition-all ${
                   rankDiscountPercent > 0 
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
                     : 'bg-slate-800 text-slate-400 border-white/5'
                 }`}>
-                  {rankDiscountPercent > 0 ? `${rankDiscountPercent}% Rank Scholarship` : 'Standard Rate'}
+                  {rankDiscountPercent > 0 ? `${rankDiscountPercent}% Fee Discount` : 'Standard Rate'}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                 {[
-                  { id: '1st', title: 'First Position', sub: '1st Rank (50% Off)' },
-                  { id: '2nd', title: 'Second Position', sub: '2nd Rank (30% Off)' },
-                  { id: '3rd', title: 'Third Position', sub: '3rd Rank (20% Off)' },
-                  { id: 'none', title: 'Other / General', sub: 'Standard Fee' },
+                  { id: '1st', title: '1st Position', sub: '50% Tuition Discount' },
+                  { id: '2nd', title: '2nd Position', sub: '30% Tuition Discount' },
+                  { id: '3rd', title: '3rd Position', sub: '20% Tuition Discount' },
+                  { id: 'none', title: 'General / Other', sub: 'Standard Fee' },
                 ].map((rank) => {
                   const isActive = terminalRank === rank.id;
                   return (
@@ -284,33 +284,33 @@ export const FeeEstimator: React.FC = () => {
             {/* Step 3: Sibling Status */}
             <div className="bg-slate-900/40 p-4 rounded-xl border border-white/5 space-y-2">
               <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-300 font-poppins">
-                <Users className="w-4 h-4 text-amber-400" /> 3. Sibling Status & Family Benefit
+                <Users className="w-4 h-4 text-amber-400" /> 3. Brothers / Sisters Enrolled in School
               </label>
               <select
                 value={siblingCount}
                 onChange={(e) => setSiblingCount(Number(e.target.value))}
                 className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-amber-400 cursor-pointer"
               >
-                <option value={1}>1st Child (Single Entry - Standard Rate)</option>
-                <option value={2}>2nd Sibling Enrolled (20% Off Tuition)</option>
-                <option value={3}>3rd+ Sibling Enrolled (35% Off Tuition)</option>
+                <option value={1}>1st Child (Regular Rate)</option>
+                <option value={2}>2nd Child (20% Off Tuition Fee)</option>
+                <option value={3}>3rd or More Children (35% Off Tuition Fee)</option>
               </select>
             </div>
 
             {/* Step 4: Bus Transportation Route */}
             <div className="bg-slate-900/40 p-4 rounded-xl border border-white/5 space-y-2">
               <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-300 font-poppins">
-                <Bus className="w-4 h-4 text-amber-400" /> 4. Bus Transportation Route
+                <Bus className="w-4 h-4 text-amber-400" /> 4. School Bus Route
               </label>
               <select
                 value={selectedRouteId}
                 onChange={(e) => setSelectedRouteId(e.target.value)}
                 className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-amber-400 cursor-pointer"
               >
-                <option value="none">Self Transit / Walking (Free)</option>
+                <option value="none">No Bus Needed / Walking (Free)</option>
                 {feeData.transportation.map((t) => (
                   <option key={t.id || t.route} value={t.id}>
-                    {t.route} — NRs. {(parseNum(t.fee) || 0).toLocaleString()}/mo
+                    {t.route} — NRs. {(parseNum(t.fee) || 0).toLocaleString()} / month
                   </option>
                 ))}
               </select>
@@ -325,7 +325,7 @@ export const FeeEstimator: React.FC = () => {
               <div className="flex justify-between items-start border-b border-slate-950/15 pb-4">
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-900 block font-poppins">
-                    OFFICIAL FEE ESTIMATE BREAKDOWN
+                    FEE BREAKDOWN
                   </span>
                   <h3 className="text-2xl font-black text-slate-950 tracking-tight font-display mt-0.5">
                     {currentGradeRow.className} <span className="text-slate-800 text-xs font-bold">({category})</span>
@@ -359,20 +359,20 @@ export const FeeEstimator: React.FC = () => {
 
                 {computerFee > 0 && (
                   <div className="flex justify-between items-center">
-                    <span>Computer / Tech Practical Fee</span>
+                    <span>Computer Lab Fee</span>
                     <span className="font-bold">NRs. {(computerFee || 0).toLocaleString()}</span>
                   </div>
                 )}
 
                 {transportCost > 0 && (
                   <div className="flex justify-between items-center">
-                    <span className="truncate max-w-[200px]">Bus Route ({selectedRouteObj?.route})</span>
+                    <span className="truncate max-w-[200px]">School Bus ({selectedRouteObj?.route})</span>
                     <span className="font-bold shrink-0">NRs. {(transportCost || 0).toLocaleString()}</span>
                   </div>
                 )}
 
                 <div className="border-t border-slate-950/20 pt-3 flex justify-between items-baseline">
-                  <span className="font-black uppercase tracking-wider text-xs">Net Monthly Fee</span>
+                  <span className="font-black uppercase tracking-wider text-xs">Total Monthly Fee</span>
                   <div className="text-right">
                     <span className="text-2xl font-black text-slate-950 block leading-none font-display">
                       NRs. {(totalNetMonthlyFee || 0).toLocaleString()}
@@ -384,17 +384,17 @@ export const FeeEstimator: React.FC = () => {
                 {/* Additional non-monthly charges */}
                 <div className="pt-2 border-t border-slate-950/15 space-y-1.5 text-[11px] text-slate-900 font-semibold">
                   <div className="flex justify-between items-center bg-slate-950/10 p-2 rounded-lg border border-slate-950/10">
-                    <span>Terminal Exam Fee (Once per 3 mo / 4 terms)</span>
+                    <span>Terminal Exam Fee (4 exams per year)</span>
                     <span className="font-black text-slate-950">NRs. {(examFee || 0).toLocaleString()} / exam</span>
                   </div>
 
                   <div className="flex justify-between items-center pt-0.5">
-                    <span>Annual Charges (One-Time / Year)</span>
+                    <span>Annual Charges (Once a year)</span>
                     <span className="font-bold">NRs. {(annualCharges || 0).toLocaleString()}</span>
                   </div>
 
                   <div className="flex justify-between items-center">
-                    <span>One-Time Admission Fee</span>
+                    <span>Admission Fee (New students only)</span>
                     <span className="font-bold">
                       NRs. {(netAdmissionFee || 0).toLocaleString()}
                     </span>
@@ -406,13 +406,13 @@ export const FeeEstimator: React.FC = () => {
               {annualSavings > 0 && (
                 <div className="bg-slate-950 text-white rounded-xl p-4 border border-amber-300/40 shadow-inner space-y-1">
                   <div className="flex items-center gap-1.5 text-amber-400 font-black text-xs uppercase tracking-wider font-poppins">
-                    <Coins className="w-4 h-4 text-amber-400" /> Annual Scholarship Savings
+                    <Coins className="w-4 h-4 text-amber-400" /> Yearly Discount Savings
                   </div>
                   <p className="text-2xl font-black text-amber-300 font-display">
                     NRs. {(annualSavings || 0).toLocaleString()} <span className="text-xs font-normal text-slate-300">Saved / Year</span>
                   </p>
                   <p className="text-[10px] text-slate-400 font-medium">
-                    Calculated over 12 months including rank and sibling tuition waivers.
+                    Total savings from rank scholarship and sibling discounts over the full year.
                   </p>
                 </div>
               )}
@@ -421,7 +421,7 @@ export const FeeEstimator: React.FC = () => {
 
             <div className="flex items-center gap-2 text-[11px] text-slate-300 bg-white/5 p-3 rounded-xl border border-white/10 font-medium">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Quotes are calculated dynamically according to official {feeData.academicYear} B.S. school fee structures.</span>
+              <span>Official fees according to Shikshantar Academy {feeData.academicYear} B.S. fee structure.</span>
             </div>
           </div>
 

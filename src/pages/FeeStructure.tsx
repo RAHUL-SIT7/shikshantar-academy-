@@ -111,11 +111,11 @@ const defaultCustomTables: CustomTable[] = [
 const defaultData: FeeStructureData = {
   academicYear: '2083',
   headingTitle: 'Fees & Scholarships',
-  headingSubtitle: 'Comprehensive fee schedules, policies, development offsets, and active scholarships',
-  academicTitle: 'Academic Fees',
-  academicSubtitle: 'Playgroup to Class 10 tuition and standard admission schedules',
+  headingSubtitle: 'Transparent fee schedules and scholarship policies for Playgroup to Class 10',
+  academicTitle: 'Academic Fee Schedule',
+  academicSubtitle: 'Standard tuition and annual fee breakdown by grade',
   transportTitle: 'Transportation Fees',
-  transportSubtitle: 'Area-wise monthly transportation subscription fees',
+  transportSubtitle: 'Monthly bus rates categorized by route',
   academic: [
     { id: '0', className: 'Play Group', admission: '2000', annual: '3000', tuition: '1500', exam: '300', computer: '0' },
     { id: '1', className: 'Nursery', admission: '3000', annual: '3000', tuition: '1600', exam: '300', computer: '0' },
@@ -145,7 +145,7 @@ const defaultData: FeeStructureData = {
   lab: [
     { id: 'l1', className: 'Class 9 to 10', subject: 'Science Program', fee: '600' }
   ],
-  scholarshipPolicy: `<p>The academy provides scholarships to outstanding students based on their class performance and terminal exam results.</p><br><ul><li><strong>1st Position</strong>: Students securing the 1st position with more than 90% in terminal exams receive a full/partial scholarship.</li><li><strong>2nd &amp; 3rd Position</strong>: Students securing 2nd or 3rd position with more than 85% in terminal exams are eligible for a merit discount.</li></ul><br><p>Discounts will be automatically assessed by administration after the final terminal exams, and updated on the student's individual fee structure.</p>`,
+  scholarshipPolicy: `<p>Shikshantar Academy provides academic scholarships and need-based fee support for deserving students.</p><ul><li><strong>1st Position:</strong> Students securing 1st position with high distinction in terminal examinations receive tuition fee concessions.</li><li><strong>2nd &amp; 3rd Position:</strong> Students securing top ranks receive merit-based fee discounts.</li><li><strong>Need-Based Support:</strong> Concessions are available for eligible families upon written application to the school office.</li></ul><p>Approved scholarships are applied to terminal fee statements by the school administration.</p>`,
   academicColumns: defaultColumns,
   customTables: defaultCustomTables
 };
