@@ -55,6 +55,16 @@ service cloud.firestore {
       );
     }
 
+    function isValidAuditActor() {
+      let data = request.resource.data;
+      return (
+        (!('adminUid' in data) || data.adminUid == request.auth.uid) &&
+        (!('actorUid' in data) || data.actorUid == request.auth.uid) &&
+        (!('creatorUid' in data) || data.creatorUid == request.auth.uid) &&
+        (('adminUid' in data) || ('actorUid' in data) || ('creatorUid' in data))
+      );
+    }
+
     // ==========================================
     // USER PROFILES & AUTHENTICATION
     // ==========================================
@@ -204,8 +214,17 @@ service cloud.firestore {
 
     match /ledger_audit_logs/{logId} {
       // Immutable append-only audit trail: zero update or deletion
+      // Actor identity cannot be forged: caller must be admin and actor UID must match request.auth.uid
       allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow create: if isAdmin() && isValidAuditActor();
+      allow update, delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      // Immutable append-only audit trail: zero update or deletion
+      // Actor identity cannot be forged: caller must be admin and actor UID must match request.auth.uid
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidAuditActor();
       allow update, delete: if false;
     }
 

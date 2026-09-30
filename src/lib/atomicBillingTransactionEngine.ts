@@ -5,6 +5,7 @@ import {
   runTransaction,
   serverTimestamp
 } from 'firebase/firestore';
+import { auth } from '../firebase';
 import { sanitizeForFirestore, validateRemitBillPayload } from './firestoreSanitize';
 import { formatBSDate } from './nepaliDate';
 
@@ -415,6 +416,60 @@ export async function generateSingleStudentBillTransactionally(
         });
       }
     });
+
+    // E. Atomic Audit Log Creation (recorded inside the same transaction)
+    const auditLogRef = doc(collection(db, 'ledger_audit_logs'));
+    const systemAuditLogRef = doc(collection(db, 'audit_logs'));
+    const opId = `OP_BILL_${docSerial}`;
+    const actorUid = auth.currentUser?.uid || 'admin';
+    const auditPayload = sanitizeForFirestore({
+      id: auditLogRef.id,
+      auditLogId: auditLogRef.id,
+      operationId: opId,
+      correlationId: opId,
+      category: 'financial',
+      action: 'BILL_GENERATED',
+      actionType: 'BILL_GENERATED',
+      targetType: 'remit_bill',
+      targetId: billRef.id,
+      receipt: docSerial,
+      receiptNo: docSerial,
+      studentId: studentId,
+      studentUid: studentId,
+      studentName: studentName,
+      studentClass: student.class || '-',
+      academicYear: cleanYear,
+      beforeState: {
+        status: 'unbilled',
+        requestedMonths: unbilledForStudent
+      },
+      afterState: {
+        billId: billRef.id,
+        billNo: docSerial,
+        totalAmount: effectiveTotalAmount,
+        coveredMonths: effectiveMonths,
+        itemCount: effectiveCharges.length,
+        status: 'pending'
+      },
+      previousValue: `Unbilled months requested: ${unbilledForStudent.join(', ')}`,
+      newValue: `Generated Bill #${docSerial} | Total: NRs. ${effectiveTotalAmount.toLocaleString()} | Months: ${effectiveMonths.join(', ')}`,
+      reason: `Authorized bill generation by ${creatorName}`,
+      result: 'SUCCESS',
+      actorUid: actorUid,
+      adminUid: actorUid,
+      actorName: creatorName,
+      adminName: creatorName,
+      actorRole: 'admin',
+      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      date: currentBS,
+      dateBS: currentBS,
+      timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+      timestamp: serverTimestamp(),
+      createdAt: serverTimestamp()
+    });
+
+    transaction.set(auditLogRef, auditPayload);
+    transaction.set(systemAuditLogRef, auditPayload);
 
     return {
       success: true,

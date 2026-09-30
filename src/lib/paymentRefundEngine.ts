@@ -27,7 +27,7 @@ import {
   serverTimestamp,
   Firestore
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { sanitizeForFirestore } from './firestoreSanitize';
 import { formatBSDate } from './nepaliDate';
 
@@ -207,6 +207,7 @@ export async function processPaymentRefund(params: ProcessRefundParams): Promise
   const refundRecordRef = doc(collection(firestore, 'refund_records'));
   const cashExpenseRef = doc(collection(firestore, 'cash_ledger'));
   const auditLogRef = doc(collection(firestore, 'ledger_audit_logs'));
+  const systemAuditLogRef = doc(collection(firestore, 'audit_logs'));
 
   // ==========================================
   // 2. ATOMIC TRANSACTION (runTransaction)
@@ -490,16 +491,26 @@ export async function processPaymentRefund(params: ProcessRefundParams): Promise
     };
     t.set(cashExpenseRef, sanitizeForFirestore(cashOutflowData));
 
-    // 9. Create ledger_audit_logs document atomically inside the same transaction
+    // 9. Create ledger_audit_logs and audit_logs documents atomically inside the same transaction
+    const actorUid = auth.currentUser?.uid || 'admin';
     const auditData = {
       id: auditLogRef.id,
+      auditLogId: auditLogRef.id,
+      operationId: resolvedPaymentGroup,
+      correlationId: resolvedPaymentGroup,
       transactionId: params.transactionId,
       paymentGroupId: resolvedPaymentGroup,
       receipt: receiptNo || params.transactionId,
+      receiptNo: receiptNo || params.transactionId,
       studentId: primaryStudentId || '',
+      studentUid: primaryStudentId || '',
       studentName: targetTx.studentName || 'Student',
       studentClass: targetTx.class || '-',
+      category: 'financial',
+      action: 'PAYMENT_REFUND',
       actionType: 'REFUND',
+      targetType: 'transaction',
+      targetId: params.transactionId,
       amountReversed: totalCashToRefund,
       refundAmount: totalCashToRefund,
       billsRestoredCount,
@@ -508,14 +519,39 @@ export async function processPaymentRefund(params: ProcessRefundParams): Promise
       advancesRestoredAmount: totalAdvanceConsumedToRestore,
       refundRecordId: refundRecordRef.id,
       cashLedgerExpenseId: cashExpenseRef.id,
+      beforeState: {
+        status: targetTx.status || 'SUCCESS',
+        amount: totalCashToRefund,
+        paymentGroupId: resolvedPaymentGroup,
+        transactionCount: allTxIds.length
+      },
+      afterState: {
+        status: 'REFUNDED',
+        refundAmount: totalCashToRefund,
+        refundRecordId: refundRecordRef.id,
+        cashExpenseId: cashExpenseRef.id,
+        feesRestoredCount,
+        billsRestoredCount
+      },
       previousValue: `Status: ${targetTx.status || 'SUCCESS'} | Amount: NRs. ${totalCashToRefund.toLocaleString()} | Group: ${resolvedPaymentGroup} | TxCount: ${allTxIds.length}`,
       newValue: `Status: REFUNDED | Cash Outflow: NRs. ${totalCashToRefund.toLocaleString()} in cash_ledger | Refund Record: ${refundRecordRef.id} | Fees restored: ${feesRestoredCount} | Bills restored: ${billsRestoredCount}`,
       reason: params.reason || 'Administrative refund processed with password verification',
+      result: 'SUCCESS',
+      actorUid: actorUid,
+      adminUid: actorUid,
+      actorName: params.adminName,
       adminName: params.adminName,
+      actorRole: 'admin',
       adminEmail: params.adminEmail,
-      timestamp: serverTimestamp()
+      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      date: bsDate,
+      dateBS: bsDate,
+      timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+      timestamp: serverTimestamp(),
+      createdAt: serverTimestamp()
     };
     t.set(auditLogRef, sanitizeForFirestore(auditData));
+    t.set(systemAuditLogRef, sanitizeForFirestore(auditData));
 
     return {
       success: true,

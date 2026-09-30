@@ -25,6 +25,7 @@ import {
   TrendingUp,
   DollarSign,
   Inbox,
+  ShieldCheck,
 } from "lucide-react";
 import {
   BarChart,
@@ -43,6 +44,7 @@ import { UploadTab } from "../components/admin/UploadTab";
 import { ManualEntryTab } from "../components/admin/ManualEntryTab";
 import { ViewManageTab } from "../components/admin/ViewManageTab";
 import { EnquiriesTab } from "../components/admin/EnquiriesTab";
+import { AuditLogsTab } from "../components/admin/AuditLogsTab";
 
 import { StudentResult } from "../data/resultsState";
 
@@ -399,6 +401,14 @@ export default function Admin() {
             <Inbox className="w-4 h-4" /> Web Enquiries
           </button>
         )}
+        {userRole === "admin" && (
+          <button
+            onClick={() => setActiveTab("audit_logs")}
+            className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "audit_logs" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          >
+            <ShieldCheck className="w-4 h-4" /> Audit Logs
+          </button>
+        )}
       </div>
 
       {/* Tab Contents */}
@@ -447,6 +457,7 @@ export default function Admin() {
               />
             )}
             {activeTab === "enquiries" && userRole === "admin" && <EnquiriesTab />}
+            {activeTab === "audit_logs" && userRole === "admin" && <AuditLogsTab />}
           </>
         )}
       </div>

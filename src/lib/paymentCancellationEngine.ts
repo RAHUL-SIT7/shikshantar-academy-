@@ -23,8 +23,9 @@ import {
   serverTimestamp,
   Firestore
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { sanitizeForFirestore } from './firestoreSanitize';
+import { formatBSDate } from './nepaliDate';
 
 export interface CancelPaymentParams {
   transactionId: string;
@@ -213,8 +214,9 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
     }
   });
 
-  // 9. Pre-allocate audit log reference
+  // 9. Pre-allocate audit log references
   const auditLogRef = doc(collection(firestore, 'ledger_audit_logs'));
+  const systemAuditLogRef = doc(collection(firestore, 'audit_logs'));
 
   // 10. Execute the entire cancellation inside runTransaction for strict concurrency control
   return await runTransaction(firestore, async (t) => {
@@ -458,30 +460,66 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
       t.delete(cRef);
     }
 
-    // 8. Write Audit Log atomically inside the transaction
+    // 8. Write Audit Logs atomically inside the transaction
     const resolvedPaymentGroup = paymentGroupId || `PAY_${params.transactionId}`;
+    const actorUid = auth.currentUser?.uid || 'admin';
+    const now = new Date();
+    const bsDate = formatBSDate(now);
     const auditData = {
       id: auditLogRef.id,
+      auditLogId: auditLogRef.id,
+      operationId: resolvedPaymentGroup,
+      correlationId: resolvedPaymentGroup,
       transactionId: params.transactionId,
       paymentGroupId: resolvedPaymentGroup,
       receipt: receiptNo || params.transactionId,
-      studentId: primaryStudentId,
+      receiptNo: receiptNo || params.transactionId,
+      studentId: primaryStudentId || '',
+      studentUid: primaryStudentId || '',
       studentName: targetTx.studentName || 'Student',
       studentClass: targetTx.class || '-',
+      category: 'financial',
+      action: 'PAYMENT_UNDONE',
       actionType: 'PAYMENT_UNDONE',
+      targetType: 'transaction',
+      targetId: params.transactionId,
       amountReversed: totalAmountReversed,
       billsRestoredCount,
       feesRestoredCount,
       advancesReversedAmount: totalAdvanceCreatedToReverse,
       advancesRestoredAmount: totalAdvanceConsumedToRestore,
+      beforeState: {
+        status: targetTx.status || 'SUCCESS',
+        amount: totalAmountReversed,
+        paymentGroupId: resolvedPaymentGroup,
+        transactionCount: allTxIds.length
+      },
+      afterState: {
+        status: 'CANCELLED',
+        feesRestoredCount,
+        billsRestoredCount,
+        advancesReversedAmount: totalAdvanceCreatedToReverse,
+        advancesRestoredAmount: totalAdvanceConsumedToRestore
+      },
       previousValue: `Status: ACTIVE | Amount: NRs. ${totalAmountReversed.toLocaleString()} | Group: ${resolvedPaymentGroup} | TxCount: ${allTxIds.length}`,
       newValue: `Status: CANCELLED (Atomic Payment Undo) | Fees restored: ${feesRestoredCount} | Bills restored: ${billsRestoredCount}`,
       reason: params.reason || 'Instant payment undo within operator window with concurrency protection',
+      result: 'SUCCESS',
+      actorUid: actorUid,
+      adminUid: actorUid,
+      actorName: params.adminName,
       adminName: params.adminName,
+      actorRole: 'admin',
       adminEmail: params.adminEmail,
-      timestamp: serverTimestamp()
+      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      date: bsDate,
+      dateBS: bsDate,
+      timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+      timestamp: serverTimestamp(),
+      createdAt: serverTimestamp()
     };
     t.set(auditLogRef, sanitizeForFirestore(auditData));
+    t.set(systemAuditLogRef, sanitizeForFirestore(auditData));
 
     return {
       success: true,

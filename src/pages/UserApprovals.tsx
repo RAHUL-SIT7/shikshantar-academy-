@@ -9,6 +9,7 @@ import { initializeApp, getApps } from 'firebase/app';
 import { initializeAuth, createUserWithEmailAndPassword, inMemoryPersistence } from 'firebase/auth';
 import NepaliADDatePicker from '../components/NepaliADDatePicker';
 import { checkDuplicateStudentRoll, checkDuplicateStudentRollInFirestore, extractStudentRoll } from '../lib/studentValidation';
+import { recordAuditLog } from '../lib/auditLogger';
 
 // Initialize a secondary Firebase app to create users without signing out the admin
 const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
@@ -325,6 +326,24 @@ export default function UserApprovals() {
 
       await updateDoc(doc(db, 'users', id), updateData);
       setStatus({ type: 'success', message: `User ${editingUser.fullName || editingUser.email} updated successfully.` });
+      
+      // Record immutable audit log
+      recordAuditLog({
+        category: 'security',
+        actionType: 'USER_PROFILE_UPDATED',
+        action: 'USER_PROFILE_UPDATED',
+        targetType: 'user',
+        targetId: id,
+        studentId: id,
+        studentName: editingUser.fullName || editingUser.email || 'User',
+        beforeState: originalUser ? { fullName: originalUser.fullName, email: originalUser.email, class: originalUser.class, rollNumber: originalUser.rollNumber, role: originalUser.role } : 'N/A',
+        afterState: { fullName: editingUser.fullName, email: editingUser.email, class: editingUser.class, rollNumber: rawUpdateData.rollNumber, role: editingUser.role },
+        previousValue: originalUser ? `Class: ${originalUser.class || '-'}, Roll: ${originalUser.rollNumber || '-'}, Name: ${originalUser.fullName}` : 'N/A',
+        newValue: `Class: ${editingUser.class || '-'}, Roll: ${rawUpdateData.rollNumber || '-'}, Name: ${editingUser.fullName}`,
+        reason: 'Administrator updated user profile information',
+        operationId: `OP_USER_EDIT_${id}_${Date.now()}`
+      });
+
       setEditingUser(null);
     } catch (error: any) {
       console.error("Failed to update user profile info:", error);
@@ -339,6 +358,7 @@ export default function UserApprovals() {
       setTimeout(() => setStatus({ type: null, message: '' }), 3000);
       return;
     }
+    const target = usersList.find(u => u.id === userId);
     try {
       if (newRole === 'admin') {
          await updateDoc(doc(db, 'users', userId), { role: newRole, adminTier: 'secondary' });
@@ -346,6 +366,24 @@ export default function UserApprovals() {
          await updateDoc(doc(db, 'users', userId), { role: newRole, adminTier: null });
       }
       setStatus({ type: 'success', message: `Role changed to ${newRole}.` });
+
+      // Record immutable audit log
+      recordAuditLog({
+        category: 'security',
+        actionType: 'ROLE_CHANGED',
+        action: 'ROLE_CHANGED',
+        targetType: 'user',
+        targetId: userId,
+        studentId: userId,
+        studentName: target?.fullName || target?.email || 'User',
+        beforeState: { role: target?.role || 'user', adminTier: target?.adminTier || null },
+        afterState: { role: newRole, adminTier: newRole === 'admin' ? 'secondary' : null },
+        previousValue: `Role: ${target?.role || 'user'}`,
+        newValue: `Role: ${newRole} (Tier: ${newRole === 'admin' ? 'secondary' : 'none'})`,
+        reason: `Administrator updated role to ${newRole}`,
+        operationId: `OP_ROLE_CHANGE_${userId}_${Date.now()}`,
+        meta: { userId, previousRole: target?.role, newRole }
+      });
     } catch (error) {
       setStatus({ type: 'error', message: 'Update failed.' });
     }
@@ -353,9 +391,28 @@ export default function UserApprovals() {
   };
 
   const setAdminTier = async (userId: string, tier: 'primary' | 'secondary') => {
+    const target = usersList.find(u => u.id === userId);
     try {
       await updateDoc(doc(db, 'users', userId), { adminTier: tier });
       setStatus({ type: 'success', message: `Admin tier updated to ${tier}.` });
+
+      // Record immutable audit log
+      recordAuditLog({
+        category: 'security',
+        actionType: 'ADMIN_TIER_CHANGED',
+        action: 'ADMIN_TIER_CHANGED',
+        targetType: 'user',
+        targetId: userId,
+        studentId: userId,
+        studentName: target?.fullName || target?.email || 'Administrator',
+        beforeState: { adminTier: target?.adminTier || 'primary' },
+        afterState: { adminTier: tier },
+        previousValue: `Admin Tier: ${target?.adminTier || 'primary'} (${(target?.adminTier || 'primary') === 'primary' ? '1° Admin' : '2° Admin'})`,
+        newValue: `Admin Tier: ${tier} (${tier === 'primary' ? '1° Admin' : '2° Admin'})`,
+        reason: `Primary Administrator changed governance tier to ${tier === 'primary' ? '1° Admin (Primary)' : '2° Admin (Secondary)'}`,
+        operationId: `OP_TIER_CHANGE_${userId}_${Date.now()}`,
+        meta: { userId, previousTier: target?.adminTier, newTier: tier }
+      });
     } catch (error) {
       setStatus({ type: 'error', message: 'Update failed.' });
     }
@@ -416,6 +473,29 @@ export default function UserApprovals() {
 
       // 2. Delete Firestore profile from database
       await deleteDoc(doc(db, 'users', userToDelete.id));
+
+      // Record immutable audit log
+      recordAuditLog({
+        category: 'security',
+        actionType: 'USER_DELETED',
+        action: 'USER_DELETED',
+        targetType: 'user',
+        targetId: userToDelete.id,
+        studentId: userToDelete.id,
+        studentName: userToDelete.fullName || userToDelete.email || 'User',
+        beforeState: {
+          id: userToDelete.id,
+          email: userToDelete.email,
+          fullName: userToDelete.fullName,
+          role: userToDelete.role,
+          adminTier: userToDelete.adminTier || null
+        },
+        afterState: { deleted: true, authDeleted },
+        previousValue: `User: ${userToDelete.fullName || userToDelete.email} | Role: ${userToDelete.role} | Tier: ${userToDelete.adminTier || 'none'}`,
+        newValue: `Account deleted from database${authDeleted ? ' and Firebase Auth' : ''}`,
+        reason: 'Administrator confirmed deletion of user account and profile',
+        operationId: `OP_USER_DEL_${userToDelete.id}_${Date.now()}`
+      });
 
       if (authDeleted) {
         setStatus({ type: 'success', message: 'User profile and login account deleted successfully.' });

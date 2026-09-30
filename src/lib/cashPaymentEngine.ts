@@ -646,13 +646,83 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
       timestamp: serverTimestamp()
     });
 
+    // 7. Atomic Audit Log Creation (recorded inside the same transaction)
+    const auditLogRef = doc(collection(firestoreDb, 'ledger_audit_logs'));
+    const systemAuditLogRef = doc(collection(firestoreDb, 'audit_logs'));
+    const auditLogId = auditLogRef.id;
+    const opId = params.paymentGroupId || `OP_PAY_${txId}`;
+
+    const beforeState = {
+      studentId: studentId,
+      studentName: params.student.fullName || params.student.name,
+      class: params.student.class,
+      advanceBalance: parseIntegerAmount(studentData.advanceBalance || 0),
+      netPayable: netPayable
+    };
+
+    const afterState = {
+      transactionId: txId,
+      receiptNo: params.receiptNo,
+      amountApplied: breakdown.amountApplied,
+      cashTendered: cashTendered,
+      changeReturned: breakdown.changeReturned,
+      excessAmount: breakdown.excessAmount,
+      advanceCreated: params.excessDecision === 'ADVANCE' ? breakdown.excessAmount : 0,
+      excessReturned: params.excessDecision === 'RETURN' ? breakdown.excessAmount : 0,
+      remainingOutstanding: breakdown.remainingOutstanding,
+      allocationsCount: allocations.length,
+      status: 'SUCCESS'
+    };
+
+    const auditPayload = {
+      id: auditLogId,
+      auditLogId: auditLogId,
+      operationId: opId,
+      correlationId: paymentGroupId,
+      category: 'financial',
+      action: 'FEE_PAYMENT',
+      actionType: 'PAYMENT_ENTRY',
+      targetType: 'transaction',
+      targetId: txId,
+      transactionId: txId,
+      receipt: params.receiptNo,
+      receiptNo: params.receiptNo,
+      paymentGroupId: paymentGroupId,
+      studentId: studentId,
+      studentUid: studentId,
+      studentName: params.student.fullName || params.student.name,
+      studentClass: params.student.class,
+      academicYear: `${getBSYearMonthDate().year} BS`,
+      beforeState: beforeState,
+      afterState: afterState,
+      previousValue: `Net Payable: NRs. ${netPayable.toLocaleString()} | Advance Balance: NRs. ${beforeState.advanceBalance.toLocaleString()}`,
+      newValue: `Cash Tendered: NRs. ${cashTendered.toLocaleString()} | Applied: NRs. ${breakdown.amountApplied.toLocaleString()} | Change Returned: NRs. ${breakdown.changeReturned.toLocaleString()}${breakdown.isExcess ? ` | Excess (${params.excessDecision}): NRs. ${breakdown.excessAmount.toLocaleString()}` : ''}`,
+      reason: fullRemarks,
+      result: 'SUCCESS',
+      actorUid: operatorUid,
+      adminUid: operatorUid,
+      actorName: operatorName,
+      adminName: operatorName,
+      actorRole: 'admin',
+      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      date: bsDate,
+      dateBS: bsDate,
+      timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+      timestamp: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+
+    transaction.set(auditLogRef, auditPayload);
+    transaction.set(systemAuditLogRef, auditPayload);
+
     return {
       transactionId: txId,
       receiptNo: params.receiptNo,
       breakdown,
       allocations,
       advanceDocId,
-      refundDocId
+      refundDocId,
+      auditLogId
     };
   });
 }
