@@ -18,24 +18,34 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function isActiveUserDoc() {
+      return hasUserDoc() && 
+        (!('deleted' in getUserData()) || getUserData().deleted != true) &&
+        (!('status' in getUserData()) || (
+          getUserData().status != 'DELETED' && 
+          getUserData().status != 'AUTH_DELETED_PENDING_FINALIZATION' && 
+          getUserData().status != 'DELETION_PENDING'
+        ));
+    }
+
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.role == 'admin' ||
-        (hasUserDoc() && getUserData().role == 'admin')
+        (hasUserDoc() && isActiveUserDoc() && getUserData().role == 'admin') ||
+        (!hasUserDoc() && request.auth.token.role == 'admin')
       );
     }
 
     function isTeacher() {
       return isSignedIn() && (
-        request.auth.token.role == 'teacher' ||
-        (hasUserDoc() && getUserData().role == 'teacher')
+        (hasUserDoc() && isActiveUserDoc() && getUserData().role == 'teacher') ||
+        (!hasUserDoc() && request.auth.token.role == 'teacher')
       );
     }
 
     function isStudent() {
       return isSignedIn() && (
-        request.auth.token.role == 'student' ||
-        (hasUserDoc() && getUserData().role == 'student')
+        (hasUserDoc() && isActiveUserDoc() && getUserData().role == 'student') ||
+        (!hasUserDoc() && request.auth.token.role == 'student')
       );
     }
 
@@ -51,17 +61,106 @@ service cloud.firestore {
           resource.data.studentUid == request.auth.uid ||
           resource.data.userId == request.auth.uid
         )) ||
-        (hasUserDoc() && getUserData().studentId == studentId)
+        (hasUserDoc() && (
+          getUserData().studentId == studentId ||
+          ('permanentStudentId' in getUserData() && getUserData().permanentStudentId == studentId) ||
+          ('admissionNumber' in getUserData() && getUserData().admissionNumber == studentId) ||
+          ('admissionNo' in getUserData() && getUserData().admissionNo == studentId) ||
+          ('emisNumber' in getUserData() && getUserData().emisNumber == studentId) ||
+          ('studentEmis' in getUserData() && getUserData().studentEmis == studentId)
+        ))
       );
     }
 
     function isValidAuditActor() {
       let data = request.resource.data;
+      let userData = getUserData();
       return (
         (!('adminUid' in data) || data.adminUid == request.auth.uid) &&
         (!('actorUid' in data) || data.actorUid == request.auth.uid) &&
         (!('creatorUid' in data) || data.creatorUid == request.auth.uid) &&
-        (('adminUid' in data) || ('actorUid' in data) || ('creatorUid' in data))
+        (('adminUid' in data) || ('actorUid' in data) || ('creatorUid' in data)) &&
+        (!('actorRole' in data) || data.actorRole == userData.role || (!hasUserDoc() && data.actorRole == 'admin')) &&
+        (!('adminTier' in data) || data.adminTier == userData.adminTier || (userData.adminTier == null && data.adminTier == 'primary'))
+      );
+    }
+
+    function isValidAuditTarget() {
+      let data = request.resource.data;
+      let actionType = data.actionType;
+      let targetId = data.targetId;
+      return (
+        // A. Financial Payment: Target transaction MUST be newly created in this write batch/transaction
+        (actionType in ['PAYMENT_ENTRY', 'FEE_PAYMENT'] && (
+          (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
+          ('transactionId' in data && data.transactionId != '' && !exists(/databases/$(database)/documents/transactions/$(data.transactionId)) && existsAfter(/databases/$(database)/documents/transactions/$(data.transactionId)))
+        )) ||
+        // B. Financial Refund: Target transaction status MUST change to REFUNDED in this transaction OR new refund record created
+        (actionType in ['REFUND', 'PAYMENT_REFUND'] && (
+          (exists(/databases/$(database)/documents/transactions/$(targetId)) && get(/databases/$(database)/documents/transactions/$(targetId)).data.status != 'REFUNDED' && getAfter(/databases/$(database)/documents/transactions/$(targetId)).data.status == 'REFUNDED') ||
+          ('refundRecordId' in data && data.refundRecordId != '' && !exists(/databases/$(database)/documents/refund_records/$(data.refundRecordId)) && existsAfter(/databases/$(database)/documents/refund_records/$(data.refundRecordId)))
+        )) ||
+        // C. Payment Undo / Cancellation: Target transaction status MUST change to CANCELLED in this transaction
+        (actionType in ['PAYMENT_UNDONE'] && (
+          exists(/databases/$(database)/documents/transactions/$(targetId)) &&
+          get(/databases/$(database)/documents/transactions/$(targetId)).data.status != 'CANCELLED' &&
+          getAfter(/databases/$(database)/documents/transactions/$(targetId)).data.status == 'CANCELLED'
+        )) ||
+        // D. Bill Generated: Target remit bill MUST be newly created in this transaction
+        (actionType in ['BILL_GENERATED'] && (
+          !exists(/databases/$(database)/documents/remitBills/$(targetId)) &&
+          existsAfter(/databases/$(database)/documents/remitBills/$(targetId))
+        )) ||
+        // E. Bill Voided: Target remit bill status MUST change to void in this transaction
+        (actionType in ['BILL_VOIDED'] && (
+          exists(/databases/$(database)/documents/remitBills/$(targetId)) &&
+          get(/databases/$(database)/documents/remitBills/$(targetId)).data.status != 'void' &&
+          getAfter(/databases/$(database)/documents/remitBills/$(targetId)).data.status == 'void'
+        )) ||
+        // F. User Governance Mutations: Target user document MUST be modified in this transaction
+        (actionType == 'ROLE_CHANGED' && (
+          exists(/databases/$(database)/documents/users/$(targetId)) &&
+          existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+          get(/databases/$(database)/documents/users/$(targetId)).data.role != getAfter(/databases/$(database)/documents/users/$(targetId)).data.role
+        )) ||
+        (actionType == 'ADMIN_TIER_CHANGED' && (
+          exists(/databases/$(database)/documents/users/$(targetId)) &&
+          existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+          get(/databases/$(database)/documents/users/$(targetId)).data.adminTier != getAfter(/databases/$(database)/documents/users/$(targetId)).data.adminTier
+        )) ||
+        (actionType == 'USER_PROFILE_UPDATED' && (
+          exists(/databases/$(database)/documents/users/$(targetId)) &&
+          existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+          get(/databases/$(database)/documents/users/$(targetId)).data != getAfter(/databases/$(database)/documents/users/$(targetId)).data
+        )) ||
+        // G. User Deletion Lifecycle & Tombstone State Transitions
+        (actionType in ['USER_DELETED', 'USER_DELETION_REQUESTED', 'USER_AUTH_DELETE_FAILED', 'USER_DELETION_FINALIZED'] && (
+          // Soft-deleted tombstone or deletion state mutation
+          (exists(/databases/$(database)/documents/users/$(targetId)) &&
+           existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+           get(/databases/$(database)/documents/users/$(targetId)).data != getAfter(/databases/$(database)/documents/users/$(targetId)).data) ||
+          // Physical deletion transition
+          (exists(/databases/$(database)/documents/users/$(targetId)) &&
+           !existsAfter(/databases/$(database)/documents/users/$(targetId)))
+        )) ||
+        // H. Cash Ledger Mutations
+        (actionType in ['TRANSACTION_DELETED'] && (
+          exists(/databases/$(database)/documents/cash_ledger/$(targetId)) &&
+          !existsAfter(/databases/$(database)/documents/cash_ledger/$(targetId))
+        )) ||
+        (actionType in ['REMARKS_MODIFIED', 'AMOUNT_MODIFIED'] && (
+          (exists(/databases/$(database)/documents/cash_ledger/$(targetId)) && existsAfter(/databases/$(database)/documents/cash_ledger/$(targetId)) && get(/databases/$(database)/documents/cash_ledger/$(targetId)).data != getAfter(/databases/$(database)/documents/cash_ledger/$(targetId)).data) ||
+          (exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId)) && get(/databases/$(database)/documents/transactions/$(targetId)).data != getAfter(/databases/$(database)/documents/transactions/$(targetId)).data)
+        )) ||
+        (actionType in ['MANUAL_OVERRIDE'] && (
+          ('transactionId' in data && data.transactionId != '' && !exists(/databases/$(database)/documents/transactions/$(data.transactionId)) && existsAfter(/databases/$(database)/documents/transactions/$(data.transactionId))) ||
+          (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
+          (exists(/databases/$(database)/documents/studentFees/$(targetId)) && get(/databases/$(database)/documents/studentFees/$(targetId)).data != getAfter(/databases/$(database)/documents/studentFees/$(targetId)).data)
+        )) ||
+        // I. Permitted Financial Maintenance & Maintenance Operations
+        (actionType in ['LEDGER_RECONCILIATION_REPAIR', 'TEST_TRANSACTION_PURGED', 'EXCESS_APPROVED_ADVANCE', 'EXCESS_APPROVED_RETURN']) ||
+        // J. Academic Examination & Mark Management Audit Operations
+        (actionType in ['MARK_MODIFIED', 'RESULT_EDITED', 'MARK_ENTRY', 'EXAM_PUBLISHED', 'RESULTS_SAVED'])
       );
     }
 
@@ -100,8 +199,7 @@ service cloud.firestore {
 
     match /alumni_submissions/{alumniId} {
       allow create: if true;
-      allow read: if isAdmin() || (resource != null && resource.data.status == 'approved');
-      allow update, delete: if isAdmin();
+      allow read, update, delete: if isAdmin();
     }
 
     // ==========================================
@@ -150,12 +248,20 @@ service cloud.firestore {
     }
 
     match /results_secure/{studentId} {
-      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == studentId);
+      allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(studentId));
+      allow create, update: if isAdmin() || isTeacher();
+      allow delete: if isAdmin() || isTeacher();
 
       match /records/{recordId} {
-        allow read: if isAdmin() || (isSignedIn() && request.auth.uid == studentId);
-        allow write: if isAdmin();
+        allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(studentId));
+        allow create, update: if isAdmin() || isTeacher();
+        allow delete: if isAdmin() || isTeacher();
       }
+    }
+
+    match /student_enrollments/{enrollmentId} {
+      allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(resource.data.studentId) || (resource != null && resource.data.studentUid == request.auth.uid));
+      allow write: if isAdmin();
     }
 
     match /userCalendars/{userId} {
@@ -164,6 +270,18 @@ service cloud.firestore {
       match /{subpath=**} {
         allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       }
+    }
+
+    // ==========================================
+    // USER SESSIONS & LOGIN SECURITY
+    // Strict isolation: Each user can ONLY read and write their OWN sessions
+    // ==========================================
+
+    match /user_sessions/{sessionId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.userUid == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userUid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid;
+      allow delete: if false; // Append-only audit preservation; never delete session history
     }
 
     // ==========================================
@@ -214,17 +332,17 @@ service cloud.firestore {
 
     match /ledger_audit_logs/{logId} {
       // Immutable append-only audit trail: zero update or deletion
-      // Actor identity cannot be forged: caller must be admin and actor UID must match request.auth.uid
+      // Actor identity and target operation are strictly verified against authoritative state transition
       allow read: if isAdmin();
-      allow create: if isAdmin() && isValidAuditActor();
+      allow create: if isAdmin() && isValidAuditActor() && isValidAuditTarget();
       allow update, delete: if false;
     }
 
     match /audit_logs/{logId} {
       // Immutable append-only audit trail: zero update or deletion
-      // Actor identity cannot be forged: caller must be admin and actor UID must match request.auth.uid
+      // Actor identity and target operation are strictly verified against authoritative state transition
       allow read: if isAdmin();
-      allow create: if isAdmin() && isValidAuditActor();
+      allow create: if isAdmin() && isValidAuditActor() && isValidAuditTarget();
       allow update, delete: if false;
     }
 

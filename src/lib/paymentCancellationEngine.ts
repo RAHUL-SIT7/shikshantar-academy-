@@ -26,6 +26,7 @@ import {
 import { db, auth } from '../firebase';
 import { sanitizeForFirestore } from './firestoreSanitize';
 import { formatBSDate } from './nepaliDate';
+import { getAuthoritativeActor } from './auditLogger';
 
 export interface CancelPaymentParams {
   transactionId: string;
@@ -214,9 +215,14 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
     }
   });
 
-  // 9. Pre-allocate audit log references
-  const auditLogRef = doc(collection(firestore, 'ledger_audit_logs'));
-  const systemAuditLogRef = doc(collection(firestore, 'audit_logs'));
+  const resolvedPaymentGroup = paymentGroupId || `PAY_${params.transactionId}`;
+
+  // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
+  const authoritativeActor = await getAuthoritativeActor();
+
+  // 9. Pre-allocate deterministic audit log references
+  const auditLogRef = doc(firestore, 'ledger_audit_logs', resolvedPaymentGroup);
+  const systemAuditLogRef = doc(firestore, 'audit_logs', resolvedPaymentGroup);
 
   // 10. Execute the entire cancellation inside runTransaction for strict concurrency control
   return await runTransaction(firestore, async (t) => {
@@ -461,8 +467,6 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
     }
 
     // 8. Write Audit Logs atomically inside the transaction
-    const resolvedPaymentGroup = paymentGroupId || `PAY_${params.transactionId}`;
-    const actorUid = auth.currentUser?.uid || 'admin';
     const now = new Date();
     const bsDate = formatBSDate(now);
     const auditData = {
@@ -505,13 +509,13 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
       newValue: `Status: CANCELLED (Atomic Payment Undo) | Fees restored: ${feesRestoredCount} | Bills restored: ${billsRestoredCount}`,
       reason: params.reason || 'Instant payment undo within operator window with concurrency protection',
       result: 'SUCCESS',
-      actorUid: actorUid,
-      adminUid: actorUid,
-      actorName: params.adminName,
-      adminName: params.adminName,
-      actorRole: 'admin',
-      adminEmail: params.adminEmail,
-      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      actorUid: authoritativeActor.actorUid,
+      adminUid: authoritativeActor.adminUid,
+      actorName: authoritativeActor.actorName || params.adminName,
+      adminName: authoritativeActor.adminName || params.adminName,
+      actorRole: authoritativeActor.actorRole || 'admin',
+      adminEmail: authoritativeActor.adminEmail || params.adminEmail,
+      adminTier: authoritativeActor.adminTier || 'primary',
       date: bsDate,
       dateBS: bsDate,
       timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,

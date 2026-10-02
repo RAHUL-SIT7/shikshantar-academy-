@@ -3,6 +3,7 @@ import { CheckCircle2, Save, Loader2, AlertCircle } from 'lucide-react';
 import { StudentResult } from '../../data/resultsState';
 import { doc, writeBatch, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { recordAuditLog } from '../../lib/auditLogger';
 
 const CLASS_SUBJECTS: any = {
   'PG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
@@ -19,6 +20,31 @@ const CLASS_SUBJECTS: any = {
   '8': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
   '9': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Opt Math', 'Opt II'],
   '10': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Opt Math', 'Opt II']
+};
+
+export const getNepalGPA = (pct: number) => {
+    if (pct >= 90) return 4.0;
+    if (pct >= 80) return 3.6;
+    if (pct >= 70) return 3.2;
+    if (pct >= 60) return 2.8;
+    if (pct >= 50) return 2.4;
+    if (pct >= 40) return 2.0;
+    if (pct >= 35) return 1.6;
+    return 0.0;
+};
+
+export const getGrade = (marks: number | 'AB', fm: number, pm?: number) => {
+  if (marks === 'AB') return 'NG';
+  if (pm !== undefined && marks < pm) return 'NG';
+  const pct = (marks / fm) * 100;
+  if (pct >= 90) return 'A+';
+  if (pct >= 80) return 'A';
+  if (pct >= 70) return 'B+';
+  if (pct >= 60) return 'B';
+  if (pct >= 50) return 'C+';
+  if (pct >= 40) return 'C';
+  if (pct >= 30) return 'D';
+  return 'NG';
 };
 
 export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setStatus, userRole, assignedClasses, assignedSubjects, teacherProfile }: any) {
@@ -80,32 +106,6 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
     }
   }, [selectedClass, allSubjects, userRole, assignedSubjects, teacherProfile]);
 
-
-  const getNepalGPA = (pct: number) => {
-      if (pct >= 90) return 4.0;
-      if (pct >= 80) return 3.6;
-      if (pct >= 70) return 3.2;
-      if (pct >= 60) return 2.8;
-      if (pct >= 50) return 2.4;
-      if (pct >= 40) return 2.0;
-      if (pct >= 35) return 1.6;
-      return 0.0;
-  };
-
-  const getGrade = (marks: number | 'AB', fm: number, pm?: number) => {
-    if (marks === 'AB') return 'NG';
-    if (pm !== undefined && marks < pm) return 'NG';
-    const pct = (marks / fm) * 100;
-    if (pct >= 90) return 'A+';
-    if (pct >= 80) return 'A';
-    if (pct >= 70) return 'B+';
-    if (pct >= 60) return 'B';
-    if (pct >= 50) return 'C+';
-    if (pct >= 40) return 'C';
-    if (pct >= 30) return 'D';
-    return 'NG';
-  };
-
   useEffect(() => {
     if (!selectedClass || !examType) return;
 
@@ -118,7 +118,7 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
           let classStudents = usersSnap.docs.map(d => {
              const usr = d.data();
              let fallbackRoll = '';
-             let sId = usr.studentId || '';
+             let sId = usr.studentId || usr.permanentStudentId || '';
              
              if (!usr.rollNumber && !usr.rollNo && !!sId) {
                  const match = sId.match(/^SA\d+([A-Z]*\d*)*$/i);
@@ -137,9 +137,19 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
                  }
              }
 
+             const permId = usr.permanentStudentId || usr.studentId || d.id;
+             const emis = usr.emisNumber || usr.studentEmis || '';
+             const rollSnap = usr.rollNumber || usr.rollNo || fallbackRoll || '';
+
              return {
-                 studentId: d.id,
-                 schoolId: usr.rollNumber || usr.rollNo || fallbackRoll || usr.studentId || '',
+                 studentUid: d.id,
+                 studentId: permId,
+                 permanentStudentId: permId,
+                 studentEmis: emis,
+                 schoolId: rollSnap || permId,
+                 rollNumberSnapshot: rollSnap,
+                 rollNo: rollSnap,
+                 section: usr.section || 'A',
                  studentName: usr.fullName ? usr.fullName : (usr.firstName && usr.lastName ? `${usr.firstName} ${usr.lastName}` : (usr.email || 'Unknown'))
              };
           });
@@ -147,8 +157,18 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
           // Fallback if no students in users col: try the current results to prefill
           if (classStudents.length === 0) {
               const classResults = (data as StudentResult[]).filter(r => String(r.class) === selectedClass);
-              const uniqueStudentsMap = new Map<string, {studentId: string, schoolId: string, studentName: string}>();
-              classResults.forEach(r => uniqueStudentsMap.set(r.studentId, {studentId: r.studentId, schoolId: '', studentName: r.studentName}));
+              const uniqueStudentsMap = new Map<string, {studentUid: string, studentId: string, permanentStudentId?: string, studentEmis?: string, schoolId: string, rollNumberSnapshot?: string, rollNo?: string, section?: string, studentName: string}>();
+              classResults.forEach(r => uniqueStudentsMap.set(r.studentUid || r.studentId, {
+                studentUid: r.studentUid || r.studentId,
+                studentId: r.permanentStudentId || r.studentId,
+                permanentStudentId: r.permanentStudentId || r.studentId,
+                studentEmis: r.studentEmis || '',
+                schoolId: r.rollNo || r.rollNumberSnapshot || '',
+                rollNumberSnapshot: r.rollNo || r.rollNumberSnapshot || '',
+                rollNo: r.rollNo || r.rollNumberSnapshot || '',
+                section: r.section || 'A',
+                studentName: r.studentName
+              }));
               classStudents = Array.from(uniqueStudentsMap.values());
           }
           
@@ -444,7 +464,18 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
 
               if (Object.keys(finalMarksParams).length === 0) continue; // Skip empty
 
-              const existingIdx = (data as StudentResult[]).findIndex(r => r.studentId === std.studentId && r.examType === examType);
+              const primaryUid = std.studentUid || std.studentId;
+              const permId = std.permanentStudentId || std.studentId;
+              const emisVal = std.studentEmis || '';
+              const rollSnapshot = std.rollNo || std.rollNumberSnapshot || std.schoolId || '';
+              const sectionVal = std.section || 'A';
+              const acadYear = std.academicYear || new Date().getFullYear().toString();
+
+              const existingIdx = (data as StudentResult[]).findIndex(r => 
+                (r.studentUid && r.studentUid === primaryUid && r.examType === examType) ||
+                (r.studentId === permId && r.examType === examType) ||
+                (r.studentId === primaryUid && r.examType === examType)
+              );
               
               if (existingIdx >= 0) {
                   const rec = { ...data[existingIdx] };
@@ -468,24 +499,40 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
                       };
                       
                       updatedSubjects[subj] = updateData;
-                      const subjectDocId = `${examId}_${std.studentId}_${subj.replace(/\s+/g, '')}`;
+                      const subjectDocId = `${examId}_${primaryUid}_${subj.replace(/\s+/g, '')}`;
                       batch.set(doc(db, 'results', subjectDocId), {
-                          studentId: std.studentId,
+                          studentUid: primaryUid,
+                          studentId: permId,
+                          permanentStudentId: permId,
+                          studentEmis: emisVal,
                           examId: examId,
                           subject: subj,
                           marks: obtainedTotal,
                           fullMarks: tFM + pFM,
                           thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM
+                          thFull: tFM, prFull: pFM,
+                          class: String(rec.class || selectedClass),
+                          section: sectionVal,
+                          academicYear: acadYear,
+                          rollNo: rollSnapshot,
+                          rollNumberSnapshot: rollSnapshot
                       });
-                      batch.set(doc(db, 'results_secure', std.studentId, 'records', subjectDocId), {
-                          studentId: std.studentId,
+                      batch.set(doc(db, 'results_secure', primaryUid, 'records', subjectDocId), {
+                          studentUid: primaryUid,
+                          studentId: permId,
+                          permanentStudentId: permId,
+                          studentEmis: emisVal,
                           examId: examId,
                           subject: subj,
                           marks: obtainedTotal,
                           fullMarks: tFM + pFM,
                           thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM
+                          thFull: tFM, prFull: pFM,
+                          class: String(rec.class || selectedClass),
+                          section: sectionVal,
+                          academicYear: acadYear,
+                          rollNo: rollSnapshot,
+                          rollNumberSnapshot: rollSnapshot
                       });
                       opCount++;
                   });
@@ -503,14 +550,25 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
                   rec.grade = getGrade(t, ft); // Note: Simple sum grade
                   rec.gpa = getNepalGPA(rec.percentage);
                   rec.studentName = std.studentName || rec.studentName;
-                  rec.rollNo = std.schoolId || '00';
+                  rec.rollNo = rollSnapshot || '00';
+                  rec.rollNumberSnapshot = rollSnapshot || '00';
+                  rec.studentUid = primaryUid;
+                  rec.studentId = permId;
+                  rec.permanentStudentId = permId;
+                  rec.studentEmis = emisVal;
 
-                  const summaryDocId = `${examId}_${std.studentId}`;
+                  const summaryDocId = `${examId}_${primaryUid}`;
                   batch.set(doc(db, 'resultSummary', summaryDocId), {
-                      studentId: std.studentId,
+                      studentUid: primaryUid,
+                      studentId: permId,
+                      permanentStudentId: permId,
+                      studentEmis: emisVal,
                       studentName: rec.studentName,
-                      rollNo: rec.rollNo,
+                      rollNo: rollSnapshot || '00',
+                      rollNumberSnapshot: rollSnapshot || '00',
                       class: String(rec.class),
+                      section: sectionVal,
+                      academicYear: acadYear,
                       examId: examId,
                       examType: examType,
                       total: rec.total,
@@ -542,24 +600,40 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
                           thFull: tFM, prFull: pFM, 
                           thPass: Number(subjConfig.thPassMarks || 0), prPass: Number(subjConfig.prPassMarks || 0)
                       };
-                      const subjectDocId = `${examId}_${std.studentId}_${subj.replace(/\s+/g, '')}`;
+                      const subjectDocId = `${examId}_${primaryUid}_${subj.replace(/\s+/g, '')}`;
                       batch.set(doc(db, 'results', subjectDocId), {
-                          studentId: std.studentId,
+                          studentUid: primaryUid,
+                          studentId: permId,
+                          permanentStudentId: permId,
+                          studentEmis: emisVal,
                           examId: examId,
                           subject: subj,
                           marks: obtainedTotal,
                           fullMarks: tFM + pFM,
                           thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM
+                          thFull: tFM, prFull: pFM,
+                          class: String(std.Class || selectedClass),
+                          section: sectionVal,
+                          academicYear: acadYear,
+                          rollNo: rollSnapshot,
+                          rollNumberSnapshot: rollSnapshot
                       });
-                      batch.set(doc(db, 'results_secure', std.studentId, 'records', subjectDocId), {
-                          studentId: std.studentId,
+                      batch.set(doc(db, 'results_secure', primaryUid, 'records', subjectDocId), {
+                          studentUid: primaryUid,
+                          studentId: permId,
+                          permanentStudentId: permId,
+                          studentEmis: emisVal,
                           examId: examId,
                           subject: subj,
                           marks: obtainedTotal,
                           fullMarks: tFM + pFM,
                           thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM
+                          thFull: tFM, prFull: pFM,
+                          class: String(std.Class || selectedClass),
+                          section: sectionVal,
+                          academicYear: acadYear,
+                          rollNo: rollSnapshot,
+                          rollNumberSnapshot: rollSnapshot
                       });
                       opCount++;
                   });
@@ -572,10 +646,16 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
                   });
 
                   const newRec: StudentResult = {
-                      studentId: std.studentId,
+                      studentUid: primaryUid,
+                      studentId: permId,
+                      permanentStudentId: permId,
+                      studentEmis: emisVal,
                       studentName: std.studentName,
                       class: std.Class || selectedClass,
-                      rollNo: std.schoolId || '00',
+                      section: sectionVal,
+                      academicYear: acadYear,
+                      rollNo: rollSnapshot || '00',
+                      rollNumberSnapshot: rollSnapshot || '00',
                       examType: examType,
                       subjects: newSubjects,
                       total: t,
@@ -588,12 +668,18 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
                       classTeacherRemark: '' // added
                   };
                   
-                  const summaryDocId = `${examId}_${std.studentId}`;
+                  const summaryDocId = `${examId}_${primaryUid}`;
                   batch.set(doc(db, 'resultSummary', summaryDocId), {
-                      studentId: newRec.studentId,
+                      studentUid: primaryUid,
+                      studentId: permId,
+                      permanentStudentId: permId,
+                      studentEmis: emisVal,
                       studentName: newRec.studentName,
                       rollNo: newRec.rollNo,
+                      rollNumberSnapshot: newRec.rollNumberSnapshot,
                       class: String(newRec.class),
+                      section: sectionVal,
+                      academicYear: acadYear,
                       examId: examId,
                       examType: examType,
                       total: newRec.total,
@@ -622,6 +708,24 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
               } catch (e: any) {
                   throw new Error("Final batch commit failed: " + e.message);
               }
+          }
+
+          // Record audit log for mark entry
+          try {
+              await recordAuditLog({
+                  category: 'academic',
+                  actionType: 'MARK_ENTRY',
+                  targetType: 'class_exam_results',
+                  targetId: examId,
+                  studentClass: String(selectedClass),
+                  academicYear: new Date().getFullYear().toString(),
+                  reason: `Saved marks for Class ${selectedClass} - ${examType} (${students.length} students)`,
+                  previousValue: 'Draft/Unsaved state',
+                  newValue: `Marks saved for ${students.length} students in Class ${selectedClass}`,
+                  result: 'SUCCESS'
+              });
+          } catch (auditErr) {
+              console.warn('Audit logging failed for manual mark entry:', auditErr);
           }
 
           setStatus({type: 'success', message: `Class ${selectedClass} - ${examType} marks saved successfully!` });
@@ -672,6 +776,24 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
         batch.update(doc(db, 'exams', examId), { published: true });
         
         await batch.commit();
+
+        try {
+            await recordAuditLog({
+                category: 'academic',
+                actionType: 'EXAM_PUBLISHED',
+                targetType: 'class_exam_results',
+                targetId: examId,
+                studentClass: String(selectedClass),
+                academicYear: new Date().getFullYear().toString(),
+                reason: `Calculated ranks and published results for Class ${selectedClass} - ${examType}`,
+                previousValue: 'Draft/Unpublished',
+                newValue: `Published results for ${allStudents.length} students`,
+                result: 'SUCCESS'
+            });
+        } catch (auditErr) {
+            console.warn('Audit logging failed for exam publication:', auditErr);
+        }
+
         setStatus({type: 'success', message: `Results and Ranks Published successfully for Class ${selectedClass}.`});
         setPublishSuccessMessage(`Marks have been successfully published and ranks calculated for Class ${selectedClass}!`);
     } catch(err: any) {

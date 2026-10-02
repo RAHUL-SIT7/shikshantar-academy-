@@ -2,9 +2,44 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Camera, Edit2, Lock, MonitorSmartphone, Shield, CheckCircle2, ChevronRight, CircleUserRound, Check, X, Activity, GraduationCap, LogOut, AlertCircle, Eye, EyeOff, FileText, Banknote, Settings } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { doc, getDoc, updateDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, query, orderBy, limit, getDocs, where, onSnapshot } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useNavigate } from 'react-router-dom';
+
+function formatTimeAgo(isoString?: string): string {
+  if (!isoString) return 'Just now';
+  try {
+    const diffMs = Date.now() - new Date(isoString).getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return 'Just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin} min${diffMin > 1 ? 's' : ''} ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  } catch {
+    return 'Recently';
+  }
+}
+
+function formatActivityDate(isoString?: string): string {
+  if (!isoString) return 'Recent';
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleDateString('en-US', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    }) + ', ' + d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return isoString;
+  }
+}
 
 export default function AdminProfileView() {
   const [loading, setLoading] = useState(true);
@@ -19,6 +54,8 @@ export default function AdminProfileView() {
   const [dob, setDob] = useState('');
   const [address, setAddress] = useState('');
   const [gender, setGender] = useState('Male');
+  const [adminId, setAdminId] = useState('');
+  const [adminTier, setAdminTier] = useState('primary');
   
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [activities, setActivities] = useState<any[]>([]);
@@ -37,6 +74,16 @@ export default function AdminProfileView() {
   const [pwdError, setPwdError] = useState('');
   const [isActivityLogOpen, setIsActivityLogOpen] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState('Current Device');
+
+  // Real Sessions State
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+  const [confirmingRevokeSession, setConfirmingRevokeSession] = useState<string | null>(null);
+  const [confirmingLogoutAll, setConfirmingLogoutAll] = useState(false);
+  const [logoutAllLoading, setLogoutAllLoading] = useState(false);
+  const [sessionError, setSessionError] = useState('');
+  const currentSessionId = localStorage.getItem('localSessionId') || '';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -61,6 +108,8 @@ export default function AdminProfileView() {
 
     setDeviceInfo(`${browser} on ${os}`);
 
+    let unsubSessions = () => {};
+
     const fetchAdminData = async () => {
       if (auth.currentUser) {
         try {
@@ -75,6 +124,8 @@ export default function AdminProfileView() {
             setAddress(data.address || '');
             setGender(data.gender || 'Male');
             setAvatarUrl(data.avatarUrl || '');
+            setAdminId(data.permanentAdminId || data.adminId || data.staffId || 'ADM-000001');
+            setAdminTier(data.adminTier || (auth.currentUser?.email === 'rahulsah4534@gmail.com' ? 'primary' : 'secondary'));
             if (data.passwordUpdatedAt) {
               const d = new Date(data.passwordUpdatedAt);
               const diff = Math.floor((new Date().getTime() - d.getTime()) / (1000 * 3600 * 24));
@@ -88,18 +139,48 @@ export default function AdminProfileView() {
         }
 
         try {
-          // Fetch real recent activity from transactions
-          const txSnap = await getDocs(query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(15)));
-          const txActs = txSnap.docs.map(d => ({ type: 'fee', id: d.id, ...d.data() }));
-          
-          setActivities(txActs);
-        } catch(e) {
-          // Ignore
+          // Subscribe to user's real session security records
+          const qSessions = query(
+            collection(db, 'user_sessions'),
+            where('userUid', '==', auth.currentUser.uid)
+          );
+          unsubSessions = onSnapshot(qSessions, (snap) => {
+            const sList: any[] = [];
+            snap.forEach(docSnap => {
+              sList.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            sList.sort((a, b) => new Date(b.loginAt || 0).getTime() - new Date(a.loginAt || 0).getTime());
+            setSessions(sList);
+            setSessionsLoading(false);
+
+            // Populate recent activity from real login records
+            const loginActs = sList.map(s => ({
+              id: s.id,
+              action: 'LOGIN',
+              device: s.compositeName || `${s.browser || 'Browser'} on ${s.operatingSystem || 'OS'}`,
+              location: s.approximateLocation || 'Location unavailable',
+              ip: s.ipAddress || 'Unknown',
+              dateStr: formatActivityDate(s.loginAt),
+              rawDate: s.loginAt,
+              status: s.status
+            }));
+            setActivities(loginActs);
+          }, (err) => {
+            console.warn("Could not load user sessions:", err);
+            setSessionsLoading(false);
+          });
+        } catch (err) {
+          console.warn("Error setting up sessions listener:", err);
+          setSessionsLoading(false);
         }
       }
       setLoading(false);
     };
+
     fetchAdminData();
+    return () => {
+      unsubSessions();
+    };
   }, []);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -211,22 +292,93 @@ export default function AdminProfileView() {
   };
 
   const handleLogoutAllOtherDevices = async () => {
-    if (window.confirm("Are you sure you want to log out from all other devices? You will remain logged in on this device.")) {
-       if (auth.currentUser) {
-          try {
-            const localSessionId = localStorage.getItem('localSessionId');
-            if (localSessionId) {
-               await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-                  activeSessions: [localSessionId]
-               });
-               setSuccessToast('Successfully logged out from all other active sessions.');
-            }
-          } catch(e) {
-             console.error(e);
-             setPwdError('Failed to logout other devices. Please try again.');
-          }
-       }
-       setTimeout(() => setSuccessToast(''), 4000);
+    setConfirmingLogoutAll(false);
+    setSessionError('');
+    if (!auth.currentUser) {
+      setSessionError('Authentication required.');
+      return;
+    }
+
+    setLogoutAllLoading(true);
+    try {
+      const localSessionId = localStorage.getItem('localSessionId') || '';
+      const token = await auth.currentUser.getIdToken();
+      const res = await fetch('/api/auth/logout-other-sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ currentSessionId: localSessionId })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('Successfully logged out from all other active sessions.');
+        // Optimistically prune remote sessions immediately
+        setSessions(prev => prev.map(s => 
+          (s.sessionId === localSessionId || s.id === localSessionId)
+            ? s
+            : { ...s, status: 'REVOKED', revokedAt: new Date().toISOString() }
+        ));
+      } else {
+        setSessionError(data.error || 'Failed to logout other devices. Please try again.');
+      }
+    } catch (e: any) {
+      console.error('[SECURITY] Error logging out other devices:', e);
+      setSessionError('Failed to logout other devices. Please try again.');
+    } finally {
+      setLogoutAllLoading(false);
+    }
+  };
+
+  const handleRevokeSession = async (targetSessionId: string) => {
+    setConfirmingRevokeSession(null);
+    setSessionError('');
+    if (!targetSessionId) return;
+
+    if (currentSessionId && (targetSessionId === currentSessionId)) {
+      setSessionError('Cannot revoke current active session on this device.');
+      return;
+    }
+
+    if (!auth.currentUser) {
+      setSessionError('Authentication required.');
+      return;
+    }
+
+    setRevokingSessionId(targetSessionId);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const res = await fetch('/api/auth/revoke-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          sessionId: targetSessionId,
+          currentSessionId
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('Session revoked successfully.');
+        // Optimistically update sessions state immediately
+        setSessions(prev => prev.map(s => 
+          (s.sessionId === targetSessionId || s.id === targetSessionId)
+            ? { ...s, status: 'REVOKED', revokedAt: new Date().toISOString() }
+            : s
+        ));
+      } else {
+        setSessionError(data.error || 'Unable to revoke this session. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('[SECURITY] Error revoking session:', err);
+      setSessionError('Unable to revoke this session. Please try again.');
+    } finally {
+      setRevokingSessionId(null);
     }
   };
 
@@ -302,9 +454,19 @@ export default function AdminProfileView() {
          <div className="flex-1 relative z-10">
             <div className="flex flex-col md:flex-row md:items-center gap-3 mb-1">
                <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight">{fullName}</h1>
-               <span className="bg-white border-primary text-primary text-[10px] uppercase font-black tracking-widest px-2.5 py-1 rounded-full border border-gray-200 shadow-sm w-max">
-                 ADMIN
-               </span>
+               <div className="flex items-center gap-2 flex-wrap">
+                 <span className="bg-white border-primary text-primary text-[10px] uppercase font-black tracking-widest px-2.5 py-1 rounded-full border border-gray-200 shadow-sm w-max">
+                   ADMIN
+                 </span>
+                 {adminId && (
+                   <span className="bg-white/20 text-white text-xs font-mono font-bold px-3 py-1 rounded-full border border-white/30 backdrop-blur-sm">
+                     Admin ID: {adminId}
+                   </span>
+                 )}
+                 <span className="bg-orange-600/80 text-white text-xs font-bold px-3 py-1 rounded-full border border-orange-400/40">
+                   {adminTier === 'primary' ? '1° Primary Admin' : '2° Secondary Admin'}
+                 </span>
+               </div>
             </div>
             <p className="text-gray-300 font-medium text-sm mb-4">School Administrator • Shikshantar Academy | Siraha</p>
 
@@ -441,8 +603,12 @@ export default function AdminProfileView() {
                  <span className="text-xs font-bold border-primary text-primary bg-blue-50 border border-blue-100 px-2 py-0.5 rounded uppercase">Admin</span>
                </div>
                <div>
-                 <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Employee ID</p>
-                 <p className="text-sm font-bold text-gray-900">EMP-001</p>
+                 <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Admin ID</p>
+                 <p className="text-sm font-mono font-bold text-gray-900">{adminId || 'ADM-000001'}</p>
+               </div>
+               <div>
+                 <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Governance Tier</p>
+                 <p className="text-sm font-bold text-orange-600">{adminTier === 'primary' ? '1° Primary Admin' : '2° Secondary Admin'}</p>
                </div>
                <div>
                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Position</p>
@@ -576,46 +742,118 @@ export default function AdminProfileView() {
 
               {/* Right Side: Sessions */}
               <div className="flex-1 md:pt-0 pt-6 md:border-t-0 border-t border-gray-100">
-                 <h3 className="text-sm font-bold text-gray-900 mb-4">Active Sessions</h3>
-                 <div className="space-y-3">
-                    <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3 flex gap-3 items-start">
-                       <MonitorSmartphone className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-                       <div>
-                          <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                            {deviceInfo}
-                            <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">This device</span>
-                          </p>
-                          <p className="text-xs text-gray-500 font-medium">Active now</p>
-                       </div>
-                    </div>
+                 <div className="flex items-center justify-between mb-4">
+                   <h3 className="text-sm font-bold text-gray-900">Active Sessions</h3>
+                   <span className="text-[11px] font-bold text-gray-500">
+                     {sessions.filter(s => s.status === 'ACTIVE').length || 1} active
+                   </span>
                  </div>
 
-                 <button onClick={handleLogoutAllOtherDevices} className="mt-5 w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 text-sm font-bold px-4 py-2.5 rounded-lg flex justify-center items-center gap-2 transition-colors">
-                    <LogOut className="w-4 h-4" /> Logout All Other Devices
+                 {sessionError && (
+                   <div className="p-3 bg-red-50 text-red-700 text-xs font-bold rounded-lg border border-red-200 flex justify-between items-center mb-3">
+                     <span>{sessionError}</span>
+                     <button type="button" onClick={() => setSessionError('')} className="text-red-500 hover:text-red-800 text-sm font-black cursor-pointer">×</button>
+                   </div>
+                 )}
+
+                 <div className="space-y-3">
+                   {sessions.filter(s => s.status === 'ACTIVE').map((s) => {
+                     const isThisDevice = s.sessionId === currentSessionId || s.id === currentSessionId;
+                     return (
+                       <div key={s.id || s.sessionId} className={`border rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 transition-all ${isThisDevice ? 'bg-blue-50/50 border-blue-200' : 'bg-white border-gray-200'}`}>
+                         <div className="flex gap-3 items-start">
+                           <MonitorSmartphone className={`w-5 h-5 mt-0.5 shrink-0 ${isThisDevice ? 'text-primary' : 'text-gray-400'}`} />
+                           <div className="space-y-0.5">
+                             <p className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                               {s.browser || 'Browser'} on {s.operatingSystem || 'OS'}
+                               {isThisDevice && (
+                                 <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">THIS DEVICE</span>
+                               )}
+                             </p>
+                             <p className="text-xs text-gray-500 font-medium">
+                               {isThisDevice ? 'Active now' : `Active ${formatTimeAgo(s.lastActiveAt || s.loginAt)}`}
+                             </p>
+                             <p className="text-[11px] text-gray-600">
+                               Approximate location: <strong className="font-semibold text-gray-800">{s.approximateLocation || 'Location unavailable'}</strong>
+                             </p>
+                             <p className="text-[11px] text-gray-400 font-mono">
+                               IP: {s.ipAddress || 'Unknown'} • Last active: {formatTimeAgo(s.lastActiveAt || s.loginAt)}
+                             </p>
+                           </div>
+                         </div>
+                         {!isThisDevice && (
+                           <button
+                             type="button"
+                             onClick={() => setConfirmingRevokeSession(s.sessionId || s.id)}
+                             disabled={revokingSessionId === (s.sessionId || s.id)}
+                             className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                           >
+                             {revokingSessionId === (s.sessionId || s.id) ? 'Revoking...' : 'REVOKE'}
+                           </button>
+                         )}
+                       </div>
+                     );
+                   })}
+
+                   {sessions.filter(s => s.status === 'ACTIVE').length === 0 && (
+                     <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3 flex gap-3 items-start">
+                       <MonitorSmartphone className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+                       <div>
+                         <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                           {deviceInfo}
+                           <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">THIS DEVICE</span>
+                         </p>
+                         <p className="text-xs text-gray-500 font-medium">Active now</p>
+                       </div>
+                     </div>
+                   )}
+                 </div>
+
+                 <button 
+                   type="button"
+                   onClick={() => setConfirmingLogoutAll(true)} 
+                   disabled={logoutAllLoading}
+                   className="mt-5 w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 text-sm font-bold px-4 py-2.5 rounded-lg flex justify-center items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+                 >
+                   <LogOut className="w-4 h-4" /> {logoutAllLoading ? 'Logging out other devices...' : 'Logout All Other Devices'}
                  </button>
               </div>
            </div>
         </div>
       </div>
 
-      {/* SECTION 4: RECENT ACTIVITY (Admin Only) */}
+      {/* SECTION 4: RECENT ACTIVITY */}
       <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.08)] overflow-hidden mb-6">
-        <div className="p-5 border-b border-gray-100 text-primary">
+        <div className="p-5 border-b border-gray-100 text-primary flex items-center justify-between">
            <h2 className="text-[15px] font-bold text-gray-900 flex items-center gap-2">
               <Activity className="w-5 h-5 text-primary" /> Recent Activity
            </h2>
+           <span className="text-xs font-bold text-gray-400">Login & Session Events</span>
         </div>
         <div className="p-2 md:p-4">
            {/* Timeline */}
            <div className="relative pl-4 pr-4 py-2">
               <div className="absolute left-6 top-6 bottom-6 w-px bg-gray-200"></div>
               
-              {activities.slice(0,5).map((act, i) => (
-                <div className={`relative flex gap-4 items-start ${i < activities.slice(0,5).length - 1 ? 'mb-6' : ''}`} key={act.id}>
-                   <div className="w-4 h-4 rounded-full border-2 border-white bg-emerald-500 shadow-sm shrink-0 mt-1 relative z-10"></div>
+              {activities.slice(0, 5).map((act, i) => (
+                <div className={`relative flex gap-4 items-start ${i < activities.slice(0, 5).length - 1 ? 'mb-6' : ''}`} key={act.id}>
+                   <div className="w-4 h-4 rounded-full border-2 border-white bg-blue-600 shadow-sm shrink-0 mt-1 relative z-10"></div>
                    <div>
-                     <p className="text-sm font-bold text-gray-800">Recorded fee payment for {act.studentName} (NRs. {(act.amount||0).toLocaleString()})</p>
-                     <p className="text-[11px] font-bold text-gray-400 mt-0.5 uppercase">{act.date} • {act.method}</p>
+                     <div className="flex items-center gap-2">
+                       <span className="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
+                         {act.action}
+                       </span>
+                       <span className="text-sm font-bold text-gray-900">{act.device}</span>
+                     </div>
+                     <p className="text-xs text-gray-600 mt-1">
+                       Approximate Location: <strong className="font-semibold text-gray-800">{act.location}</strong>
+                     </p>
+                     <p className="text-xs text-gray-500 font-mono mt-0.5">
+                       IP: {act.ip}
+                     </p>
+                     <p className="text-[11px] font-bold text-gray-400 mt-1">
+                       {act.dateStr}
+                     </p>
                    </div>
                 </div>
               ))}
@@ -625,7 +863,11 @@ export default function AdminProfileView() {
            </div>
         </div>
         <div className="border-t border-gray-100 p-4">
-           <button onClick={() => setIsActivityLogOpen(true)} className="text-sm font-bold text-primary hover:text-blue-700 flex items-center gap-1 mx-auto">
+           <button 
+             type="button"
+             onClick={() => setIsActivityLogOpen(true)} 
+             className="text-sm font-bold text-primary hover:text-blue-700 flex items-center gap-1 mx-auto cursor-pointer"
+           >
              View Full Activity Log <ChevronRight className="w-4 h-4" />
            </button>
         </div>
@@ -662,12 +904,13 @@ export default function AdminProfileView() {
                 </div>
                 <div>
                   <h3 className="text-xl font-black text-gray-900">Activity Log</h3>
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-0.5">Your recent system actions</p>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-0.5">Your recent system login & session actions</p>
                 </div>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsActivityLogOpen(false)}
-                className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
+                className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -677,12 +920,25 @@ export default function AdminProfileView() {
                <div className="relative border-l-2 border-gray-100 pl-6 ml-3 space-y-8">
                  {activities.length > 0 ? activities.map(act => (
                    <div className="relative" key={act.id}>
-                      <div className="absolute -left-[31px] top-1 rounded-full border-4 border-white bg-emerald-500 p-1.5 shadow-sm">
-                        <Banknote className="w-3 h-3 text-white" />
+                      <div className="absolute -left-[31px] top-1 rounded-full border-4 border-white bg-blue-600 p-1.5 shadow-sm">
+                        <MonitorSmartphone className="w-3 h-3 text-white" />
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-gray-800">Recorded fee payment of रू {(act.amount||0).toLocaleString()} for {act.studentName}</p>
-                        <p className="text-[11px] font-bold text-gray-400 mt-0.5 uppercase tracking-wider">{act.date} • {act.method}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
+                            {act.action}
+                          </span>
+                          <span className="text-sm font-bold text-gray-900">{act.device}</span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Approximate Location: <strong className="font-semibold text-gray-800">{act.location}</strong>
+                        </p>
+                        <p className="text-xs text-gray-500 font-mono mt-0.5">
+                          IP: {act.ip}
+                        </p>
+                        <p className="text-[11px] font-bold text-gray-400 mt-1">
+                          {act.dateStr}
+                        </p>
                       </div>
                    </div>
                  )) : (
@@ -692,11 +948,76 @@ export default function AdminProfileView() {
              </div>
             <div className="px-6 py-4 text-primary border-t border-gray-100 flex justify-end shrink-0">
                <button 
+                 type="button"
                  onClick={() => setIsActivityLogOpen(false)}
-                 className="px-5 py-2.5 bg-gray-200 text-gray-700 font-bold rounded-xl text-sm hover:bg-gray-300 transition-colors"
+                 className="px-5 py-2.5 bg-gray-200 text-gray-700 font-bold rounded-xl text-sm hover:bg-gray-300 transition-colors cursor-pointer"
                >
                  Close
                </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Modal: Confirm Revoke Session */}
+      {confirmingRevokeSession && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-gray-900 text-center mb-1">Revoke Session</h3>
+            <p className="text-xs text-gray-500 text-center mb-6 leading-relaxed">
+              Are you sure you want to revoke this session? That device will immediately lose application access.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmingRevokeSession(null)}
+                className="flex-1 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRevokeSession(confirmingRevokeSession)}
+                disabled={revokingSessionId === confirmingRevokeSession}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-sm shadow-red-200 disabled:opacity-50"
+              >
+                {revokingSessionId === confirmingRevokeSession ? 'Revoking...' : 'Revoke'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Modal: Confirm Logout All Other Devices */}
+      {confirmingLogoutAll && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <LogOut className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-gray-900 text-center mb-1">Logout All Other Devices</h3>
+            <p className="text-xs text-gray-500 text-center mb-6 leading-relaxed">
+              Are you sure you want to log out from all other devices? You will remain logged in on this device.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmingLogoutAll(false)}
+                className="flex-1 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleLogoutAllOtherDevices}
+                disabled={logoutAllLoading}
+                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-sm shadow-red-200 disabled:opacity-50"
+              >
+                {logoutAllLoading ? 'Logging out...' : 'Logout All'}
+              </button>
             </div>
           </div>
         </div>

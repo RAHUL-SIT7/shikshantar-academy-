@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { formatBSDate } from '../../lib/nepaliDate';
+import { formatBSDate, getBSYearMonthDate } from '../../lib/nepaliDate';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { FileDown, Users, TrendingUp, DollarSign } from 'lucide-react';
+import { FileDown, Users, TrendingUp, DollarSign, CheckCircle, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { exportToExcel } from '../../lib/excelExport';
 import { exportToPDF } from '../../lib/pdfExport';
@@ -12,6 +12,7 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#a855f7', '#ec4899'
 
 
 export default function ReportsAnalyticsTab({ students, transactions }: { students: any[], transactions: any[] }) {
+  const [alertNotice, setAlertNotice] = useState<string | null>(null);
 
   // Aggregations
   
@@ -48,19 +49,27 @@ export default function ReportsAnalyticsTab({ students, transactions }: { studen
      return (a.class || '').localeCompare(b.class || '');
   });
 
-  const totalCollectedSum = classData.reduce((acc, x) => acc + x.paid, 0);
-  const totalDueSum = classData.reduce((acc, x) => acc + x.due, 0);
+  // Use pure institutional data only — zero mock fallback
+  const finalClassData = classData;
 
-  const finalClassData = (classData.length > 0 && (totalCollectedSum > 0 || totalDueSum > 0)) ? classData : [
-    { class: 'Nursery', paid: 45000, due: 12000 },
-    { class: 'LKG', paid: 62000, due: 15000 },
-    { class: 'UKG', paid: 58000, due: 18000 },
-    { class: '1', paid: 88000, due: 22000 },
-    { class: '2', paid: 95000, due: 25000 },
-    { class: '3', paid: 78000, due: 30000 },
-    { class: '4', paid: 92000, due: 28000 },
-    { class: '5', paid: 84000, due: 20000 }
-  ];
+  // Helper to filter transactions belonging to current BS billing month
+  const isCurrentBSMonth = (t: any) => {
+     if (!t?.date) return false;
+     const { year: currentBSYear, month: currentBSMonth } = getBSYearMonthDate();
+     const dStr = String(t.date).split('T')[0];
+     const parts = dStr.split(/[-/]/).map(Number);
+     if (parts.length >= 2 && parts[0] > 2040) {
+        const y = parts[0];
+        const m = parts[1] - 1; // 0-indexed month
+        return y === currentBSYear && m === currentBSMonth;
+     }
+     try {
+        const parsed = getBSYearMonthDate(new Date(t.date));
+        return parsed.year === currentBSYear && parsed.month === currentBSMonth;
+     } catch {
+        return false;
+     }
+  };
 
   const exportMonthlyReport = async () => {
     const columns = [
@@ -72,9 +81,8 @@ export default function ReportsAnalyticsTab({ students, transactions }: { studen
        { header: 'Amount', key: 'amount', width: 15 }
     ];
     
-    const currentMonth = new Date().getMonth();
     const exportData = transactions
-       .filter(t => new Date(t.date).getMonth() === currentMonth)
+       .filter(isCurrentBSMonth)
        .map(t => ({
           date: formatBSDate(t.date) || '',
           receiptNo: t.receiptNo || '',
@@ -90,9 +98,8 @@ export default function ReportsAnalyticsTab({ students, transactions }: { studen
   const exportMonthlyReportPDF = async () => {
     const columns = ['Date', 'Receipt No', 'Student', 'Class', 'Method', 'Amount'];
     
-    const currentMonth = new Date().getMonth();
     const exportData = transactions
-       .filter(t => new Date(t.date).getMonth() === currentMonth)
+       .filter(isCurrentBSMonth)
        .map(t => [
           formatBSDate(t.date) || '-',
           t.receiptNo || t.receipt || t.id || '-',
@@ -196,8 +203,19 @@ export default function ReportsAnalyticsTab({ students, transactions }: { studen
                <h3 className="text-base font-black text-gray-800">Defaulters List</h3>
                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Students with outstanding dues</p>
              </div>
-             <button onClick={() => window.alert('Bulk reminders have been sent to all defaulters.')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-700">Send Bulk Reminders</button>
+             <button onClick={() => setAlertNotice('Bulk reminders have been queued for all defaulters.')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-700">Send Bulk Reminders</button>
           </div>
+          {alertNotice && (
+             <div className="mx-6 mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-800 font-bold">
+                <span className="flex items-center gap-2">
+                   <CheckCircle className="w-4 h-4 text-emerald-600" />
+                   {alertNotice}
+                </span>
+                <button onClick={() => setAlertNotice(null)} className="text-emerald-600 hover:text-emerald-900">
+                   <X className="w-4 h-4" />
+                </button>
+             </div>
+          )}
           <div className="overflow-x-auto custom-scrollbar pb-2">
              <table className="w-full text-left whitespace-nowrap min-w-[650px]">
                 <thead className="bg-white">

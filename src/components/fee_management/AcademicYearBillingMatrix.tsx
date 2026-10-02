@@ -120,8 +120,11 @@ export default function AcademicYearBillingMatrix({
   // Filter student rows
   const filteredStudents = useMemo(() => {
     return classStudents.filter(s => {
-      const nameMatch = (s.fullName || s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (s.rollNumber || s.studentId || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const q = searchTerm.toLowerCase();
+      const nameMatch = (s.fullName || s.name || '').toLowerCase().includes(q) ||
+        (s.rollNumber || s.rollNo || '').toLowerCase().includes(q) ||
+        (s.studentId || s.permanentStudentId || '').toLowerCase().includes(q) ||
+        (s.emisNumber || s.studentEmis || '').toLowerCase().includes(q);
       if (!nameMatch) return false;
 
       if (statusFilter === 'all') return true;

@@ -58,7 +58,8 @@ import {
   FirestoreBillingVerificationResult,
   BillItem
 } from '../../lib/firestoreBillVerification';
-import { generateSingleStudentBillTransactionally } from '../../lib/atomicBillingTransactionEngine';
+import { generateSingleStudentBillTransactionally, releaseBillUniquenessLocks } from '../../lib/atomicBillingTransactionEngine';
+import { executeCashFeePayment, parseMonthsFromBillingPeriod } from '../../lib/cashPaymentEngine';
 import { sanitizeForFirestore, validateRemitBillPayload } from '../../lib/firestoreSanitize';
 import { allocateBatchDocumentNumbers, allocateNextDocumentNumber } from '../../lib/documentNumberingEngine';
 import AcademicYearBillingMatrix from './AcademicYearBillingMatrix';
@@ -1322,7 +1323,7 @@ export default function RemitBillsGeneratorTab({
     }
   };
 
-  // Process receipt / pay guardian bill cash deposit with sequential month-by-month full clearance first
+  // Process receipt / pay guardian bill cash deposit with canonical atomic payment engine
   const handlePayRemitBill = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!payingBill) return;
@@ -1339,283 +1340,60 @@ export default function RemitBillsGeneratorTab({
     }
 
     try {
-      const batch = writeBatch(db);
-      const currentBS = formatBSDate(new Date());
-      const sysEmail = localStorage.getItem('userEmail') || 'Cash Counter';
+      const targetStudent = students.find(s => s.id === payingBill.studentId) || {
+        id: payingBill.studentId,
+        studentId: payingBill.studentId,
+        name: payingBill.studentName,
+        fullName: payingBill.studentName,
+        class: payingBill.class,
+        rollNumber: payingBill.studentRoll || '-'
+      };
 
-      // Gather all unpaid or partial remit bills for this student sorted chronologically (oldest first)
-      const allStudentUnpaidRemits = remitBills.filter(
-        b => b.studentId === payingBill.studentId && (b.status === 'pending' || b.status === 'partial')
-      ).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-
-      // Ensure payingBill is included
-      const billsMap = new Map();
-      allStudentUnpaidRemits.forEach(b => billsMap.set(b.id, b));
-      billsMap.set(payingBill.id, payingBill);
-      
-      const billsToSettle = Array.from(billsMap.values()).sort((a: any, b: any) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+      const billTotal = Number(payingBill.totalAmount || 0);
+      const alreadyPaid = Number(payingBill.paidAmount || 0);
+      const netPayable = Math.max(0, billTotal - alreadyPaid);
+      const operatorName = formatIssuedBy(adminName);
+      const operatorUid = auth.currentUser?.uid || 'system';
       const allocatedReceiptNo = await allocateNextDocumentNumber('RCP', payingBill?.academicYear || currentAcademicYear);
-      const paymentGroupId = `PAY_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-      let remainingCashToApply = paidCash;
-      let totalAppliedToBills = 0;
-      let index = 0;
-      let primaryTxnId = '';
-
-      for (const bill of billsToSettle) {
-        if (remainingCashToApply <= 0) break;
-
-        const billTotal = bill.totalAmount;
-        const alreadyPaid = bill.paidAmount || 0;
-        const billDue = Math.max(0, billTotal - alreadyPaid);
-
-        if (billDue <= 0) continue;
-
-        const amountForThisBill = Math.min(billDue, remainingCashToApply);
-        remainingCashToApply -= amountForThisBill;
-        totalAppliedToBills += amountForThisBill;
-
-        const newPaidAmount = alreadyPaid + amountForThisBill;
-        const newStatus = newPaidAmount >= billTotal ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'pending');
-        const receiptNo = index === 0 ? allocatedReceiptNo : `${allocatedReceiptNo}-${index + 1}`;
-        index++;
-
-        // 1. Update Remit Bill document with partial/full paid status
-        const remitDocRef = doc(db, 'remitBills', bill.id);
-        batch.update(remitDocRef, sanitizeForFirestore({
-          status: newStatus,
-          paidAmount: newPaidAmount,
-          transactionId: receiptNo,
-          paymentGroupId: paymentGroupId,
-          paidAt: currentBS,
-          updatedAt: serverTimestamp()
-        }));
-
-        // 2. Create transaction receipt
-        const txnRef = doc(collection(db, 'transactions'));
-        if (!primaryTxnId) {
-          primaryTxnId = txnRef.id;
-        }
-        batch.set(txnRef, sanitizeForFirestore({
-          id: txnRef.id,
-          date: currentBS,
-          receipt: receiptNo,
-          receiptNo: receiptNo,
-          studentId: bill.studentId,
-          studentName: bill.studentName,
-          class: bill.class,
-          amount: amountForThisBill,
-          method: 'Cash',
-          collectedBy: sysEmail,
-          status: 'SUCCESS',
-          paymentGroupId: paymentGroupId,
-          sourceTransactionId: txnRef.id,
-          transactionType: 'FEE_PAYMENT',
-          remarks: `Remit Bill Clearance - ${bill.billNo} (${bill.billingPeriod}) - Cash Received NRs. ${paidCash.toLocaleString()}${newStatus === 'partial' ? ' (Partial Month Clearance)' : ''} - ${paymentRemarks || 'Direct Counter Clearance'}`,
-          discount: 0,
-          additionalCharge: 0,
-          ledgerPageNo: 'RMT-LEDGER',
-          isHandwrittenMode: false,
-          timestamp: serverTimestamp(),
-          remitBillId: bill.id
-        }));
-
-        // 3. Human-like Sequential Month-by-Month Clearance:
-        // Identify the exact covered months for this bill
-        const monthsList = (bill.coveredMonths && bill.coveredMonths.length > 0)
-          ? bill.coveredMonths
-          : extractCoveredMonthsFromBill(bill);
-
-        // Separate back dues / arrears from regular monthly charges
-        const arrearsItem = bill.itemizedCharges.find(it => 
-          it.name.includes('Arrears') || it.name.includes('Outstanding') || it.name.includes('Back Dues')
-        );
-        const monthlyItems = bill.itemizedCharges.filter(it => 
-          !it.name.includes('Arrears') && !it.name.includes('Outstanding') && !it.name.includes('Back Dues')
-        );
-
-        let cashForBillItems = amountForThisBill;
-
-        // Step 3a: Clear back dues first if present
-        if (arrearsItem && cashForBillItems > 0) {
-          const arrearsDue = Number(arrearsItem.total || 0);
-          const payArrears = Math.min(arrearsDue, cashForBillItems);
-          cashForBillItems -= payArrears;
-
-          const targetStudent = students.find(s => s.id === bill.studentId);
-          if (targetStudent && Array.isArray(targetStudent.fees)) {
-            const dueRecords = targetStudent.fees
-              .filter((f: any) => f.status === 'due' || f.status === 'partial')
-              .sort((a: any, b: any) => MONTHS.indexOf(a.month) - MONTHS.indexOf(b.month));
-
-            let remArrearsPay = payArrears;
-            dueRecords.forEach((f: any) => {
-              if (remArrearsPay <= 0) return;
-              const dueAmt = f.dueAmount !== undefined ? f.dueAmount : (f.totalFee || 0);
-              const payNow = Math.min(dueAmt, remArrearsPay);
-              remArrearsPay -= payNow;
-
-              const feeId = `${bill.studentId}_${f.month.replace(/\s+/g,'')}_${f.type.replace(/\s+/g,'')}`;
-              const feeRef = doc(db, 'studentFees', feeId);
-              const newFPaid = (f.paidAmount || 0) + payNow;
-              const newFDue = Math.max(0, dueAmt - payNow);
-              batch.set(feeRef, sanitizeForFirestore({
-                paidAmount: newFPaid,
-                dueAmount: newFDue,
-                status: newFDue <= 0 ? 'paid' : 'partial',
-                transactionId: txnRef.id,
-                receiptNo: receiptNo,
-                paidAt: new Date().toISOString()
-              }), { merge: true });
-            });
-          }
-        }
-
-        // Step 3b: Clear Month 1 in full, then Month 2 in full, then Month 3...
-        // For each covered month, calculate all charges belonging to that month
-        const totalMonths = Math.max(1, monthsList.length);
-
-        monthsList.forEach((monthName, monthIdx) => {
-          if (cashForBillItems <= 0) return;
-
-          // Process each monthly item for this month
-          monthlyItems.forEach((item) => {
-            if (cashForBillItems <= 0) return;
-
-            let fType = 'Other Fee';
-            if (item.name.includes('Tuition')) fType = 'Tuition Fee';
-            else if (item.name.includes('Computer')) fType = 'Computer Fee';
-            else if (item.name.includes('Transport')) fType = 'Transportation Fee';
-            else if (item.name.includes('Academy') || item.name.includes('Sports')) fType = 'Academy Fee';
-            else if (item.name.includes('Annual')) fType = 'Annual Fee';
-            else if (item.name.includes('Admission')) fType = 'Admission Fee';
-            else if (item.name.includes('Exam')) fType = 'Terminal Exam Fee';
-            else fType = item.name;
-
-            // Determine rate for this specific month
-            const isOneTime = fType === 'Annual Fee' || fType === 'Admission Fee';
-            if (isOneTime && monthIdx > 0) {
-              return; // One-time fees belong to Month 1
-            }
-
-            const itemMonthlyRate = isOneTime
-              ? Number(item.total || item.rate || 0)
-              : Number(item.rate || (item.total / totalMonths));
-
-            const feeId = isOneTime
-              ? `${bill.studentId}_${bill.academicYear || currentAcademicYear}_${fType.replace(/\s+/g,'')}`
-              : `${bill.studentId}_${monthName.replace(/\s+/g,'')}_${fType.replace(/\s+/g,'')}`;
-
-            const feeRef = doc(db, 'studentFees', feeId);
-            const payThisItem = Math.min(itemMonthlyRate, cashForBillItems);
-            cashForBillItems -= payThisItem;
-
-            batch.set(feeRef, sanitizeForFirestore({
-              studentId: bill.studentId,
-              month: monthName,
-              academicYear: bill.academicYear || currentAcademicYear,
-              type: fType,
-              totalFee: itemMonthlyRate,
-              paidAmount: payThisItem,
-              dueAmount: Math.max(0, itemMonthlyRate - payThisItem),
-              status: payThisItem >= itemMonthlyRate ? 'paid' : (payThisItem > 0 ? 'partial' : 'due'),
-              transactionId: txnRef.id,
-              receiptNo: receiptNo,
-              paidAt: new Date().toISOString()
-            }), { merge: true });
-          });
-        });
-      }
-
-      // Step 4: Handle Excess Cash Tendered (Overpayment) or Pure Advance Deposit
-      const excessCash = remainingCashToApply;
-      let advanceNote = '';
-      if (excessCash > 0) {
-        if (excessDecision === 'ADVANCE') {
-          // If no bills were settled (pure advance deposit), create an explicit ADVANCE_DEPOSIT transaction document
-          if (!primaryTxnId) {
-            const advTxnRef = doc(collection(db, 'transactions'));
-            primaryTxnId = advTxnRef.id;
-            batch.set(advTxnRef, sanitizeForFirestore({
-              id: advTxnRef.id,
-              date: currentBS,
-              receipt: allocatedReceiptNo,
-              receiptNo: allocatedReceiptNo,
-              studentId: payingBill.studentId,
-              studentName: payingBill.studentName,
-              class: payingBill.class,
-              rollNo: payingBill.studentRoll || '-',
-              amount: 0,
-              cashReceived: paidCash,
-              cashTendered: paidCash,
-              advanceCreated: excessCash,
-              amountApplied: 0,
-              method: 'Cash',
-              collectedBy: sysEmail,
-              status: 'SUCCESS',
-              type: 'Income',
-              paymentCategory: 'ADVANCE_DEPOSIT',
-              transactionType: 'ADVANCE_DEPOSIT',
-              paymentGroupId: paymentGroupId,
-              sourceTransactionId: advTxnRef.id,
-              remarks: `Pure Advance Deposit - Receipt ${allocatedReceiptNo} for ${payingBill.studentName} (Class ${payingBill.class}) - Cash Received NRs. ${paidCash.toLocaleString()} - ${paymentRemarks || 'Counter Advance Credit'}`,
-              timestamp: serverTimestamp()
-            }));
-          }
-
-          // Credit excess to student_advances and update student's advanceBalance
-          const advRef = doc(collection(db, 'student_advances'));
-          const studentDocRef = doc(db, 'users', payingBill.studentId);
-          const studentObj = students.find(s => s.id === payingBill.studentId);
-          const currentAdv = Number(studentObj?.advanceBalance || 0);
-
-          batch.set(advRef, sanitizeForFirestore({
-            id: advRef.id,
-            studentId: payingBill.studentId,
-            studentName: payingBill.studentName,
-            class: payingBill.class,
-            rollNumber: payingBill.studentRoll || '-',
-            amount: excessCash,
-            remainingCredit: excessCash,
-            sourceTransactionId: primaryTxnId,
-            paymentGroupId: paymentGroupId,
-            receiptNo: `${allocatedReceiptNo}-ADV`,
-            status: 'ACTIVE',
-            accountantName: formatIssuedBy(adminName),
-            accountantRemarks: `Excess cash overpayment from Remit Bill ${payingBill.billNo} credited to advance account`,
-            dateBS: currentBS,
-            createdAt: serverTimestamp()
-          }));
-
-          batch.update(studentDocRef, sanitizeForFirestore({
-            advanceBalance: currentAdv + excessCash,
-            updatedAt: serverTimestamp()
-          }));
-
-          advanceNote = ` Excess NRs. ${excessCash.toLocaleString()} credited to student advance balance.`;
-        } else {
-          advanceNote = ` Excess change of NRs. ${excessCash.toLocaleString()} returned to guardian.`;
-        }
-      }
-
-      // 5. Create Cash Ledger Income entry with exact transaction document ID and paymentGroupId
-      const cashLedgerRef = doc(collection(db, 'cash_ledger'));
-      batch.set(cashLedgerRef, sanitizeForFirestore({
-        type: 'Income',
-        date: currentBS,
-        amount: totalAppliedToBills + (excessDecision === 'ADVANCE' ? excessCash : 0),
-        category: 'Fee Collection',
-        transactionId: primaryTxnId,
-        sourceTransactionId: primaryTxnId,
-        paymentGroupId: paymentGroupId,
-        relatedTransactionId: allocatedReceiptNo,
+      const executionResult = await executeCashFeePayment({
         receiptNo: allocatedReceiptNo,
-        remarks: `Receipt ${allocatedReceiptNo} for ${payingBill.studentName} (Class ${payingBill.class}) - Cash Received: NRs. ${paidCash.toLocaleString()} (Applied: NRs. ${totalAppliedToBills.toLocaleString()})${advanceNote} - ${paymentRemarks || 'Direct Counter Clearance'}`,
-        timestamp: serverTimestamp()
-      }));
+        student: targetStudent,
+        cashTendered: paidCash,
+        cashCollection: paidCash,
+        netPayable: netPayable,
+        baseAmount: netPayable,
+        additionalCharges: [],
+        discounts: [],
+        paymentCategory: 'remit_bill_settlement',
+        remarks: paymentRemarks || `Remit Bill Clearance - ${payingBill.billNo} (${payingBill.billingPeriod})`,
+        operatorName,
+        operatorUid,
+        prefilledBillData: {
+          id: payingBill.id,
+          billId: payingBill.billNo || payingBill.id,
+          amount: netPayable,
+          totalAmount: billTotal,
+          paidAmount: alreadyPaid,
+          dueAmount: netPayable,
+          billingPeriod: payingBill.billingPeriod,
+          coveredMonths: payingBill.coveredMonths || (payingBill.billingPeriod ? parseMonthsFromBillingPeriod(payingBill.billingPeriod) : undefined),
+          itemizedCharges: payingBill.itemizedCharges
+        },
+        excessDecision: paidCash > netPayable ? excessDecision : null,
+        accountantRemarks: paymentRemarks || 'Direct Counter Remit Bill Clearance',
+        accountantName: operatorName,
+        accountantUid: operatorUid
+      });
 
-      await batch.commit();
-      setSuccessMsg(`Guardian cash of NRs. ${paidCash.toLocaleString()} recorded successfully! (Applied NRs. ${totalAppliedToBills.toLocaleString()}).${advanceNote} Ledger updated.`);
+      const applied = executionResult.breakdown.amountApplied;
+      const excessAdv = executionResult.breakdown.advanceCreated || 0;
+      const changeRet = executionResult.breakdown.changeReturned || 0;
+      let advanceNote = '';
+      if (excessAdv > 0) advanceNote = ` Excess NRs. ${excessAdv.toLocaleString()} credited to student advance balance.`;
+      if (changeRet > 0) advanceNote = ` Excess change of NRs. ${changeRet.toLocaleString()} returned to guardian.`;
+
+      setSuccessMsg(`Guardian cash of NRs. ${paidCash.toLocaleString()} recorded successfully! (Applied NRs. ${applied.toLocaleString()}).${advanceNote} Receipt #${executionResult.receiptNo}. Ledger updated.`);
       setPayingBill(null);
       setCashReceived('');
       setPaymentRemarks('');
@@ -1636,6 +1414,13 @@ export default function RemitBillsGeneratorTab({
         setErrorMsg('Financial Integrity Protection: Cannot physically delete a Remit Bill that has recorded payments or transactions. Please use the official Refund or Void Bill workflow to maintain complete institutional accounting compliance.');
         setBillToDelete(null);
         return;
+      }
+
+      // 1. Release all uniqueness locks for this exact bill so months and fees can be re-billed
+      try {
+        await releaseBillUniquenessLocks(db, billToDelete);
+      } catch (lockErr) {
+        console.warn('Could not release uniqueness locks upon draft bill deletion:', lockErr);
       }
 
       const batch = writeBatch(db);
@@ -1660,7 +1445,7 @@ export default function RemitBillsGeneratorTab({
       }
 
       await batch.commit();
-      setSuccessMsg('Draft/Pending Remit Bill deleted successfully.');
+      setSuccessMsg('Draft/Pending Remit Bill deleted and uniqueness locks released successfully.');
       onRefresh();
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'remitBills');
@@ -1689,6 +1474,13 @@ export default function RemitBillsGeneratorTab({
 
       const batch = writeBatch(db);
       for (const bill of billsToDeleteObj) {
+        // Release uniqueness locks for each eligible bill being deleted
+        try {
+          await releaseBillUniquenessLocks(db, bill);
+        } catch (lockErr) {
+          console.warn(`Could not release uniqueness locks for bill ${bill.id}:`, lockErr);
+        }
+
         batch.delete(doc(db, 'remitBills', bill.id));
 
         const feeQuery = query(collection(db, 'studentFees'), where('remitBillId', '==', bill.id));
@@ -1709,7 +1501,7 @@ export default function RemitBillsGeneratorTab({
       }
 
       await batch.commit();
-      setSuccessMsg(`Successfully deleted ${billsToDeleteObj.length} Draft/Pending Remit Bill(s).`);
+      setSuccessMsg(`Successfully deleted ${billsToDeleteObj.length} Draft/Pending Remit Bill(s) and released locks.`);
       setSelectedBillIds([]);
       onRefresh();
     } catch (err: any) {

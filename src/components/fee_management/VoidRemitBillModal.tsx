@@ -13,6 +13,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { doc, updateDoc, collection, query, where, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { formatBSDate } from '../../lib/nepaliDate';
 import { releaseBillUniquenessLocks } from '../../lib/atomicBillingTransactionEngine';
+import { getAuthoritativeActor } from '../../lib/auditLogger';
 
 interface VoidRemitBillModalProps {
   bill: any | null;
@@ -105,11 +106,14 @@ export default function VoidRemitBillModal({
       }
 
       // 5. Atomic Audit Log Creation (in the same batch)
-      const auditRef = doc(collection(db, 'audit_logs'));
-      const ledgerAuditRef = doc(collection(db, 'ledger_audit_logs'));
       const opId = `OP_VOID_${bill.id}`;
-      const actorUid = auth.currentUser?.uid || 'admin';
-      const actorName = operatorName || 'Authorized Accountant';
+      const auditRef = doc(db, 'audit_logs', opId);
+      const ledgerAuditRef = doc(db, 'ledger_audit_logs', opId);
+
+      // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
+      const authoritativeActor = await getAuthoritativeActor();
+
+      const actorName = authoritativeActor.actorName || operatorName || 'Authorized Accountant';
 
       const beforeState = {
         billId: bill.id,
@@ -129,8 +133,8 @@ export default function VoidRemitBillModal({
       };
 
       const auditPayload = {
-        id: auditRef.id,
-        auditLogId: auditRef.id,
+        id: opId,
+        auditLogId: opId,
         operationId: opId,
         correlationId: opId,
         category: 'financial',
@@ -151,12 +155,12 @@ export default function VoidRemitBillModal({
         newValue: `Bill #${bill.billNo} VOIDED | Reason: ${fullVoidReason} | Voided By: ${actorName}`,
         reason: fullVoidReason,
         result: 'SUCCESS',
-        actorUid: actorUid,
-        adminUid: actorUid,
+        actorUid: authoritativeActor.actorUid,
+        adminUid: authoritativeActor.adminUid,
         actorName: actorName,
         adminName: actorName,
-        actorRole: 'admin',
-        adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+        actorRole: authoritativeActor.actorRole || 'admin',
+        adminTier: authoritativeActor.adminTier || 'primary',
         date: bsDate,
         dateBS: bsDate,
         timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,

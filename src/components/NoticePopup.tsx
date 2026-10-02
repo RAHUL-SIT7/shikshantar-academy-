@@ -162,7 +162,7 @@ export default function NoticePopup({
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider uppercase mt-0.5">
-                {schoolContact.nameEn} • SIRAHA
+                {schoolContact.nameEn} • BASTIPUR
               </p>
             </div>
           </div>

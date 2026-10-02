@@ -8,6 +8,7 @@ import {
 import { auth } from '../firebase';
 import { sanitizeForFirestore, validateRemitBillPayload } from './firestoreSanitize';
 import { formatBSDate } from './nepaliDate';
+import { getAuthoritativeActor } from './auditLogger';
 
 export interface AtomicBillingStudentRequest {
   student: {
@@ -83,6 +84,9 @@ export async function generateSingleStudentBillTransactionally(
     student.admissionNumber ||
     student.admissionNo ||
     student.id;
+
+  // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
+  const authoritativeActor = await getAuthoritativeActor();
 
   return await runTransaction(db, async (transaction) => {
     // ----------------------------------------------------------------------
@@ -418,13 +422,12 @@ export async function generateSingleStudentBillTransactionally(
     });
 
     // E. Atomic Audit Log Creation (recorded inside the same transaction)
-    const auditLogRef = doc(collection(db, 'ledger_audit_logs'));
-    const systemAuditLogRef = doc(collection(db, 'audit_logs'));
     const opId = `OP_BILL_${docSerial}`;
-    const actorUid = auth.currentUser?.uid || 'admin';
+    const auditLogRef = doc(db, 'ledger_audit_logs', opId);
+    const systemAuditLogRef = doc(db, 'audit_logs', opId);
     const auditPayload = sanitizeForFirestore({
-      id: auditLogRef.id,
-      auditLogId: auditLogRef.id,
+      id: opId,
+      auditLogId: opId,
       operationId: opId,
       correlationId: opId,
       category: 'financial',
@@ -455,12 +458,12 @@ export async function generateSingleStudentBillTransactionally(
       newValue: `Generated Bill #${docSerial} | Total: NRs. ${effectiveTotalAmount.toLocaleString()} | Months: ${effectiveMonths.join(', ')}`,
       reason: `Authorized bill generation by ${creatorName}`,
       result: 'SUCCESS',
-      actorUid: actorUid,
-      adminUid: actorUid,
-      actorName: creatorName,
-      adminName: creatorName,
-      actorRole: 'admin',
-      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      actorUid: authoritativeActor.actorUid,
+      adminUid: authoritativeActor.adminUid,
+      actorName: authoritativeActor.actorName || creatorName,
+      adminName: authoritativeActor.adminName || creatorName,
+      actorRole: authoritativeActor.actorRole || 'admin',
+      adminTier: authoritativeActor.adminTier || 'primary',
       date: currentBS,
       dateBS: currentBS,
       timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,

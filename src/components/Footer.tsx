@@ -84,7 +84,7 @@ export default function Footer() {
                 SHIKSHANTAR
               </h3>
               <p className="text-[11px] font-black tracking-[0.22em] text-amber-400 uppercase">
-                ACADEMY | SIRAHA
+                ACADEMY BASTIPUR
               </p>
             </div>
 

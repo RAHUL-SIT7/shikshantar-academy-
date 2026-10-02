@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Shield, Search, CheckCircle2, AlertCircle, User, Mail, Smartphone, BadgeCheck, MoreHorizontal, Trash2, Edit3, X, Filter, UserPlus, Users, UserCheck, ShieldCheck, Lock, Eye, EyeOff, ChevronDown, Calendar, KeyRound, Copy, Check, AlertTriangle } from 'lucide-react';
 import { db, auth, firebaseConfig } from '../firebase';
-import { doc, onSnapshot, collection, updateDoc, deleteDoc, setDoc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, collection, updateDoc, deleteDoc, setDoc, getDoc, getDocs, query, where, runTransaction } from 'firebase/firestore';
 import { onAuthStateChanged, getAuth } from 'firebase/auth';
 import { initializeApp, getApps } from 'firebase/app';
 import { initializeAuth, createUserWithEmailAndPassword, inMemoryPersistence } from 'firebase/auth';
 import NepaliADDatePicker from '../components/NepaliADDatePicker';
 import { checkDuplicateStudentRoll, checkDuplicateStudentRollInFirestore, extractStudentRoll } from '../lib/studentValidation';
-import { recordAuditLog } from '../lib/auditLogger';
+import { recordAuditLog, buildAuthoritativeAuditPayload, getAuthoritativeActor } from '../lib/auditLogger';
+import { generateNextStudentId, generateNextTeacherId, generateNextAdminId, assertEmisIsUnique, recordStudentEnrollment, getCurrentBSAcademicYear, ensurePermanentIdentitiesForExistingUsers } from '../lib/permanentIdentityEngine';
 
 // Initialize a secondary Firebase app to create users without signing out the admin
 const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
@@ -57,13 +58,36 @@ interface UserProfile {
   role?: 'student' | 'teacher' | 'admin';
   adminTier?: 'primary' | 'secondary';
   fullName?: string;
+  name?: string;
   dob?: string;
   dobBs?: string;
   phone?: string;
   studentId?: string;
+  permanentStudentId?: string;
+  legacyStudentId?: string;
+  teacherId?: string;
+  permanentTeacherId?: string;
+  adminId?: string;
+  permanentAdminId?: string;
+  staffId?: string;
+  emisNumber?: string;
+  studentEmis?: string;
   class?: string;
+  section?: string;
+  rollNumber?: string;
+  rollNo?: string;
   active?: boolean;
   status?: string;
+  deleted?: boolean;
+  fatherName?: string;
+  motherName?: string;
+  guardianName?: string;
+  caste?: string;
+  disability?: string;
+  gender?: string;
+  address?: string;
+  scholarshipStatus?: string;
+  scholarshipAmount?: number;
   hasTransportation?: string;
   transportRoute?: string;
   transportFee?: number;
@@ -71,6 +95,8 @@ interface UserProfile {
   computerFee?: number;
   assignedClasses?: string[];
   assignedSubjects?: string[];
+  classAssignedYear?: string;
+  createdAt?: string;
 }
 
 export default function UserApprovals() {
@@ -105,29 +131,40 @@ export default function UserApprovals() {
     return () => unsub();
   }, []);
 
-  const getStudentCurrentClass = (user: UserProfile, currentYearStr: string) => {
+  const getStudentCurrentClass = (user: UserProfile, currentYearStr?: string) => {
     if (user.role !== 'student' || !user.class) return user.class || '';
-    const baseClass = user.class;
-    const assignedYear = parseInt((user as any).classAssignedYear || '2083', 10);
-    const currentYear = parseInt(currentYearStr || '2083', 10);
-    
-    if (isNaN(assignedYear) || isNaN(currentYear) || currentYear <= assignedYear) {
-      return baseClass;
-    }
-    
-    const diff = currentYear - assignedYear;
-    const CLASS_ORDER = [
-      'Play Group', 'Nursery', 'LKG', 'UKG',
-      '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
-      'Passed Out'
-    ];
-    
-    const idx = CLASS_ORDER.findIndex(c => c.toLowerCase() === baseClass.trim().toLowerCase());
-    if (idx === -1) return baseClass;
-    
-    const nextIdx = Math.min(idx + diff, CLASS_ORDER.length - 1);
-    return CLASS_ORDER[nextIdx];
+    return user.class;
   };
+
+  // Handle incoming deep-links from dedicated StudentProfileView (e.g. ?editUserId=... or ?deleteUserId=...)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const editId = params.get('editUserId');
+    const deleteId = params.get('deleteUserId');
+
+    if (editId && usersList.length > 0) {
+      const u = usersList.find(x => x.id === editId || x.permanentStudentId === editId || x.studentId === editId);
+      if (u) {
+        setEditingUser(u);
+        navigate(location.pathname, { replace: true });
+      }
+    } else if (deleteId && usersList.length > 0) {
+      const u = usersList.find(x => x.id === deleteId || x.permanentStudentId === deleteId || x.studentId === deleteId);
+      if (u) {
+        setUserToDelete({ id: u.id, name: u.fullName || u.email || 'User', role: u.role, adminTier: u.adminTier });
+        navigate(location.pathname, { replace: true });
+      }
+    }
+  }, [location.search, usersList, navigate]);
+
+  // Ensure student profiles never open in a modal: automatically redirect to the dedicated full page
+  useEffect(() => {
+    if (viewingUser && viewingUser.role === 'student') {
+      const studentTargetId = viewingUser.id;
+      setViewingUser(null);
+      navigate(`/student-profile/${encodeURIComponent(studentTargetId)}`);
+    }
+  }, [viewingUser, navigate]);
 
   useEffect(() => {
     let unsubUsers = () => {};
@@ -187,6 +224,20 @@ export default function UserApprovals() {
     runSelfHeal();
   }, [auth.currentUser, isUsersLoading, usersList]);
 
+  // Safe idempotent migration effect: Ensures all existing active users have permanent IDs without overwriting existing IDs or inventing EMIS
+  const migrationRanRef = React.useRef(false);
+  useEffect(() => {
+    if (!auth.currentUser || isUsersLoading || !isPrimaryAdmin || migrationRanRef.current) return;
+    migrationRanRef.current = true;
+    ensurePermanentIdentitiesForExistingUsers().then(res => {
+      if (res.migratedCount > 0) {
+        console.log(`[Identity Engine] Migrated ${res.migratedCount} existing user records with permanent identities.`);
+      }
+    }).catch(err => {
+      console.warn("[Identity Engine] Backfill check error:", err);
+    });
+  }, [auth.currentUser, isUsersLoading, isPrimaryAdmin]);
+
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
@@ -215,80 +266,42 @@ export default function UserApprovals() {
       }
     }
 
-    // Validate Student ID / Staff ID
-    let normalizedStudentId = editingUser.studentId?.trim() || '';
-    if (!normalizedStudentId) {
-      setStatus({ 
-        type: 'error', 
-        message: editingUser.role === 'student' ? 'Student ID is required.' : 'Staff ID is required.' 
-      });
-      setTimeout(() => setStatus({ type: null, message: '' }), 3000);
-      return;
-    }
+    const originalUser = usersList.find(u => u.id === editingUser.id);
 
+    // Edit Protection: Permanent identities are authoritative and immutable
     if (editingUser.role === 'student') {
-      let formattedId = normalizedStudentId.toUpperCase().replace(/[-_ ]/g, '');
-      if (!formattedId.startsWith('SA')) {
-        formattedId = 'SA' + formattedId;
-      }
-      
-      const clsNum = (editingUser.class || '').replace(/\D/g, '');
-      let isValid = false;
-      if (clsNum) {
-        const regex = new RegExp(`^SA0?${clsNum}\\d+$`, 'i');
-        isValid = regex.test(formattedId);
-      } else {
-        const clsClean = (editingUser.class || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const regex = new RegExp(`^SA${clsClean}\\d+$`, 'i');
-        isValid = regex.test(formattedId);
-      }
-      
-      if (!isValid) {
-        setStatus({ 
-          type: 'error', 
-          message: `Student ID must follow format SA[Class][Roll Number] (e.g., SA${editingUser.class || '5'}24 for class ${editingUser.class || '5'}, roll number 24).` 
-        });
-        setTimeout(() => setStatus({ type: null, message: '' }), 3000);
-        return;
-      }
+      const permId = originalUser?.permanentStudentId || originalUser?.studentId || editingUser.permanentStudentId || editingUser.studentId || '';
+      editingUser.permanentStudentId = permId;
+      editingUser.studentId = permId;
 
-      // Check for duplicate Roll Number in the SAME class
-      const dupCheck = checkDuplicateStudentRoll(usersList, editingUser.class || '', formattedId, editingUser.id);
-      if (dupCheck.isDuplicate) {
-        setStatus({
-          type: 'error',
-          message: dupCheck.message || `Roll number already exists in Class ${editingUser.class}. Duplicate roll numbers in the same class are not allowed.`
-        });
-        setTimeout(() => setStatus({ type: null, message: '' }), 6000);
-        return;
-      }
-
-      editingUser.studentId = formattedId;
-    } else {
-      // Staff / Admin format: SA_T01, etc.
-      let formattedId = normalizedStudentId.toUpperCase().trim();
-      if (!formattedId.startsWith('SA_')) {
-        if (formattedId.startsWith('SA')) {
-          formattedId = 'SA_' + formattedId.substring(2).replace(/^[-_ ]+/, '');
-        } else {
-          formattedId = 'SA_' + formattedId;
+      const cleanEmis = (editingUser.emisNumber || '').trim();
+      if (cleanEmis) {
+        try {
+          await assertEmisIsUnique(cleanEmis, editingUser.id);
+          editingUser.emisNumber = cleanEmis;
+          editingUser.studentEmis = cleanEmis;
+        } catch (emisErr: any) {
+          setStatus({ type: 'error', message: emisErr.message || 'Duplicate EMIS Number detected.' });
+          setTimeout(() => setStatus({ type: null, message: '' }), 5000);
+          return;
         }
       }
-      
-      if (!/^SA_[A-Z0-9]+$/i.test(formattedId)) {
-        setStatus({ type: 'error', message: 'Staff ID must follow the format: SA_T01, SA_T02, etc.' });
-        setTimeout(() => setStatus({ type: null, message: '' }), 3000);
-        return;
-      }
-      editingUser.studentId = formattedId;
-    }
 
-    if (editingUser.role === 'student') {
       if (!editingUser.address?.trim()) {
         setStatus({ type: 'error', message: 'Address is a permanent field and is mandatory for students.' });
         setTimeout(() => setStatus({ type: null, message: '' }), 3000);
         return;
       }
+    } else if (editingUser.role === 'teacher') {
+      const permTchId = originalUser?.teacherId || originalUser?.permanentTeacherId || editingUser.teacherId || editingUser.permanentTeacherId || '';
+      editingUser.teacherId = permTchId;
+      editingUser.permanentTeacherId = permTchId;
+      editingUser.staffId = permTchId;
+    } else if (editingUser.role === 'admin') {
+      const permAdmId = originalUser?.adminId || originalUser?.permanentAdminId || editingUser.adminId || editingUser.permanentAdminId || '';
+      editingUser.adminId = permAdmId;
+      editingUser.permanentAdminId = permAdmId;
+      editingUser.staffId = permAdmId;
     }
 
     try {
@@ -296,15 +309,29 @@ export default function UserApprovals() {
       
       // Keep track of class assignment year for automatic promotion baseline
       if (editingUser.role === 'student') {
-        const originalUser = usersList.find(u => u.id === id);
         if (originalUser && originalUser.class !== editingUser.class) {
           rawUpdateData.classAssignedYear = academicYear;
         } else if (!editingUser.classAssignedYear) {
           rawUpdateData.classAssignedYear = academicYear;
         }
-        const extractedRoll = extractStudentRoll(editingUser.studentId, editingUser.class);
-        rawUpdateData.rollNumber = extractedRoll;
-        rawUpdateData.rollNo = extractedRoll;
+        rawUpdateData.permanentStudentId = editingUser.permanentStudentId;
+        rawUpdateData.studentId = editingUser.permanentStudentId;
+        if (editingUser.emisNumber) {
+          rawUpdateData.emisNumber = editingUser.emisNumber.trim();
+          rawUpdateData.studentEmis = editingUser.emisNumber.trim();
+        }
+        if (editingUser.rollNumber !== undefined) {
+          rawUpdateData.rollNumber = editingUser.rollNumber;
+          rawUpdateData.rollNo = editingUser.rollNumber;
+        }
+      } else if (editingUser.role === 'teacher') {
+        rawUpdateData.permanentTeacherId = editingUser.permanentTeacherId;
+        rawUpdateData.teacherId = editingUser.teacherId;
+        rawUpdateData.staffId = editingUser.teacherId;
+      } else if (editingUser.role === 'admin') {
+        rawUpdateData.permanentAdminId = editingUser.permanentAdminId;
+        rawUpdateData.adminId = editingUser.adminId;
+        rawUpdateData.staffId = editingUser.adminId;
       }
 
       if (rawUpdateData.role === 'admin') {
@@ -324,26 +351,68 @@ export default function UserApprovals() {
         }
       });
 
-      await updateDoc(doc(db, 'users', id), updateData);
-      setStatus({ type: 'success', message: `User ${editingUser.fullName || editingUser.email} updated successfully.` });
-      
-      // Record immutable audit log
-      recordAuditLog({
-        category: 'security',
-        actionType: 'USER_PROFILE_UPDATED',
-        action: 'USER_PROFILE_UPDATED',
-        targetType: 'user',
-        targetId: id,
-        studentId: id,
-        studentName: editingUser.fullName || editingUser.email || 'User',
-        beforeState: originalUser ? { fullName: originalUser.fullName, email: originalUser.email, class: originalUser.class, rollNumber: originalUser.rollNumber, role: originalUser.role } : 'N/A',
-        afterState: { fullName: editingUser.fullName, email: editingUser.email, class: editingUser.class, rollNumber: rawUpdateData.rollNumber, role: editingUser.role },
-        previousValue: originalUser ? `Class: ${originalUser.class || '-'}, Roll: ${originalUser.rollNumber || '-'}, Name: ${originalUser.fullName}` : 'N/A',
-        newValue: `Class: ${editingUser.class || '-'}, Roll: ${rawUpdateData.rollNumber || '-'}, Name: ${editingUser.fullName}`,
-        reason: 'Administrator updated user profile information',
-        operationId: `OP_USER_EDIT_${id}_${Date.now()}`
+      // Fail-closed authorization check
+      const authoritativeActor = await getAuthoritativeActor();
+      if (authoritativeActor.actorRole !== 'admin') {
+        setStatus({ type: 'error', message: 'Unauthorized: Only administrators can update user profiles.' });
+        return;
+      }
+
+      const stableRequestId = Math.random().toString(36).slice(2, 9);
+      const opId = `OP_USER_EDIT_${id}_${stableRequestId}`;
+      const userRef = doc(db, 'users', id);
+
+      await runTransaction(db, async (tx) => {
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) {
+          throw new Error('User profile record not found.');
+        }
+        const currentData = userSnap.data();
+        const beforeState = {
+          fullName: currentData.fullName || '',
+          email: currentData.email || '',
+          class: currentData.class || '',
+          rollNumber: currentData.rollNumber || '',
+          role: currentData.role || ''
+        };
+        const afterState = {
+          fullName: updateData.fullName !== undefined ? updateData.fullName : beforeState.fullName,
+          email: updateData.email !== undefined ? updateData.email : beforeState.email,
+          class: updateData.class !== undefined ? updateData.class : beforeState.class,
+          rollNumber: updateData.rollNumber !== undefined ? updateData.rollNumber : beforeState.rollNumber,
+          role: updateData.role !== undefined ? updateData.role : beforeState.role
+        };
+
+        // Idempotency: If state is unchanged, do not perform redundant write
+        const isIdentical = Object.keys(afterState).every(
+          (k) => (beforeState as any)[k] === (afterState as any)[k]
+        );
+        if (isIdentical) {
+          return;
+        }
+
+        tx.update(userRef, updateData);
+
+        const auditPayload = await buildAuthoritativeAuditPayload({
+          category: 'security',
+          actionType: 'USER_PROFILE_UPDATED',
+          action: 'USER_PROFILE_UPDATED',
+          targetType: 'user',
+          targetId: id,
+          studentId: id,
+          studentName: editingUser.fullName || editingUser.email || 'User',
+          beforeState,
+          afterState,
+          previousValue: `Class: ${beforeState.class || '-'}, Roll: ${beforeState.rollNumber || '-'}, Name: ${beforeState.fullName}`,
+          newValue: `Class: ${afterState.class || '-'}, Roll: ${afterState.rollNumber || '-'}, Name: ${afterState.fullName}`,
+          reason: 'Administrator updated user profile information',
+          operationId: opId
+        }, opId);
+
+        tx.set(doc(db, 'audit_logs', opId), auditPayload);
       });
 
+      setStatus({ type: 'success', message: `User ${editingUser.fullName || editingUser.email} updated successfully.` });
       setEditingUser(null);
     } catch (error: any) {
       console.error("Failed to update user profile info:", error);
@@ -353,68 +422,127 @@ export default function UserApprovals() {
   };
 
   const setRole = async (userId: string, newRole: 'admin' | 'teacher' | 'student') => {
-    if (newRole === 'admin' && !isPrimaryAdmin) {
-      setStatus({ type: 'error', message: 'Only Primary Administrators can assign admin roles.' });
-      setTimeout(() => setStatus({ type: null, message: '' }), 3000);
-      return;
-    }
-    const target = usersList.find(u => u.id === userId);
     try {
-      if (newRole === 'admin') {
-         await updateDoc(doc(db, 'users', userId), { role: newRole, adminTier: 'secondary' });
-      } else {
-         await updateDoc(doc(db, 'users', userId), { role: newRole, adminTier: null });
+      // Fail-closed authorization check
+      const authoritativeActor = await getAuthoritativeActor();
+      if (authoritativeActor.actorRole !== 'admin') {
+        setStatus({ type: 'error', message: 'Unauthorized: Administrator privileges required.' });
+        return;
       }
-      setStatus({ type: 'success', message: `Role changed to ${newRole}.` });
 
-      // Record immutable audit log
-      recordAuditLog({
-        category: 'security',
-        actionType: 'ROLE_CHANGED',
-        action: 'ROLE_CHANGED',
-        targetType: 'user',
-        targetId: userId,
-        studentId: userId,
-        studentName: target?.fullName || target?.email || 'User',
-        beforeState: { role: target?.role || 'user', adminTier: target?.adminTier || null },
-        afterState: { role: newRole, adminTier: newRole === 'admin' ? 'secondary' : null },
-        previousValue: `Role: ${target?.role || 'user'}`,
-        newValue: `Role: ${newRole} (Tier: ${newRole === 'admin' ? 'secondary' : 'none'})`,
-        reason: `Administrator updated role to ${newRole}`,
-        operationId: `OP_ROLE_CHANGE_${userId}_${Date.now()}`,
-        meta: { userId, previousRole: target?.role, newRole }
+      if (newRole === 'admin' && authoritativeActor.adminTier !== 'primary') {
+        setStatus({ type: 'error', message: 'Only Primary Administrators can assign admin roles.' });
+        setTimeout(() => setStatus({ type: null, message: '' }), 3000);
+        return;
+      }
+
+      const target = usersList.find(u => u.id === userId);
+      const stableRequestId = Math.random().toString(36).slice(2, 9);
+      const opId = `OP_ROLE_CHANGE_${userId}_${stableRequestId}`;
+      const userRef = doc(db, 'users', userId);
+
+      await runTransaction(db, async (tx) => {
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) {
+          throw new Error('User record not found.');
+        }
+        const currentData = userSnap.data();
+        const currentRole = currentData.role || 'user';
+        const currentTier = currentData.adminTier || null;
+        const newTier = newRole === 'admin' ? 'secondary' : null;
+
+        // Idempotency check: If user already has the requested role and tier, do not perform mutation
+        if (currentRole === newRole && currentTier === newTier) {
+          return;
+        }
+
+        if (newRole === 'admin') {
+          tx.update(userRef, { role: newRole, adminTier: 'secondary' });
+        } else {
+          tx.update(userRef, { role: newRole, adminTier: null });
+        }
+
+        const auditPayload = await buildAuthoritativeAuditPayload({
+          category: 'security',
+          actionType: 'ROLE_CHANGED',
+          action: 'ROLE_CHANGED',
+          targetType: 'user',
+          targetId: userId,
+          studentId: userId,
+          studentName: currentData.fullName || currentData.email || 'User',
+          beforeState: { role: currentRole, adminTier: currentTier },
+          afterState: { role: newRole, adminTier: newTier },
+          previousValue: `Role: ${currentRole}`,
+          newValue: `Role: ${newRole} (Tier: ${newRole === 'admin' ? 'secondary' : 'none'})`,
+          reason: `Administrator updated role to ${newRole}`,
+          operationId: opId,
+          meta: { userId, previousRole: currentRole, newRole }
+        }, opId);
+
+        tx.set(doc(db, 'audit_logs', opId), auditPayload);
       });
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Update failed.' });
+
+      setStatus({ type: 'success', message: `Role changed to ${newRole}.` });
+    } catch (error: any) {
+      console.error("Failed to update role:", error);
+      setStatus({ type: 'error', message: `Update failed: ${error?.message || error}` });
     }
     setTimeout(() => setStatus({ type: null, message: '' }), 3000);
   };
 
   const setAdminTier = async (userId: string, tier: 'primary' | 'secondary') => {
-    const target = usersList.find(u => u.id === userId);
     try {
-      await updateDoc(doc(db, 'users', userId), { adminTier: tier });
-      setStatus({ type: 'success', message: `Admin tier updated to ${tier}.` });
+      // Fail-closed authorization check
+      const authoritativeActor = await getAuthoritativeActor();
+      if (authoritativeActor.actorRole !== 'admin' || authoritativeActor.adminTier !== 'primary') {
+        setStatus({ type: 'error', message: 'Unauthorized: Only Primary (1°) Administrators can change admin tiers.' });
+        return;
+      }
 
-      // Record immutable audit log
-      recordAuditLog({
-        category: 'security',
-        actionType: 'ADMIN_TIER_CHANGED',
-        action: 'ADMIN_TIER_CHANGED',
-        targetType: 'user',
-        targetId: userId,
-        studentId: userId,
-        studentName: target?.fullName || target?.email || 'Administrator',
-        beforeState: { adminTier: target?.adminTier || 'primary' },
-        afterState: { adminTier: tier },
-        previousValue: `Admin Tier: ${target?.adminTier || 'primary'} (${(target?.adminTier || 'primary') === 'primary' ? '1° Admin' : '2° Admin'})`,
-        newValue: `Admin Tier: ${tier} (${tier === 'primary' ? '1° Admin' : '2° Admin'})`,
-        reason: `Primary Administrator changed governance tier to ${tier === 'primary' ? '1° Admin (Primary)' : '2° Admin (Secondary)'}`,
-        operationId: `OP_TIER_CHANGE_${userId}_${Date.now()}`,
-        meta: { userId, previousTier: target?.adminTier, newTier: tier }
+      const target = usersList.find(u => u.id === userId);
+      const stableRequestId = Math.random().toString(36).slice(2, 9);
+      const opId = `OP_TIER_CHANGE_${userId}_${stableRequestId}`;
+      const userRef = doc(db, 'users', userId);
+
+      await runTransaction(db, async (tx) => {
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) {
+          throw new Error('User record not found.');
+        }
+        const currentData = userSnap.data();
+        const currentTier = currentData.adminTier || 'primary';
+
+        // Idempotency check: If user already has the requested tier, return cleanly
+        if (currentTier === tier) {
+          return;
+        }
+
+        tx.update(userRef, { adminTier: tier });
+
+        const auditPayload = await buildAuthoritativeAuditPayload({
+          category: 'security',
+          actionType: 'ADMIN_TIER_CHANGED',
+          action: 'ADMIN_TIER_CHANGED',
+          targetType: 'user',
+          targetId: userId,
+          studentId: userId,
+          studentName: currentData.fullName || currentData.email || 'Administrator',
+          beforeState: { adminTier: currentTier },
+          afterState: { adminTier: tier },
+          previousValue: `Admin Tier: ${currentTier} (${currentTier === 'primary' ? '1° Admin' : '2° Admin'})`,
+          newValue: `Admin Tier: ${tier} (${tier === 'primary' ? '1° Admin' : '2° Admin'})`,
+          reason: `Primary Administrator changed governance tier to ${tier === 'primary' ? '1° Admin (Primary)' : '2° Admin (Secondary)'}`,
+          operationId: opId,
+          meta: { userId, previousTier: currentTier, newTier: tier }
+        }, opId);
+
+        tx.set(doc(db, 'audit_logs', opId), auditPayload);
       });
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Update failed.' });
+
+      setStatus({ type: 'success', message: `Admin tier updated to ${tier}.` });
+    } catch (error: any) {
+      console.error("Failed to update admin tier:", error);
+      setStatus({ type: 'error', message: `Update failed: ${error?.message || error}` });
     }
     setTimeout(() => setStatus({ type: null, message: '' }), 3000);
   };
@@ -428,12 +556,6 @@ export default function UserApprovals() {
       return;
     }
 
-    // A secondary admin cannot delete another admin
-    if (!isPrimaryAdmin && userToDelete.role === 'admin') {
-      setStatus({ type: 'error', message: 'Secondary administrators cannot delete other administrators.' });
-      return;
-    }
-
     if (deleteConfirmationText !== 'DELETE') {
       setStatus({ type: 'error', message: 'Please type DELETE to confirm.' });
       setTimeout(() => setStatus({ type: null, message: '' }), 3000);
@@ -441,11 +563,85 @@ export default function UserApprovals() {
     }
 
     try {
-      // 1. First, attempt to delete Firebase Authentication account via the backend API (if available)
-      let authDeleted = false;
+      // Step 1: Resolve authoritative actor and verify admin permissions fail-closed
+      const authoritativeActor = await getAuthoritativeActor();
+      if (authoritativeActor.actorRole !== 'admin') {
+        setStatus({ type: 'error', message: 'Unauthorized: Only administrators can delete users.' });
+        return;
+      }
+
+      // Secondary admin cannot delete another admin
+      if (authoritativeActor.adminTier !== 'primary' && userToDelete.role === 'admin') {
+        setStatus({ type: 'error', message: 'Secondary administrators cannot delete other administrators.' });
+        return;
+      }
+
+      const stableRequestId = Math.random().toString(36).slice(2, 9);
+      const opId = `OP_USER_DEL_${userToDelete.id}_${stableRequestId}`;
+      const userRef = doc(db, 'users', userToDelete.id);
+
+      // Snapshot authoritative pre-delete user data
+      const preSnap = await getDoc(userRef);
+      if (!preSnap.exists() || preSnap.data().status === 'DELETED' || preSnap.data().deleted === true) {
+        setStatus({ type: 'success', message: 'User record is already deleted.' });
+        setUserToDelete(null);
+        setDeleteConfirmationText('');
+        return;
+      }
+      const preData = preSnap.data();
+
+      // PHASE 1: Mark user status as DELETION_PENDING and record initial audit event
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(userRef);
+        if (!snap.exists()) return;
+        const currentData = snap.data();
+        if (currentData.status === 'DELETED' || currentData.deleted === true) return;
+
+        tx.update(userRef, {
+          status: 'DELETION_PENDING',
+          deletionOperationId: opId,
+          deletionRequestedBy: authoritativeActor.actorUid,
+          deletionRequestedAt: serverTimestamp(),
+          lastAttemptAt: serverTimestamp()
+        });
+
+        const reqAuditPayload = await buildAuthoritativeAuditPayload({
+          category: 'security',
+          actionType: 'USER_DELETION_REQUESTED',
+          action: 'USER_DELETION_REQUESTED',
+          targetType: 'user',
+          targetId: userToDelete.id,
+          studentId: userToDelete.id,
+          studentName: preData.fullName || preData.email || 'User',
+          beforeState: {
+            id: userToDelete.id,
+            email: preData.email || '',
+            fullName: preData.fullName || '',
+            role: preData.role || '',
+            adminTier: preData.adminTier || null,
+            status: preData.status || 'active'
+          },
+          afterState: {
+            status: 'DELETION_PENDING',
+            deletionOperationId: opId
+          },
+          previousValue: `Status: ${preData.status || 'active'} | User: ${preData.fullName || preData.email}`,
+          newValue: 'Status: DELETION_PENDING (Phase 1 initiated)',
+          reason: 'Administrator requested user account deletion',
+          operationId: `${opId}_REQ`
+        }, `${opId}_REQ`);
+
+        tx.set(doc(db, 'audit_logs', `${opId}_REQ`), reqAuditPayload);
+      });
+
+      // PHASE 2: Delete Firebase Authentication account via backend API
+      const idToken = await auth.currentUser?.getIdToken();
+      let resData: any = {};
+      let response: Response | null = null;
+      let authErrorMsg: string | null = null;
+
       try {
-        const idToken = await auth.currentUser?.getIdToken();
-        const response = await fetch('/api/users/delete-auth', {
+        response = await fetch('/api/users/delete-auth', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -453,58 +649,122 @@ export default function UserApprovals() {
           },
           body: JSON.stringify({ uid: userToDelete.id })
         });
-        
-        let resData: any = {};
         const responseText = await response.text();
         try {
           resData = JSON.parse(responseText);
-        } catch (e) {
-          resData = { error: responseText.slice(0, 150) || `HTTP ${response.status} ${response.statusText}` };
+        } catch {
+          resData = { error: responseText.slice(0, 150) || `HTTP ${response?.status}` };
         }
-
-        if (response.ok) {
-          authDeleted = true;
-        } else {
-          console.warn("Backend Auth deletion endpoint returned non-200 or not available on static host:", response.status, resData);
-        }
-      } catch (authErr: any) {
-        console.warn("Auth deletion API unreachable (running on static host or offline):", authErr);
+      } catch (fetchErr: any) {
+        authErrorMsg = fetchErr.message || 'Auth endpoint unreachable';
       }
 
-      // 2. Delete Firestore profile from database
-      await deleteDoc(doc(db, 'users', userToDelete.id));
+      // PHASE 3A: Firebase Auth Deletion FAILED
+      if (authErrorMsg || !response || !response.ok || resData.error) {
+        const finalErrorMsg = authErrorMsg || resData.error || `HTTP ${response?.status || 500}`;
+        console.error("Auth deletion failed:", finalErrorMsg);
 
-      // Record immutable audit log
-      recordAuditLog({
-        category: 'security',
-        actionType: 'USER_DELETED',
-        action: 'USER_DELETED',
-        targetType: 'user',
-        targetId: userToDelete.id,
-        studentId: userToDelete.id,
-        studentName: userToDelete.fullName || userToDelete.email || 'User',
-        beforeState: {
+        // Transition user document to DELETION_FAILED
+        try {
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(userRef);
+            if (!snap.exists()) return;
+            tx.update(userRef, {
+              status: 'DELETION_FAILED',
+              deletionError: finalErrorMsg,
+              lastAttemptAt: serverTimestamp()
+            });
+
+            const failAuditPayload = await buildAuthoritativeAuditPayload({
+              category: 'security',
+              actionType: 'USER_AUTH_DELETE_FAILED',
+              action: 'USER_AUTH_DELETE_FAILED',
+              targetType: 'user',
+              targetId: userToDelete.id,
+              studentId: userToDelete.id,
+              studentName: preData.fullName || preData.email || 'User',
+              beforeState: { status: 'DELETION_PENDING' },
+              afterState: { status: 'DELETION_FAILED', error: finalErrorMsg },
+              previousValue: 'Status: DELETION_PENDING',
+              newValue: `Status: DELETION_FAILED (${finalErrorMsg})`,
+              reason: `Firebase Auth deletion failed: ${finalErrorMsg}`,
+              operationId: `${opId}_FAIL`
+            }, `${opId}_FAIL`);
+
+            tx.set(doc(db, 'audit_logs', `${opId}_FAIL`), failAuditPayload);
+          });
+        } catch (dbErr) {
+          console.warn("Could not record DELETION_FAILED state in Firestore:", dbErr);
+        }
+
+        setStatus({ 
+          type: 'error', 
+          message: `Deletion could not be completed. The account remains protected and is marked for retry (${finalErrorMsg}).` 
+        });
+        setUserToDelete(null);
+        setDeleteConfirmationText('');
+        return;
+      }
+
+      // PHASE 3B: Firebase Auth Deletion SUCCEEDED -> Finalize Soft-Deleted Tombstone
+      await runTransaction(db, async (tx) => {
+        const freshSnap = await tx.get(userRef);
+        if (!freshSnap.exists()) return;
+
+        // Controlled soft-deleted tombstone retaining minimal historical metadata
+        tx.set(userRef, {
           id: userToDelete.id,
-          email: userToDelete.email,
-          fullName: userToDelete.fullName,
-          role: userToDelete.role,
-          adminTier: userToDelete.adminTier || null
-        },
-        afterState: { deleted: true, authDeleted },
-        previousValue: `User: ${userToDelete.fullName || userToDelete.email} | Role: ${userToDelete.role} | Tier: ${userToDelete.adminTier || 'none'}`,
-        newValue: `Account deleted from database${authDeleted ? ' and Firebase Auth' : ''}`,
-        reason: 'Administrator confirmed deletion of user account and profile',
-        operationId: `OP_USER_DEL_${userToDelete.id}_${Date.now()}`
+          fullName: preData.fullName || preData.name || 'Deleted User',
+          email: preData.email || '',
+          role: preData.role || '',
+          class: preData.class || '',
+          studentId: preData.studentId || preData.admissionNumber || '',
+          status: 'DELETED',
+          deleted: true,
+          authDeleted: true,
+          deletedAt: serverTimestamp(),
+          deletedBy: authoritativeActor.actorUid,
+          deletedByName: authoritativeActor.actorName,
+          deletionOperationId: opId,
+          reconciliationRequired: false,
+          updatedAt: serverTimestamp()
+        }, { merge: false });
+
+        const auditPayload = await buildAuthoritativeAuditPayload({
+          category: 'security',
+          actionType: 'USER_DELETED',
+          action: 'USER_DELETED',
+          targetType: 'user',
+          targetId: userToDelete.id,
+          studentId: userToDelete.id,
+          studentName: preData.fullName || preData.email || 'User',
+          beforeState: {
+            id: userToDelete.id,
+            email: preData.email || '',
+            fullName: preData.fullName || '',
+            role: preData.role || '',
+            adminTier: preData.adminTier || null,
+            status: preData.status || 'active'
+          },
+          afterState: { 
+            status: 'DELETED', 
+            deleted: true, 
+            authDeleted: true,
+            deletionOperationId: opId 
+          },
+          previousValue: `User: ${preData.fullName || preData.email} | Role: ${preData.role} | Tier: ${preData.adminTier || 'none'}`,
+          newValue: 'Account deleted from Firebase Auth and tombstoned in Firestore',
+          reason: 'Administrator confirmed deletion of user account and profile',
+          operationId: opId
+        }, opId);
+
+        tx.set(doc(db, 'audit_logs', opId), auditPayload);
       });
 
-      if (authDeleted) {
-        setStatus({ type: 'success', message: 'User profile and login account deleted successfully.' });
-      } else {
-        setStatus({ type: 'success', message: 'User profile deleted successfully from database.' });
-      }
+      setStatus({ type: 'success', message: 'User account and profile deleted successfully.' });
     } catch (error: any) {
-      console.error("Failed to delete user document:", error);
-      setStatus({ type: 'error', message: `Failed to delete user profile from database: ${error.message || error}` });
+      console.error("Failed to execute deletion state machine:", error);
+      setStatus({ type: 'error', message: `Deletion failed: ${error.message || error}` });
     }
     setUserToDelete(null);
     setDeleteConfirmationText('');
@@ -513,11 +773,25 @@ export default function UserApprovals() {
 
   const getFilteredUsers = () => {
     return usersList.filter(u => {
+      // Exclude soft-deleted/tombstone users from the active roster
+      if (u.status === 'DELETED' || u.deleted === true || u.status === 'AUTH_DELETED_PENDING_FINALIZATION') {
+        return false;
+      }
+
+      const q = searchQuery.toLowerCase().trim();
       const matchesSearch = 
-        String(u.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        String(u.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        String(u.studentId || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        String(u.phone || '').toLowerCase().includes(searchQuery.toLowerCase());
+        String(u.email || '').toLowerCase().includes(q) ||
+        String(u.fullName || u.name || '').toLowerCase().includes(q) ||
+        String(u.studentId || '').toLowerCase().includes(q) ||
+        String(u.permanentStudentId || '').toLowerCase().includes(q) ||
+        String(u.emisNumber || u.studentEmis || '').toLowerCase().includes(q) ||
+        String(u.teacherId || '').toLowerCase().includes(q) ||
+        String(u.adminId || '').toLowerCase().includes(q) ||
+        String(u.staffId || '').toLowerCase().includes(q) ||
+        String(u.phone || '').toLowerCase().includes(q) ||
+        String(u.class || '').toLowerCase().includes(q) ||
+        String(u.section || '').toLowerCase().includes(q) ||
+        String(u.rollNo || u.rollNumber || '').toLowerCase().includes(q);
       
       const isPending = u.status === 'pending';
       let matchesRole = false;
@@ -590,7 +864,14 @@ export default function UserApprovals() {
       return;
     }
     
-    if (!isPrimaryAdmin) {
+    // Fail-closed admin check
+    const authoritativeActor = await getAuthoritativeActor();
+    if (authoritativeActor.actorRole !== 'admin') {
+      setStatus({ type: 'error', message: 'Unauthorized: Only administrators can bulk delete users.' });
+      return;
+    }
+
+    if (authoritativeActor.adminTier !== 'primary') {
       const isDeletingAdmin = usersToDelete.some(u => u.role === 'admin');
       if (isDeletingAdmin) {
         setStatus({ type: 'error', message: 'Secondary administrators cannot delete other administrators.' });
@@ -601,11 +882,12 @@ export default function UserApprovals() {
 
     if (!window.confirm(`Are you sure you want to delete ${selectedUsers.length} users?`)) return;
     try {
-      // 1. Call backend to delete Firebase Authentication accounts in bulk first (if backend is available)
-      let backendSuccess = false;
+      // 1. Call backend to delete Firebase Authentication accounts in bulk first
+      const idToken = await auth.currentUser?.getIdToken();
+      let resData: any = {};
+      let response: Response;
       try {
-        const idToken = await auth.currentUser?.getIdToken();
-        const response = await fetch('/api/users/delete-auth-bulk', {
+        response = await fetch('/api/users/delete-auth-bulk', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -613,32 +895,43 @@ export default function UserApprovals() {
           },
           body: JSON.stringify({ uids: selectedUsers })
         });
-        
-        let resData: any = {};
         const responseText = await response.text();
         try {
           resData = JSON.parse(responseText);
-        } catch (e) {
+        } catch {
           resData = { error: responseText.slice(0, 150) || `HTTP ${response.status} ${response.statusText}` };
         }
-
-        if (response.ok) {
-          backendSuccess = true;
-        } else {
-          console.warn("Bulk auth deletion backend returned non-ok status or static host:", response.status, resData);
-        }
       } catch (authErr: any) {
-        console.warn("Bulk auth deletion API unreachable (running on static host or offline):", authErr);
+        setStatus({ type: 'error', message: `Bulk authentication deletion failed: Service unreachable (${authErr.message || authErr}). Deletion aborted.` });
+        return;
       }
 
-      // 2. Delete Firestore profiles for all selected users
-      await Promise.all(selectedUsers.map(id => deleteDoc(doc(db, 'users', id))));
-
-      if (backendSuccess) {
-        setStatus({ type: 'success', message: `All ${selectedUsers.length} users and their login accounts deleted successfully.` });
-      } else {
-        setStatus({ type: 'success', message: `Selected ${selectedUsers.length} user profiles deleted successfully from database.` });
+      if (!response.ok || resData.error) {
+        setStatus({ type: 'error', message: `Bulk auth deletion failed: ${resData.error || `HTTP ${response.status}`}. Deletion aborted.` });
+        return;
       }
+
+      // 2. Controlled soft-deletion / tombstone of Firestore profiles for all selected users
+      await Promise.all(selectedUsers.map(async (id) => {
+        const target = usersList.find(u => u.id === id);
+        return setDoc(doc(db, 'users', id), {
+          id,
+          fullName: target?.fullName || 'Deleted User',
+          email: target?.email || '',
+          role: target?.role || '',
+          class: target?.class || '',
+          studentId: target?.studentId || '',
+          status: 'DELETED',
+          deleted: true,
+          authDeleted: true,
+          deletedAt: serverTimestamp(),
+          deletedBy: authoritativeActor.actorUid,
+          deletedByName: authoritativeActor.actorName,
+          updatedAt: serverTimestamp()
+        }, { merge: false });
+      }));
+
+      setStatus({ type: 'success', message: `All ${selectedUsers.length} users and their login accounts deleted successfully.` });
       setSelectedUsers([]);
       setBulkActionOpen(false);
     } catch(err: any) {
@@ -713,12 +1006,29 @@ export default function UserApprovals() {
     }
 
     const nextClass = CLASS_ORDER[idx + 1];
+    const targetUser = usersList.find(u => u.id === userId);
+    const currentBSYear = getCurrentBSAcademicYear(academicYear);
+    const nextBSYear = currentBSYear + 1;
+    const nextAcademicYearStr = `${nextBSYear}-${nextBSYear + 1} B.S.`;
 
     try {
       await updateDoc(doc(db, 'users', userId), { 
         class: nextClass,
-        classAssignedYear: academicYear 
+        classAssignedYear: nextAcademicYearStr 
       });
+
+      // Record immutable academic enrollment record for the new academic year
+      await recordStudentEnrollment({
+        studentUid: userId,
+        studentId: targetUser?.permanentStudentId || targetUser?.studentId || `STU-${userId.substring(0, 6)}`,
+        emisNumber: targetUser?.emisNumber || targetUser?.studentEmis || '',
+        bsYear: nextBSYear,
+        className: nextClass,
+        sectionName: targetUser?.section || 'A',
+        rollNumber: targetUser?.rollNumber || targetUser?.rollNo || '',
+        status: 'promoted'
+      });
+
       setStatus({ type: 'success', message: `Promoted student to Class ${nextClass} successfully!` });
     } catch (err: any) {
       console.error(err);
@@ -740,6 +1050,9 @@ export default function UserApprovals() {
 
     let promotedCount = 0;
     let failedCount = 0;
+    const currentBSYear = getCurrentBSAcademicYear(academicYear);
+    const nextBSYear = currentBSYear + 1;
+    const nextAcademicYearStr = `${nextBSYear}-${nextBSYear + 1} B.S.`;
 
     try {
       await Promise.all(selectedStudentsList.map(async (std) => {
@@ -754,8 +1067,20 @@ export default function UserApprovals() {
           const nextClass = CLASS_ORDER[idx + 1];
           await updateDoc(doc(db, 'users', std.id), { 
             class: nextClass,
-            classAssignedYear: academicYear 
+            classAssignedYear: nextAcademicYearStr 
           });
+
+          await recordStudentEnrollment({
+            studentUid: std.id,
+            studentId: std.permanentStudentId || std.studentId || `STU-${std.id.substring(0, 6)}`,
+            emisNumber: std.emisNumber || std.studentEmis || '',
+            bsYear: nextBSYear,
+            className: nextClass,
+            sectionName: std.section || 'A',
+            rollNumber: std.rollNumber || std.rollNo || '',
+            status: 'promoted'
+          });
+
           promotedCount++;
         } else {
           failedCount++;
@@ -795,6 +1120,7 @@ export default function UserApprovals() {
     phone: '',
     class: '',
     studentId: '',
+    rollNumber: '',
     guardianName: '',
     address: '',
     section: '',
@@ -1000,60 +1326,7 @@ export default function UserApprovals() {
       return;
     }
 
-    if (newUser.role === 'student' && !newUser.guardianName) {
-      setStatus({ type: 'error', message: 'Guardian / Parent\'s Name is mandatory.' });
-      return;
-    }
-
-    let normalizedStudentId = newUser.studentId?.trim() || '';
-    let finalTeacherId = newUser.linkedTeacherId || '';
-
-    if (!normalizedStudentId) {
-      setStatus({ 
-        type: 'error', 
-        message: newUser.role === 'student' ? 'Student ID is mandatory.' : 'Staff ID is mandatory.' 
-      });
-      return;
-    }
-
     if (newUser.role === 'student') {
-      let formattedId = normalizedStudentId.toUpperCase().replace(/[-_ ]/g, '');
-      if (!formattedId.startsWith('SA')) {
-        formattedId = 'SA' + formattedId;
-      }
-      
-      const clsNum = (newUser.class || '').replace(/\D/g, '');
-      let isValid = false;
-      if (clsNum) {
-        const regex = new RegExp(`^SA0?${clsNum}\\d+$`, 'i');
-        isValid = regex.test(formattedId);
-      } else {
-        const clsClean = (newUser.class || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const regex = new RegExp(`^SA${clsClean}\\d+$`, 'i');
-        isValid = regex.test(formattedId);
-      }
-      
-      if (!isValid) {
-        setStatus({ 
-          type: 'error', 
-          message: `Student ID must follow format SA[Class][Roll Number] (e.g., SA${newUser.class || '5'}24 for class ${newUser.class || '5'}, roll number 24).` 
-        });
-        return;
-      }
-
-      // Check for duplicate Roll Number in the SAME class
-      const dupCheck = checkDuplicateStudentRoll(usersList, newUser.class || '', formattedId);
-      if (dupCheck.isDuplicate) {
-        setStatus({ 
-          type: 'error', 
-          message: dupCheck.message || `Roll number already exists in Class ${newUser.class}. Duplicate roll numbers in the same class are not allowed.` 
-        });
-        setTimeout(() => setStatus({ type: null, message: '' }), 6000);
-        return;
-      }
-
-      normalizedStudentId = formattedId;
-
       if (!newUser.class) {
         setStatus({ type: 'error', message: 'Assigned Class is mandatory for students.' });
         return;
@@ -1062,26 +1335,39 @@ export default function UserApprovals() {
         setStatus({ type: 'error', message: 'Address is a permanent field and is mandatory for students.' });
         return;
       }
-    } else {
-      // Staff / Admin format: SA_T01, etc.
-      let formattedId = normalizedStudentId.toUpperCase().trim();
-      if (!formattedId.startsWith('SA_')) {
-        if (formattedId.startsWith('SA')) {
-          formattedId = 'SA_' + formattedId.substring(2).replace(/^[-_ ]+/, '');
-        } else {
-          formattedId = 'SA_' + formattedId;
-        }
-      }
-      
-      if (!/^SA_[A-Z0-9]+$/i.test(formattedId)) {
-        setStatus({ type: 'error', message: 'Staff ID must follow the format: SA_T01, SA_T02, etc.' });
+      if (!newUser.guardianName?.trim()) {
+        setStatus({ type: 'error', message: "Guardian / Parent's Name is mandatory." });
         return;
       }
-      normalizedStudentId = formattedId;
+      const cleanEmis = (newUser.emisNumber || '').trim();
+      if (!cleanEmis) {
+        setStatus({ type: 'error', message: 'EMIS Number is mandatory for new student registration.' });
+        return;
+      }
+      // Assert EMIS uniqueness at authoritative database layer
+      try {
+        await assertEmisIsUnique(cleanEmis);
+      } catch (emisErr: any) {
+        setStatus({ type: 'error', message: emisErr.message || 'Duplicate EMIS Number detected.' });
+        return;
+      }
     }
 
     setIsCreating(true);
     try {
+      // Concurrency-safe atomic generation of permanent identities
+      let generatedStudentId = '';
+      let generatedTeacherId = '';
+      let generatedAdminId = '';
+
+      if (newUser.role === 'student') {
+        generatedStudentId = await generateNextStudentId();
+      } else if (newUser.role === 'teacher') {
+        generatedTeacherId = await generateNextTeacherId();
+      } else if (newUser.role === 'admin') {
+        generatedAdminId = await generateNextAdminId();
+      }
+
       let emailToRegister = newUser.email;
       let userCredential;
 
@@ -1117,20 +1403,29 @@ export default function UserApprovals() {
         createdAt: new Date().toISOString()
       };
       if (newUser.role === 'admin') {
-         userProfilePayload.adminTier = 'secondary';
+        userProfilePayload.adminTier = 'secondary';
+        userProfilePayload.adminId = generatedAdminId;
+        userProfilePayload.permanentAdminId = generatedAdminId;
+        userProfilePayload.staffId = generatedAdminId;
       }
       if (newUser.dob) userProfilePayload.dob = newUser.dob;
       if (newUser.dobBs) userProfilePayload.dobBs = newUser.dobBs;
       if (rawPhone) userProfilePayload.phone = `+977-${rawPhone}`;
-      if (normalizedStudentId) userProfilePayload.studentId = normalizedStudentId;
-      if (newUser.class) userProfilePayload.class = newUser.class;
-      if (newUser.guardianName) userProfilePayload.guardianName = newUser.guardianName;
       if (newUser.address) userProfilePayload.address = newUser.address;
-      if (newUser.section) userProfilePayload.section = newUser.section;
 
       if (newUser.role === 'student') {
-        userProfilePayload.linkedTeacherId = finalTeacherId || '';
-        if (newUser.emisNumber) userProfilePayload.emisNumber = newUser.emisNumber;
+        const cleanEmis = (newUser.emisNumber || '').trim();
+        userProfilePayload.permanentStudentId = generatedStudentId;
+        userProfilePayload.studentId = generatedStudentId;
+        userProfilePayload.emisNumber = cleanEmis;
+        userProfilePayload.studentEmis = cleanEmis;
+        userProfilePayload.class = newUser.class;
+        userProfilePayload.section = newUser.section || 'A';
+        userProfilePayload.rollNumber = newUser.rollNumber || '';
+        userProfilePayload.rollNo = newUser.rollNumber || '';
+        userProfilePayload.classAssignedYear = academicYear;
+        userProfilePayload.linkedTeacherId = newUser.linkedTeacherId || '';
+        userProfilePayload.guardianName = newUser.guardianName;
         if (newUser.fatherName) userProfilePayload.fatherName = newUser.fatherName;
         if (newUser.motherName) userProfilePayload.motherName = newUser.motherName;
         userProfilePayload.caste = newUser.caste;
@@ -1141,25 +1436,6 @@ export default function UserApprovals() {
         userProfilePayload.transportFee = newUser.hasTransportation === 'Yes' ? Number(newUser.transportFee || 0) : 0;
         userProfilePayload.hasComputer = newUser.hasComputer || 'No';
         userProfilePayload.computerFee = newUser.hasComputer === 'Yes' ? Number(newUser.computerFee || 0) : 0;
-        let extractedRoll = '';
-        const match = normalizedStudentId.match(/^SA\d+([A-Z]*\d*)*$/i);
-        if (match) {
-            const numPart = normalizedStudentId.replace(/^SA/i, '');
-            // Simple heuristic to strip out class if it starts with it
-            let clsStr = newUser.class || '';
-            if (numPart.startsWith(clsStr)) {
-                extractedRoll = numPart.substring(clsStr.length);
-            } else if (numPart.startsWith('0' + clsStr)) {
-                extractedRoll = numPart.substring(clsStr.length + 1);
-            } else {
-                extractedRoll = numPart;
-            }
-        } else {
-            extractedRoll = normalizedStudentId;
-        }
-        
-        userProfilePayload.rollNumber = extractedRoll;
-        userProfilePayload.rollNo = extractedRoll; // For compatibility
         userProfilePayload.scholarshipStatus = newUser.scholarshipStatus;
         if (newUser.scholarshipStatus === 'Provided') {
           userProfilePayload.scholarshipAmount = Number(newUser.scholarshipAmount) || 0;
@@ -1167,32 +1443,57 @@ export default function UserApprovals() {
           userProfilePayload.scholarshipAmount = 0;
         }
       } else if (newUser.role === 'teacher') {
+        userProfilePayload.permanentTeacherId = generatedTeacherId;
+        userProfilePayload.teacherId = generatedTeacherId;
+        userProfilePayload.staffId = generatedTeacherId;
         userProfilePayload.class = newUser.class;
         userProfilePayload.assignedClasses = newUser.assignedClasses || [];
         userProfilePayload.assignedSubjects = newUser.assignedSubjects || [];
       }
 
-      // Use getFirestore with secondaryApp so the write is executed under the newly created user's own session,
-      // which bypasses strict database security rules requiring the user to be the owner of their own document.
+      // Use getFirestore with secondaryApp so the write is executed under the newly created user's own session
       const { getFirestore: getFirestoreSecondary } = await import('firebase/firestore');
       const secondaryDb = getFirestoreSecondary(secondaryApp, firebaseConfig.firestoreDatabaseId);
       await setDoc(doc(secondaryDb, 'users', docId), userProfilePayload);
       
-      if (newUser.role === 'student' && newUser.class) {
-         await generateInitialFee(docId, newUser.class, newUser.scholarshipStatus, Number(newUser.scholarshipAmount) || 0);
+      if (newUser.role === 'student') {
+        // Concurrency-safe automatic Academic Enrollment record creation
+        await recordStudentEnrollment({
+          studentUid: docId,
+          studentId: generatedStudentId,
+          emisNumber: (newUser.emisNumber || '').trim(),
+          bsYear: getCurrentBSAcademicYear(academicYear),
+          className: newUser.class,
+          sectionName: newUser.section || 'A',
+          rollNumber: newUser.rollNumber || '',
+          status: 'active'
+        });
+
+        if (newUser.class) {
+          await generateInitialFee(docId, newUser.class, newUser.scholarshipStatus, Number(newUser.scholarshipAmount) || 0);
+        }
       }
       
       // Immediately sign out the secondary auth so it can be used again cleanly
       await secondaryAuth.signOut();
 
-      setStatus({ type: 'success', message: `${newUser.role.toUpperCase()} account created successfully. They can now log in.` });
+      setStatus({ 
+        type: 'success', 
+        message: `${newUser.role.toUpperCase()} account created successfully with ID: ${generatedStudentId || generatedTeacherId || generatedAdminId}. They can now log in.` 
+      });
       setIsCreatingUser(false);
-      setNewUser({ email: '', password: '', fullName: '', dob: '', dobBs: '', role: 'teacher', phone: '', class: '', studentId: '', guardianName: '', address: '', section: '', scholarshipStatus: 'Not Provided', scholarshipAmount: 0, assignedClasses: [], assignedSubjects: [], emisNumber: '', fatherName: '', motherName: '', caste: '', disability: '', gender: '', hasTransportation: 'No', transportRoute: '', transportFee: 0, hasComputer: 'No', computerFee: 0 });
+      setNewUser({ 
+        email: '', password: '', fullName: '', dob: '', dobBs: '', role: 'teacher', 
+        phone: '', class: '', studentId: '', rollNumber: '', guardianName: '', address: '', 
+        section: '', scholarshipStatus: 'Not Provided', scholarshipAmount: 0, 
+        assignedClasses: [], assignedSubjects: [], emisNumber: '', fatherName: '', 
+        motherName: '', caste: '', disability: '', gender: '', hasTransportation: 'No', 
+        transportRoute: '', transportFee: 0, hasComputer: 'No', computerFee: 0 
+      });
     } catch (error: any) {
       let errMsg = error.message || 'Failed to create user account.';
       if (error.code === 'auth/email-already-in-use' || String(error.message).includes('auth/email-already-in-use')) {
          errMsg = 'An account with this email address already exists. Please use a different email.';
-         // Log gracefully instead of throwing a stack trace in console
          console.warn("Attempted to register an email that is already taken:", newUser.email);
       } else {
          console.error("User creation error:", error);
@@ -1476,8 +1777,26 @@ export default function UserApprovals() {
 
                       <div className="flex flex-wrap items-center justify-between text-xs text-gray-600 gap-2 bg-gray-50/80 p-2.5 rounded-xl">
                         <div>
-                          <span className="text-gray-400 font-medium">{user.role === 'student' ? 'Student ID' : 'Staff ID'}:</span>{' '}
-                          <span className="text-blue-600 font-mono font-bold uppercase">{user.studentId || 'N/A'}</span>
+                          <span className="text-gray-400 font-medium">
+                            {user.role === 'student' ? 'Student ID' : user.role === 'admin' ? 'Admin ID' : 'Teacher ID'}:
+                          </span>{' '}
+                          <span className="text-blue-600 font-mono font-bold uppercase">
+                            {user.role === 'student' 
+                              ? (user.permanentStudentId || user.studentId || 'N/A')
+                              : user.role === 'admin'
+                              ? (user.permanentAdminId || user.adminId || user.staffId || 'N/A')
+                              : (user.permanentTeacherId || user.teacherId || user.staffId || 'N/A')}
+                          </span>
+                          {user.role === 'student' && (user.emisNumber || user.studentEmis) && (
+                            <span className="ml-2 text-[11px] text-gray-500 font-mono">
+                              (EMIS: {user.emisNumber || user.studentEmis})
+                            </span>
+                          )}
+                          {user.role === 'admin' && (
+                            <span className="ml-2 text-[10px] font-black text-orange-600 uppercase">
+                              [{user.adminTier === 'primary' ? '1° Admin' : '2° Admin'}]
+                            </span>
+                          )}
                         </div>
                         {user.phone && (
                           <div className="flex items-center gap-1 text-gray-500">
@@ -1493,8 +1812,14 @@ export default function UserApprovals() {
 
                       <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1">
                         <button 
-                          onClick={() => setViewingUser(user)}
-                          className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-600 hover:text-emerald-700 rounded-lg transition-all text-xs font-bold flex items-center gap-1 px-2.5"
+                          onClick={() => {
+                            if (user.role === 'student') {
+                              navigate(`/student-profile/${encodeURIComponent(user.id)}`);
+                            } else {
+                              setViewingUser(user);
+                            }
+                          }}
+                          className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-600 hover:text-emerald-700 rounded-lg transition-all text-xs font-bold flex items-center gap-1 px-2.5 cursor-pointer"
                           title="View Profile"
                         >
                           <Eye className="w-3.5 h-3.5" /> View
@@ -1619,8 +1944,25 @@ export default function UserApprovals() {
                         <div className="text-xs space-y-1">
                           <p className="font-bold text-gray-600 flex items-center gap-1"><Smartphone className="w-3 h-3 text-gray-400" /> {user.phone || '--'}</p>
                           <p className="text-gray-400">
-                            {user.role === 'student' ? 'Student ID' : 'Staff ID'}: <span className="text-blue-600 font-mono font-bold uppercase">{user.studentId || 'N/A'}</span>
+                            {user.role === 'student' ? 'Student ID' : user.role === 'admin' ? 'Admin ID' : 'Teacher ID'}:{' '}
+                            <span className="text-blue-600 font-mono font-bold uppercase">
+                              {user.role === 'student' 
+                                ? (user.permanentStudentId || user.studentId || 'N/A')
+                                : user.role === 'admin'
+                                ? (user.permanentAdminId || user.adminId || user.staffId || 'N/A')
+                                : (user.permanentTeacherId || user.teacherId || user.staffId || 'N/A')}
+                            </span>
                           </p>
+                          {user.role === 'student' && (user.emisNumber || user.studentEmis) && (
+                            <p className="text-[11px] text-gray-500 font-mono">
+                              EMIS: <span className="font-bold text-gray-700">{user.emisNumber || user.studentEmis}</span>
+                            </p>
+                          )}
+                          {user.role === 'admin' && (
+                            <p className="text-[10px] font-black uppercase text-orange-600">
+                              {user.adminTier === 'primary' ? '1° Primary Admin' : '2° Secondary Admin'}
+                            </p>
+                          )}
                         </div>
                       </td>
                       <td className="p-4 px-6">
@@ -1640,8 +1982,14 @@ export default function UserApprovals() {
                       <td className="p-4 px-6 text-right">
                          <div className="flex justify-end items-center gap-1.5 opacity-100 transition-opacity">
                             <button 
-                              onClick={() => setViewingUser(user)}
-                              className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-500 hover:text-emerald-700 rounded-lg transition-all"
+                              onClick={() => {
+                                if (user.role === 'student') {
+                                  navigate(`/student-profile/${encodeURIComponent(user.id)}`);
+                                } else {
+                                  setViewingUser(user);
+                                }
+                              }}
+                              className="p-1.5 bg-gray-100 hover:bg-emerald-100 text-gray-500 hover:text-emerald-700 rounded-lg transition-all cursor-pointer"
                               title="View Profile"
                             >
                               <Eye className="w-4 h-4" />
@@ -1745,79 +2093,254 @@ export default function UserApprovals() {
         </div>
       </section>
 
-      {/* View User Modal */}
-      {viewingUser && createPortal(
+      {/* View User Modal (Only for Teachers and Administrators; Students open dedicated full page) */}
+      {viewingUser && viewingUser.role !== 'student' && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-6 relative">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className={`p-6 relative text-white ${
+              viewingUser.role === 'admin' 
+                ? 'bg-gradient-to-r from-orange-600 to-amber-600' 
+                : viewingUser.role === 'teacher' 
+                ? 'bg-gradient-to-r from-blue-700 to-indigo-700' 
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600'
+            }`}>
               <h2 className="text-xl font-black flex items-center gap-2">
-                <User className="w-6 h-6" /> User Profile
+                <User className="w-6 h-6" /> {viewingUser.role === 'student' ? 'Student Profile' : viewingUser.role === 'teacher' ? 'Teacher Profile' : 'Admin Profile'}
               </h2>
-              <p className="text-emerald-100 text-xs font-medium mt-1">Detailed identity information</p>
+              <p className="text-white/80 text-xs font-medium mt-1">Detailed institutional identity record</p>
               <button 
                 onClick={() => setViewingUser(null)} 
-                className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+                className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5"/>
               </button>
             </div>
 
-            <div className="p-8 space-y-6">
+            <div className="p-6 md:p-8 space-y-6 overflow-y-auto max-h-[calc(90vh-160px)] custom-scrollbar">
               <div className="flex items-center gap-4 border-b border-gray-100 pb-6">
-                <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-black text-white shadow-sm ${ viewingUser.role === 'admin' ? 'bg-orange-500' : viewingUser.role === 'teacher' ? 'bg-blue-500' : 'bg-emerald-500' }`}>
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black text-white shadow-sm shrink-0 ${ viewingUser.role === 'admin' ? 'bg-orange-500' : viewingUser.role === 'teacher' ? 'bg-blue-600' : 'bg-emerald-600' }`}>
                   {viewingUser.fullName ? viewingUser.fullName.charAt(0) : viewingUser.email?.charAt(0).toUpperCase()}
                 </div>
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900">{viewingUser.fullName || 'No Name Provided'}</h3>
-                  <div className="flex gap-2 items-center mt-1">
+                <div className="min-w-0">
+                  <h3 className="text-xl font-bold text-gray-900 truncate">{viewingUser.fullName || 'No Name Provided'}</h3>
+                  <div className="flex flex-wrap gap-2 items-center mt-1">
                     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border ${ viewingUser.role === 'admin' ? 'bg-orange-50 text-orange-700 border-orange-200' : viewingUser.role === 'teacher' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200' }`}>
                       {viewingUser.role}
                     </span>
-                    {viewingUser.class && (
-                      <span className="text-[10px] bg-gray-100 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-full font-bold">{viewingUser.role === 'teacher' ? `Class ${viewingUser.class} (Class Teacher)` : `Class ${viewingUser.class}`}</span>
+                    {viewingUser.role === 'student' && viewingUser.class && (
+                      <span className="text-[10px] bg-gray-100 text-gray-700 border border-gray-200 px-2.5 py-0.5 rounded-full font-bold">
+                        Class {viewingUser.class} {viewingUser.section ? `• Sec ${viewingUser.section}` : ''} {viewingUser.rollNumber || viewingUser.rollNo ? `• Roll ${viewingUser.rollNumber || viewingUser.rollNo}` : ''}
+                      </span>
+                    )}
+                    {viewingUser.role === 'teacher' && viewingUser.class && (
+                      <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full font-bold">Class {viewingUser.class} (Class Teacher)</span>
+                    )}
+                    {viewingUser.role === 'admin' && (
+                      <span className="text-[10px] bg-orange-100 text-orange-800 border border-orange-300 px-2.5 py-0.5 rounded-full font-bold uppercase">
+                        {viewingUser.adminTier === 'primary' ? '1° Primary Admin' : '2° Secondary Admin'}
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Identity & Basic Info Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Email Address</p>
-                  <p className="font-medium text-gray-800 flex items-center gap-2"><Mail className="w-4 h-4 text-gray-400"/> {viewingUser.email}</p>
+                  <p className="font-medium text-gray-800 flex items-center gap-2 text-sm truncate"><Mail className="w-4 h-4 text-gray-400 shrink-0"/> {viewingUser.email}</p>
                 </div>
                 
                 <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Date of Birth</p>
-                  <p className="font-medium text-gray-800 flex flex-col gap-1">
-                     <span className="flex items-center gap-2"><Calendar className="w-4 h-4 text-gray-400"/> {viewingUser.dob || 'Not Provided'} (A.D.)</span>
-                     {viewingUser.dobBs && <span className="flex items-center gap-2"><Calendar className="w-4 h-4 text-gray-400"/> {viewingUser.dobBs} (B.S.)</span>}
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Permanent Identifier</p>
+                  <p className="font-mono font-bold text-blue-700 flex items-center gap-2 text-sm">
+                    <BadgeCheck className="w-4 h-4 text-blue-500 shrink-0"/> 
+                    {viewingUser.role === 'student' 
+                      ? (viewingUser.permanentStudentId || viewingUser.studentId || 'N/A')
+                      : viewingUser.role === 'admin'
+                      ? (viewingUser.permanentAdminId || viewingUser.adminId || viewingUser.staffId || 'ADM-000001')
+                      : (viewingUser.permanentTeacherId || viewingUser.teacherId || viewingUser.staffId || 'N/A')}
                   </p>
+                  {viewingUser.role === 'student' && (viewingUser.emisNumber || viewingUser.studentEmis) && (
+                    <p className="text-xs text-gray-500 mt-0.5 font-mono">
+                      EMIS: <span className="font-bold text-gray-800">{viewingUser.emisNumber || viewingUser.studentEmis}</span>
+                    </p>
+                  )}
                 </div>
-                
+
                 <div>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Contact Phone</p>
-                  <p className="font-medium text-gray-800 flex items-center gap-2"><Smartphone className="w-4 h-4 text-gray-400"/> {viewingUser.phone || 'N/A'}</p>
+                  <p className="font-medium text-gray-800 flex items-center gap-2 text-sm"><Smartphone className="w-4 h-4 text-gray-400 shrink-0"/> {viewingUser.phone || 'N/A'}</p>
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
-                    {viewingUser.role === 'student' ? 'Student ID' : 'Staff ID'}
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Date of Birth</p>
+                  <p className="font-medium text-gray-800 flex flex-col gap-0.5 text-xs">
+                     <span className="flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0"/> {viewingUser.dob || 'Not Provided'} (A.D.)</span>
+                     {viewingUser.dobBs && <span className="flex items-center gap-2 text-gray-600"><Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0"/> {viewingUser.dobBs} (B.S.)</span>}
                   </p>
-                  <p className="font-mono font-bold text-blue-600 flex items-center gap-2"><BadgeCheck className="w-4 h-4 text-gray-400"/> {viewingUser.studentId || 'N/A'}</p>
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Account Status</p>
-                  <p className="font-medium text-emerald-600 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500"/> {viewingUser.active !== false ? 'Active' : 'Inactive'}</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Permanent Address</p>
+                  <p className="font-medium text-gray-800 text-sm">{viewingUser.address || 'Not Provided'}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Gender</p>
+                  <p className="font-medium text-gray-800 text-sm">{viewingUser.gender || 'Not Specified'}</p>
                 </div>
               </div>
 
-              <div className="flex gap-4 pt-6 mt-6 border-t border-gray-100">
+              {/* Student-Specific Section */}
+              {viewingUser.role === 'student' && (
+                <div className="pt-4 border-t border-gray-100 space-y-4">
+                  <p className="text-xs font-black text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                    🎓 Academic & Guardian Details
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-emerald-50/40 p-4 rounded-2xl border border-emerald-100/60">
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Father's Name</p>
+                      <p className="font-bold text-gray-800 text-xs">{viewingUser.fatherName || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Mother / Guardian</p>
+                      <p className="font-bold text-gray-800 text-xs">{viewingUser.motherName || viewingUser.guardianName || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Guardian Phone</p>
+                      <p className="font-bold text-gray-800 text-xs">{viewingUser.phone || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Scholarship Status</p>
+                      <p className="font-bold text-gray-800 text-xs">{viewingUser.scholarshipStatus === 'Provided' ? `Provided (NRs. ${viewingUser.scholarshipAmount || 0})` : 'None'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Teacher-Specific Section */}
+              {viewingUser.role === 'teacher' && (
+                <div className="pt-4 border-t border-gray-100 space-y-4">
+                  <p className="text-xs font-black text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                    👨‍🏫 Faculty & Teaching Assignments
+                  </p>
+                  <div className="space-y-3 bg-blue-50/40 p-4 rounded-2xl border border-blue-100/60">
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Primary Class Teacher Of</p>
+                      <p className="font-bold text-gray-800 text-xs">{viewingUser.class ? `Class ${viewingUser.class}` : 'None Assigned'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Assigned Classes</p>
+                      <div className="flex flex-wrap gap-1">
+                        {viewingUser.assignedClasses && viewingUser.assignedClasses.length > 0 ? (
+                          viewingUser.assignedClasses.map((c, i) => (
+                            <span key={i} className="bg-white border border-blue-200 text-blue-900 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              {c.startsWith('Class') ? c : `Class ${c}`}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-500 font-medium">None assigned</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Assigned Subjects</p>
+                      <div className="flex flex-wrap gap-1">
+                        {viewingUser.assignedSubjects && viewingUser.assignedSubjects.length > 0 ? (
+                          viewingUser.assignedSubjects.map((s, i) => (
+                            <span key={i} className="bg-white border border-blue-200 text-blue-900 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              {s}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-500 font-medium">None assigned</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Admin-Specific Section */}
+              {viewingUser.role === 'admin' && (
+                <div className="pt-4 border-t border-gray-100 space-y-3">
+                  <p className="text-xs font-black text-orange-800 uppercase tracking-wider flex items-center gap-1.5">
+                    🛡️ System Governance & Permissions
+                  </p>
+                  <div className="bg-orange-50/50 p-4 rounded-2xl border border-orange-100 space-y-2">
+                    <p className="text-xs font-bold text-orange-900">
+                      Tier: <span className="font-black uppercase">{viewingUser.adminTier === 'primary' ? '1° Primary Admin (Full Governance)' : '2° Secondary Admin (Operational)'}</span>
+                    </p>
+                    <p className="text-[11px] text-gray-600 leading-relaxed">
+                      {viewingUser.adminTier === 'primary' 
+                        ? 'Authorized for user approvals, governance role assignments, fee management, and system security controls.' 
+                        : 'Authorized for routine administrative duties, user reviews, and academic records.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons Toolbar */}
+              <div className="pt-4 border-t border-gray-100 flex flex-wrap gap-2.5 items-center justify-end">
+                {viewingUser.role === 'student' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetId = viewingUser.permanentStudentId || viewingUser.studentId || viewingUser.id;
+                        setViewingUser(null);
+                        navigate(`/result?studentId=${encodeURIComponent(targetId)}`);
+                      }}
+                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      📊 Result
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewingUser(null);
+                        navigate(`/account-admin?tab=student_laser&studentId=${encodeURIComponent(viewingUser.id)}`);
+                      }}
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      💳 Fee Status
+                    </button>
+                  </>
+                )}
+
                 <button 
-                  onClick={() => setViewingUser(null)} 
-                  className="w-full py-3.5 text-sm font-black bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-2xl transition-colors"
+                  type="button"
+                  onClick={() => {
+                    const u = viewingUser;
+                    setViewingUser(null);
+                    setEditingUser(u);
+                  }}
+                  className="px-4 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-black text-xs rounded-xl border border-indigo-200 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  Close Profile
+                  <Edit3 className="w-3.5 h-3.5" /> Edit Profile
+                </button>
+
+                {(viewingUser.role !== 'admin' || (isPrimaryAdmin && viewingUser.id !== auth.currentUser?.uid)) && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const toDel = { id: viewingUser.id, name: viewingUser.fullName || viewingUser.email || '', role: viewingUser.role, adminTier: viewingUser.adminTier };
+                      setViewingUser(null);
+                      setUserToDelete(toDel);
+                    }}
+                    className="px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white font-black text-xs rounded-xl border border-red-200 transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete Account
+                  </button>
+                )}
+
+                <button 
+                  type="button"
+                  onClick={() => setViewingUser(null)} 
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all ml-auto cursor-pointer"
+                >
+                  Close
                 </button>
               </div>
             </div>
@@ -2085,41 +2608,37 @@ export default function UserApprovals() {
 
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">
-                  {editingUser.role === 'student' ? 'Student ID (Required)' : 'Staff ID (Required)'}
+                  {editingUser.role === 'student' ? 'Permanent Student ID (Immutable)' : editingUser.role === 'admin' ? 'Permanent Admin ID (Immutable)' : 'Permanent Teacher ID (Immutable)'}
                 </label>
                 <input 
-                  required
+                  disabled
+                  readOnly
                   type="text" 
-                  value={editingUser.studentId || ''}
-                  onChange={e => setEditingUser({...editingUser, studentId: e.target.value})}
-                  className="w-full text-primary border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 font-mono font-bold text-blue-600 bg-white shadow-sm" 
-                  placeholder={editingUser.role === 'student' ? "e.g. SA524 (SA + Class + Roll No.)" : "e.g. SA_T01"}
+                  value={editingUser.role === 'student' ? (editingUser.permanentStudentId || editingUser.studentId || '') : editingUser.role === 'admin' ? (editingUser.permanentAdminId || editingUser.adminId || editingUser.staffId || '') : (editingUser.permanentTeacherId || editingUser.teacherId || editingUser.staffId || '')}
+                  className="w-full text-primary border border-gray-200 rounded-xl px-4 py-3 font-mono font-bold text-gray-500 bg-gray-100 cursor-not-allowed shadow-inner" 
                 />
                 <p className="text-[10px] font-bold text-gray-400 ml-1 mt-0.5">
-                  {editingUser.role === 'student' 
-                    ? "Format: SA[Class][Roll Number] (e.g., SA524 if class is 5 and roll number is 24)"
-                    : "Format: SA_T01, SA_T02, etc."}
+                  System-generated permanent institutional identity. Cannot be altered or tampered with.
                 </p>
-                {editingUser.role === 'student' && editingUser.class && editingUser.studentId && (() => {
-                  const dup = checkDuplicateStudentRoll(usersList, editingUser.class, editingUser.studentId, editingUser.id);
-                  if (dup.isDuplicate) {
-                    return (
-                      <div className="p-3 bg-red-50 border-2 border-red-200 rounded-xl text-xs text-red-700 font-bold flex items-start gap-2 mt-2 shadow-sm animate-pulse">
-                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-black text-red-900 uppercase tracking-wide block">Duplicate Roll Number Detected!</span>
-                          <p className="mt-0.5 text-[11px] font-medium text-red-800">{dup.message}</p>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 ml-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Roll No. {dup.extractedRoll || 'N/A'} is valid and unique for Class {editingUser.class}
-                    </div>
-                  );
-                })()}
               </div>
+
+              {editingUser.role === 'student' && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">
+                    Class Roll Number
+                  </label>
+                  <input 
+                    type="text" 
+                    value={editingUser.rollNumber || editingUser.rollNo || ''}
+                    onChange={e => setEditingUser({...editingUser, rollNumber: e.target.value, rollNo: e.target.value})}
+                    className="w-full text-primary border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 font-mono font-bold text-blue-600 bg-white shadow-sm" 
+                    placeholder="e.g. 1, 2, 24"
+                  />
+                  <p className="text-[10px] font-bold text-gray-400 ml-1 mt-0.5">
+                    Class-specific roll number for this student.
+                  </p>
+                </div>
+              )}
 
               {editingUser.role === 'student' && (
                 <div className="space-y-4">
@@ -2186,14 +2705,19 @@ export default function UserApprovals() {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">EMIS Number</label>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">
+                        EMIS Number (Institutional Record)
+                      </label>
                       <input 
                         type="text" 
                         value={editingUser.emisNumber || ''}
-                        onChange={e => setEditingUser({...editingUser, emisNumber: e.target.value})}
+                        onChange={e => setEditingUser({...editingUser, emisNumber: e.target.value, studentEmis: e.target.value})}
                         className="w-full text-primary border rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 font-mono font-bold text-gray-700 border-gray-200" 
                         placeholder="Enter EMIS number"
                       />
+                      <p className="text-[10px] font-bold text-gray-400 ml-1 mt-0.5">
+                        Correction of EMIS is verified for uniqueness. Duplicate EMIS numbers are strictly blocked.
+                      </p>
                     </div>
 
                     <div className="space-y-1">
@@ -2530,43 +3054,44 @@ export default function UserApprovals() {
                     onChange={(dates) => setNewUser({ ...newUser, dob: dates.dob, dobBs: dates.dobBs })}
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
-                    {newUser.role === 'student' ? 'Student ID (Required)' : 'Staff ID (Required)'}
-                  </label>
-                  <input 
-                    required
-                    type="text" 
-                    value={newUser.studentId}
-                    onChange={e => setNewUser({...newUser, studentId: e.target.value})}
-                    placeholder={newUser.role === 'student' ? "e.g. SA524 (SA + Class + Roll No.)" : "e.g. SA_T01"}
-                    className="w-full border-primary text-primary border-gray-100 rounded-2xl px-5 py-4 text-sm font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 transition-all border outline-none font-mono"
-                  />
-                  <p className="text-[10px] font-bold text-gray-400 ml-1 mt-0.5">
-                    {newUser.role === 'student' 
-                      ? "Format: SA[Class][Roll Number] (e.g., SA524 if class is 5 and roll number is 24)"
-                      : "Format: SA_T01, SA_T02, etc."}
-                  </p>
-                  {newUser.role === 'student' && newUser.class && newUser.studentId && (() => {
-                    const dup = checkDuplicateStudentRoll(usersList, newUser.class, newUser.studentId);
-                    if (dup.isDuplicate) {
-                      return (
-                        <div className="p-3 bg-red-50 border-2 border-red-200 rounded-xl text-xs text-red-700 font-bold flex items-start gap-2 mt-2 shadow-sm animate-pulse">
-                          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                          <div>
-                            <span className="font-black text-red-900 uppercase tracking-wide block">Duplicate Roll Number Detected!</span>
-                            <p className="mt-0.5 text-[11px] font-medium text-red-800">{dup.message}</p>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 ml-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Roll No. {dup.extractedRoll || 'N/A'} is available for Class {newUser.class}
+                {newUser.role === 'student' ? (
+                  <div className="space-y-3">
+                    <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-2xl flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">Permanent School ID</span>
+                        <p className="text-xs font-mono font-bold text-blue-700">Auto-generated upon registration (STU-XXXXXX format)</p>
                       </div>
-                    );
-                  })()}
-                </div>
+                      <BadgeCheck className="w-5 h-5 text-blue-600 shrink-0" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                        Class Roll Number (Optional)
+                      </label>
+                      <input 
+                        type="text" 
+                        value={newUser.rollNumber || ''}
+                        onChange={e => setNewUser({ ...newUser, rollNumber: e.target.value, rollNo: e.target.value })}
+                        placeholder="e.g. 1, 2, 24"
+                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-5 py-4 text-sm font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 transition-all border outline-none font-mono"
+                      />
+                      <p className="text-[10px] font-bold text-gray-400 ml-1 mt-0.5">
+                        Class-specific roll number for this student. Permanent Student ID will be automatically generated as STU-XXXXXX.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-2xl flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">
+                        {newUser.role === 'admin' ? 'Permanent Admin ID' : 'Permanent Teacher ID'}
+                      </span>
+                      <p className="text-xs font-mono font-bold text-blue-700">
+                        {newUser.role === 'admin' ? 'Auto-generated upon registration (ADM-XXXXXX format)' : 'Auto-generated upon registration (TCH-XXXXXX format)'}
+                      </p>
+                    </div>
+                    <BadgeCheck className="w-5 h-5 text-blue-600 shrink-0" />
+                  </div>
+                )}
                 {newUser.role === 'student' && (
                   <>
 
@@ -2591,14 +3116,20 @@ export default function UserApprovals() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">EMIS Number (Optional)</label>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">
+                        EMIS Number (Required for Students) *
+                      </label>
                       <input 
+                        required
                         type="text" 
                         value={newUser.emisNumber}
                         onChange={e => setNewUser({...newUser, emisNumber: e.target.value})}
-                        placeholder="Enter EMIS number"
+                        placeholder="Enter Government EMIS number"
                         className="w-full border-primary text-primary border-gray-100 rounded-2xl px-5 py-4 text-sm font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 transition-all border outline-none font-mono"
                       />
+                      <p className="text-[10px] font-bold text-gray-400 ml-1 mt-0.5">
+                        Mandatory government EMIS code. Must be strictly unique across all students.
+                      </p>
                     </div>
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Father's Name (Required)</label>

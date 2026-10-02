@@ -26,6 +26,7 @@ import Admin from "./pages/Admin";
 import Admission from "./pages/Admission";
 import AdminAdmissions from "./pages/AdminAdmissions";
 import UserApprovals from "./pages/UserApprovals";
+import StudentProfileView from "./pages/StudentProfileView";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import TeacherSalary from "./pages/TeacherSalary";
@@ -450,6 +451,44 @@ export default function App() {
     };
   }, []);
 
+  // Periodic heartbeat to refresh session lastActiveAt and detect remote revocation
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const runHeartbeat = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) return;
+        const currentSid = localStorage.getItem("localSessionId");
+        if (!currentSid) return;
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/auth/heartbeat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ sessionId: currentSid }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.revoked) {
+            await signOut(auth);
+            setIsAuthenticated(false);
+            setUserRole("guest");
+            localStorage.removeItem("userRole");
+          }
+        }
+      } catch {
+        // Non-blocking background heartbeat
+      }
+    };
+
+    runHeartbeat();
+    const heartbeatTimer = setInterval(runHeartbeat, 60000); // Heartbeat every 60s
+    return () => clearInterval(heartbeatTimer);
+  }, [isAuthenticated]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#f3f4f6]">
@@ -572,6 +611,16 @@ export default function App() {
             element={
               isAuthenticated && userRole === "admin" ? (
                 <UserApprovals />
+              ) : (
+                <Navigate to="/" />
+              )
+            }
+          />
+          <Route
+            path="student-profile/:id"
+            element={
+              isAuthenticated && userRole === "admin" ? (
+                <StudentProfileView />
               ) : (
                 <Navigate to="/" />
               )

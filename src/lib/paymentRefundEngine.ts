@@ -30,6 +30,7 @@ import {
 import { db, auth } from '../firebase';
 import { sanitizeForFirestore } from './firestoreSanitize';
 import { formatBSDate } from './nepaliDate';
+import { getAuthoritativeActor } from './auditLogger';
 
 export interface ProcessRefundParams {
   transactionId: string;
@@ -203,11 +204,16 @@ export async function processPaymentRefund(params: ProcessRefundParams): Promise
   const primaryStudentId = targetTx.studentId || allTxList.find(x => x.studentId)?.studentId || null;
   const studentUserRef = primaryStudentId ? doc(firestore, 'users', primaryStudentId) : null;
 
+  // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
+  const authoritativeActor = await getAuthoritativeActor();
+
+  const resolvedPaymentGroup = paymentGroupId || `PAY_${params.transactionId}`;
+
   // Pre-allocate document references for atomic writes
   const refundRecordRef = doc(collection(firestore, 'refund_records'));
   const cashExpenseRef = doc(collection(firestore, 'cash_ledger'));
-  const auditLogRef = doc(collection(firestore, 'ledger_audit_logs'));
-  const systemAuditLogRef = doc(collection(firestore, 'audit_logs'));
+  const auditLogRef = doc(firestore, 'ledger_audit_logs', resolvedPaymentGroup);
+  const systemAuditLogRef = doc(firestore, 'audit_logs', resolvedPaymentGroup);
 
   // ==========================================
   // 2. ATOMIC TRANSACTION (runTransaction)
@@ -492,7 +498,6 @@ export async function processPaymentRefund(params: ProcessRefundParams): Promise
     t.set(cashExpenseRef, sanitizeForFirestore(cashOutflowData));
 
     // 9. Create ledger_audit_logs and audit_logs documents atomically inside the same transaction
-    const actorUid = auth.currentUser?.uid || 'admin';
     const auditData = {
       id: auditLogRef.id,
       auditLogId: auditLogRef.id,
@@ -537,13 +542,13 @@ export async function processPaymentRefund(params: ProcessRefundParams): Promise
       newValue: `Status: REFUNDED | Cash Outflow: NRs. ${totalCashToRefund.toLocaleString()} in cash_ledger | Refund Record: ${refundRecordRef.id} | Fees restored: ${feesRestoredCount} | Bills restored: ${billsRestoredCount}`,
       reason: params.reason || 'Administrative refund processed with password verification',
       result: 'SUCCESS',
-      actorUid: actorUid,
-      adminUid: actorUid,
-      actorName: params.adminName,
-      adminName: params.adminName,
-      actorRole: 'admin',
-      adminEmail: params.adminEmail,
-      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      actorUid: authoritativeActor.actorUid,
+      adminUid: authoritativeActor.adminUid,
+      actorName: authoritativeActor.actorName || params.adminName,
+      adminName: authoritativeActor.adminName || params.adminName,
+      actorRole: authoritativeActor.actorRole || 'admin',
+      adminEmail: authoritativeActor.adminEmail || params.adminEmail,
+      adminTier: authoritativeActor.adminTier || 'primary',
       date: bsDate,
       dateBS: bsDate,
       timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,

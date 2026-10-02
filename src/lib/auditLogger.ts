@@ -1,5 +1,13 @@
 import { db, auth } from '../firebase';
-import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { 
+    collection, 
+    serverTimestamp, 
+    doc, 
+    getDoc, 
+    setDoc, 
+    Transaction, 
+    WriteBatch 
+} from 'firebase/firestore';
 import { formatBSDate, getBSYearMonthDate } from './nepaliDate';
 
 export interface AuditLogEntry {
@@ -12,7 +20,7 @@ export interface AuditLogEntry {
     dateBS: string;
     category?: 'financial' | 'system' | 'security' | 'academic' | string;
     action?: string;
-    actionType: 'AMOUNT_MODIFIED' | 'STATUS_REFUNDED' | 'PAYMENT_UNDONE' | 'TRANSACTION_DELETED' | 'MANUAL_OVERRIDE' | 'FEE_ADJUSTED' | 'PAYMENT_ENTRY' | 'USER_APPROVED' | 'ROLE_CHANGED' | 'ADMIN_TIER_CHANGED' | 'USER_DELETED' | 'USER_PROFILE_UPDATED' | 'BILL_GENERATED' | 'BILL_VOIDED' | 'EXAM_PUBLISHED' | 'SETTINGS_CHANGED' | string;
+    actionType: 'AMOUNT_MODIFIED' | 'STATUS_REFUNDED' | 'PAYMENT_UNDONE' | 'TRANSACTION_DELETED' | 'MANUAL_OVERRIDE' | 'FEE_ADJUSTED' | 'PAYMENT_ENTRY' | 'USER_APPROVED' | 'ROLE_CHANGED' | 'ADMIN_TIER_CHANGED' | 'USER_DELETED' | 'USER_DELETION_REQUESTED' | 'USER_AUTH_DELETE_FAILED' | 'USER_DELETION_FINALIZED' | 'USER_PROFILE_UPDATED' | 'BILL_GENERATED' | 'BILL_VOIDED' | 'EXAM_PUBLISHED' | 'MARK_MODIFIED' | 'RESULT_EDITED' | 'MARK_ENTRY' | 'RESULTS_SAVED' | 'SETTINGS_CHANGED' | 'TEST_TRANSACTION_PURGED' | 'EXCESS_APPROVED_ADVANCE' | 'EXCESS_APPROVED_RETURN' | 'REMARKS_MODIFIED' | 'LEDGER_RECONCILIATION_REPAIR' | string;
     targetType?: string;
     targetId?: string;
     transactionId?: string;
@@ -68,7 +76,7 @@ export interface AuditLogInput {
     result?: 'SUCCESS' | 'REJECTED' | 'ABORTED' | 'FAILED' | string;
     operationId?: string;
     correlationId?: string;
-    // Client hints (will NOT override authenticated user UID)
+    // Client hints (will NOT override authenticated user UID or role/tier)
     adminName?: string;
     adminEmail?: string;
     adminUid?: string;
@@ -77,33 +85,40 @@ export interface AuditLogInput {
 }
 
 /**
- * Resolves authoritative actor identity from Firebase Auth and Firestore users/{uid}.
- * Prevents client-side identity spoofing (actorUid, actorName, actorRole, adminTier).
+ * Resolves authoritative actor identity exclusively from Firebase Auth and Firestore users/{uid}.
+ * Never relies on client-controlled localStorage or arbitrary caller-provided role/tier.
+ * Fails closed if Firestore profile is inaccessible or unverified.
  */
 export async function getAuthoritativeActor() {
     const user = auth.currentUser;
     if (!user) {
-        throw new Error('UNAUTHENTICATED: An active authenticated session is required to perform audited actions.');
+        throw new Error('UNAUTHENTICATED: An active authenticated session is required to perform security-sensitive or audited actions.');
     }
 
-    let actorRole = 'admin';
-    let adminTier = 'primary';
-    let actorName = user.displayName || (user.email ? user.email.split('@')[0] : 'Administrator');
-
+    const userDocRef = doc(db, 'users', user.uid);
+    let userSnap;
     try {
-        const userDocRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userDocRef);
-        if (userSnap.exists()) {
-            const uData = userSnap.data();
-            actorRole = uData.role || 'admin';
-            adminTier = uData.adminTier || (actorRole === 'admin' ? 'primary' : '');
-            if (uData.fullName || uData.name) {
-                actorName = uData.fullName || uData.name;
-            }
-        }
-    } catch (e) {
-        console.warn('Could not read authoritative user doc for audit actor:', e);
+        userSnap = await getDoc(userDocRef);
+    } catch (err: any) {
+        throw new Error(`AUTHORIZATION_ERROR: Authoritative security identity could not be verified from Firestore (${err?.message || 'Database inaccessible'}). Operation aborted.`);
     }
+
+    if (!userSnap || !userSnap.exists()) {
+        throw new Error(`AUTHORIZATION_DENIED: User profile record for ${user.uid} does not exist in authoritative users registry.`);
+    }
+
+    const uData = userSnap.data();
+    if (uData.deleted === true || uData.status === 'DELETED' || uData.status === 'AUTH_DELETED_PENDING_FINALIZATION' || uData.status === 'DELETION_PENDING') {
+        throw new Error(`AUTHORIZATION_DENIED: User account ${user.uid} is inactive, tombstoned, or pending deletion.`);
+    }
+
+    const actorRole = uData.role;
+    if (!actorRole) {
+        throw new Error('AUTHORIZATION_DENIED: User record lacks an authoritative role.');
+    }
+
+    const adminTier: 'primary' | 'secondary' | string = uData.adminTier || (actorRole === 'admin' ? 'primary' : '');
+    const actorName = uData.fullName || uData.name || user.displayName || (user.email ? user.email.split('@')[0] : 'Administrator');
 
     return {
         actorUid: user.uid,
@@ -119,13 +134,15 @@ export async function getAuthoritativeActor() {
 
 /**
  * Builds a standardized, authoritative audit log payload with immutable timestamps and identity.
+ * Overwrites client-supplied role/tier/UID with authoritative authenticated values.
  */
 export async function buildAuthoritativeAuditPayload(data: AuditLogInput, customAuditId?: string): Promise<AuditLogEntry> {
     const actor = await getAuthoritativeActor();
     const now = new Date();
     const dateBS = formatBSDate(now) || '';
     const timestampStr = `${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
-    const opId = data.operationId || data.correlationId || `OP_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const opId = data.operationId || data.correlationId || customAuditId || `OP_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const auditDocId = customAuditId || opId;
 
     const prevStr = data.previousValue || (data.beforeState !== undefined ? (typeof data.beforeState === 'object' ? JSON.stringify(data.beforeState) : String(data.beforeState)) : 'N/A');
     const newStr = data.newValue || (data.afterState !== undefined ? (typeof data.afterState === 'object' ? JSON.stringify(data.afterState) : String(data.afterState)) : 'N/A');
@@ -134,7 +151,8 @@ export async function buildAuthoritativeAuditPayload(data: AuditLogInput, custom
     const resolvedAction = data.action || data.actionType;
 
     return {
-        ...(customAuditId ? { id: customAuditId, auditLogId: customAuditId } : {}),
+        id: auditDocId,
+        auditLogId: auditDocId,
         timestamp: serverTimestamp(),
         createdAt: serverTimestamp(),
         timestampStr,
@@ -164,7 +182,7 @@ export async function buildAuthoritativeAuditPayload(data: AuditLogInput, custom
         result: data.result || 'SUCCESS',
         operationId: opId,
         correlationId: data.correlationId || opId,
-        // Authoritative actor identity derived directly from authenticated account
+        // Authoritative actor identity derived directly from authenticated account and Firestore users profile
         actorUid: actor.actorUid,
         adminUid: actor.adminUid,
         actorName: actor.actorName,
@@ -178,12 +196,15 @@ export async function buildAuthoritativeAuditPayload(data: AuditLogInput, custom
 
 /**
  * Creates an immutable audit log entry in the Firestore `audit_logs` collection.
+ * Uses deterministic document ID derived from operationId to guarantee idempotency across retries.
  */
 export async function recordAuditLog(data: AuditLogInput): Promise<string | null> {
     try {
         const payload = await buildAuthoritativeAuditPayload(data);
-        const docRef = await addDoc(collection(db, 'audit_logs'), payload);
-        return docRef.id;
+        const docId = payload.id || payload.operationId || `OP_${Date.now()}`;
+        const docRef = doc(db, 'audit_logs', docId);
+        await setDoc(docRef, payload, { merge: true });
+        return docId;
     } catch (error) {
         console.error('Failed to write to audit_logs:', error);
         return null;
@@ -193,6 +214,7 @@ export async function recordAuditLog(data: AuditLogInput): Promise<string | null
 /**
  * Creates an immutable audit log entry in the Firestore `ledger_audit_logs` collection,
  * and mirrors it to `audit_logs` for comprehensive administrative visibility.
+ * Uses deterministic document ID derived from operationId for idempotency.
  */
 export async function recordLedgerAuditLog(data: AuditLogInput): Promise<string | null> {
     try {
@@ -201,19 +223,56 @@ export async function recordLedgerAuditLog(data: AuditLogInput): Promise<string 
             category: data.category || 'financial'
         });
 
-        const docRef = await addDoc(collection(db, 'ledger_audit_logs'), payload);
+        const docId = payload.id || payload.operationId || `OP_LEDGER_${Date.now()}`;
+        const docRef = doc(db, 'ledger_audit_logs', docId);
+        await setDoc(docRef, payload, { merge: true });
         
         // Also mirror to audit_logs for unified administrative transparency
         try {
-            await addDoc(collection(db, 'audit_logs'), payload);
+            await setDoc(doc(db, 'audit_logs', docId), payload, { merge: true });
         } catch (mirrorErr) {
             console.warn('Could not mirror to audit_logs:', mirrorErr);
         }
 
-        return docRef.id;
+        return docId;
     } catch (error) {
         console.error('Failed to write to ledger_audit_logs:', error);
         return null;
     }
 }
 
+/**
+ * Binds an audit log write to an existing Firestore Transaction.
+ */
+export async function recordTransactionalAuditLog(
+    transaction: Transaction,
+    data: AuditLogInput,
+    collections: ('audit_logs' | 'ledger_audit_logs')[] = ['audit_logs']
+): Promise<string> {
+    const payload = await buildAuthoritativeAuditPayload(data);
+    const docId = payload.id || payload.operationId || `OP_${Date.now()}`;
+    
+    for (const col of collections) {
+        const docRef = doc(db, col, docId);
+        transaction.set(docRef, payload, { merge: true });
+    }
+    return docId;
+}
+
+/**
+ * Binds an audit log write to an existing Firestore WriteBatch.
+ */
+export async function recordBatchAuditLog(
+    batch: WriteBatch,
+    data: AuditLogInput,
+    collections: ('audit_logs' | 'ledger_audit_logs')[] = ['audit_logs']
+): Promise<string> {
+    const payload = await buildAuthoritativeAuditPayload(data);
+    const docId = payload.id || payload.operationId || `OP_${Date.now()}`;
+    
+    for (const col of collections) {
+        const docRef = doc(db, col, docId);
+        batch.set(docRef, payload, { merge: true });
+    }
+    return docId;
+}

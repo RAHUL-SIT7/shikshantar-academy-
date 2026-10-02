@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { formatBSDate, getBSYearMonthDate } from '../lib/nepaliDate';
 import { Menu, X, Home, Building, Image, Calendar, User, FileText, LogOut, LogIn, Info, Settings, Upload, CreditCard, Shield, Bell, Megaphone, Check, Users, MapPin, Phone, HelpCircle, GraduationCap, Award, Wallet, Sun, Moon, ChevronUp, Facebook, Globe, Mail, SmilePlus, LayoutDashboard } from 'lucide-react';
@@ -45,27 +46,108 @@ export default function Layout({
   userRole: string
 }) {
   const [themeMode, setThemeMode] = useState<string>(() => localStorage.getItem('themeMode') || 'light');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebarCollapsed') === 'true');
+  
+  interface FlyoutState {
+    name: string;
+    top: number;
+    left: number;
+  }
+  const [flyoutState, setFlyoutState] = useState<FlyoutState | null>(null);
+  const openTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const closeTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const clearFlyoutTimeouts = () => {
+    if (openTimeoutRef.current) {
+      clearTimeout(openTimeoutRef.current);
+      openTimeoutRef.current = null;
+    }
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const calculateFlyoutPosition = (el: HTMLElement) => {
+    const rect = el.getBoundingClientRect();
+    const flyoutEstimatedHeight = 56;
+    const padding = 12;
+    const minTop = 80; // Below the top desktop header
+    const maxTop = window.innerHeight - flyoutEstimatedHeight - padding;
+    const idealTop = rect.top + (rect.height - flyoutEstimatedHeight) / 2;
+    const clampedTop = Math.max(minTop, Math.min(maxTop, idealTop));
+    const left = rect.right + 10;
+    return { top: Math.round(clampedTop), left: Math.round(left) };
+  };
+
+  const handleNavMouseEnter = (name: string, el: HTMLElement) => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+
+    const pos = calculateFlyoutPosition(el);
+
+    if (flyoutState) {
+      // If a flyout is already active, transition immediately to the hovered item
+      if (openTimeoutRef.current) {
+        clearTimeout(openTimeoutRef.current);
+        openTimeoutRef.current = null;
+      }
+      setFlyoutState({ name, top: pos.top, left: pos.left });
+    } else {
+      // First open after brief grace period (~110ms)
+      if (openTimeoutRef.current) {
+        clearTimeout(openTimeoutRef.current);
+      }
+      openTimeoutRef.current = setTimeout(() => {
+        setFlyoutState({ name, top: pos.top, left: pos.left });
+      }, 110);
+    }
+  };
+
+  const handleNavMouseLeave = () => {
+    if (openTimeoutRef.current) {
+      clearTimeout(openTimeoutRef.current);
+      openTimeoutRef.current = null;
+    }
+    // Close grace period of 180ms
+    closeTimeoutRef.current = setTimeout(() => {
+      setFlyoutState(null);
+    }, 180);
+  };
+
+  const handleFlyoutMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const handleFlyoutMouseLeave = () => {
+    if (openTimeoutRef.current) {
+      clearTimeout(openTimeoutRef.current);
+      openTimeoutRef.current = null;
+    }
+    closeTimeoutRef.current = setTimeout(() => {
+      setFlyoutState(null);
+    }, 180);
+  };
+
+  const toggleSidebarCollapse = () => {
+    clearFlyoutTimeouts();
+    setFlyoutState(null);
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebarCollapsed', String(next));
+      return next;
+    });
+  };
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isBellOpen, setIsBellOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('sidebar_collapsed') === 'true';
-    } catch (e) {
-      return false;
-    }
-  });
-
-  const toggleSidebar = () => {
-    setIsSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('sidebar_collapsed', String(next));
-      } catch (e) {}
-      return next;
-    });
-  };
 
   const {
     notices: recentNotices,
@@ -91,51 +173,12 @@ export default function Layout({
   const location = useLocation();
   const navigate = useNavigate();
   const mainRef = React.useRef<HTMLDivElement>(null);
-  const desktopProfileRef = React.useRef<HTMLDivElement>(null);
-  const desktopBellRef = React.useRef<HTMLDivElement>(null);
-  const mobileProfileRef = React.useRef<HTMLDivElement>(null);
-  const mobileBellRef = React.useRef<HTMLDivElement>(null);
-
-  // Outside click listener for notification and profile dropdowns
-  useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as Node;
-      if (isProfileOpen) {
-        if (
-          (desktopProfileRef.current && desktopProfileRef.current.contains(target)) ||
-          (mobileProfileRef.current && mobileProfileRef.current.contains(target))
-        ) {
-          // Inside profile dropdown
-        } else {
-          setIsProfileOpen(false);
-        }
-      }
-      if (isBellOpen) {
-        if (
-          (desktopBellRef.current && desktopBellRef.current.contains(target)) ||
-          (mobileBellRef.current && mobileBellRef.current.contains(target))
-        ) {
-          // Inside bell dropdown
-        } else {
-          setIsBellOpen(false);
-        }
-      }
-    };
-
-    if (isProfileOpen || isBellOpen) {
-      document.addEventListener('mousedown', handleOutsideClick);
-      document.addEventListener('touchstart', handleOutsideClick);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
-    };
-  }, [isProfileOpen, isBellOpen]);
 
   // Determine if current route is an internal portal/ERP page vs public guest page
   const portalRoutes = [
     '/admin',
     '/user-approvals',
+    '/student-profile',
     '/admin-admissions',
     '/account-admin',
     '/salary-admin',
@@ -239,6 +282,10 @@ export default function Layout({
   };
 
   React.useEffect(() => {
+    clearFlyoutTimeouts();
+    setFlyoutState(null);
+    setIsBellOpen(false);
+    setIsProfileOpen(false);
     if (mainRef.current) {
       mainRef.current.scrollTop = 0;
     }
@@ -246,9 +293,6 @@ export default function Layout({
     setScrollProgress(0);
     setShowScrollTop(false);
     setIsHeaderScrolled(false);
-    setIsMenuOpen(false);
-    setIsBellOpen(false);
-    setIsProfileOpen(false);
   }, [location.pathname]);
 
   // Handle global page-level scroll for all screen sizes
@@ -280,26 +324,52 @@ export default function Layout({
     return () => window.removeEventListener('scroll', handleGlobalScroll);
   }, []);
 
-  // Prevent background body scroll when navigation menu, notification bell, or profile menu is open
+  // Prevent background scroll when mobile sliding drawer menu, notification dropdown, or avatar profile is open
   useEffect(() => {
-    if (isMenuOpen || isBellOpen || isProfileOpen) {
+    const isLocked = isMenuOpen || isBellOpen || isProfileOpen;
+    if (isLocked) {
       document.body.style.overflow = 'hidden';
       document.body.style.height = '100%';
       document.documentElement.style.overflow = 'hidden';
       document.documentElement.style.height = '100%';
+      if (mainRef.current) {
+        mainRef.current.style.overflow = 'hidden';
+      }
     } else {
       document.body.style.overflow = '';
       document.body.style.height = '';
       document.documentElement.style.overflow = '';
       document.documentElement.style.height = '';
+      if (mainRef.current) {
+        mainRef.current.style.overflow = '';
+      }
     }
     return () => {
       document.body.style.overflow = '';
       document.body.style.height = '';
       document.documentElement.style.overflow = '';
       document.documentElement.style.height = '';
+      if (mainRef.current) {
+        mainRef.current.style.overflow = '';
+      }
     };
   }, [isMenuOpen, isBellOpen, isProfileOpen]);
+
+  // Close notification bell or avatar profile on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsBellOpen(false);
+        setIsProfileOpen(false);
+      }
+    };
+    if (isBellOpen || isProfileOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isBellOpen, isProfileOpen]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getNPTDate()), 1000);
@@ -706,17 +776,27 @@ export default function Layout({
             </span>
           )}
         </div>
-        {unreadUrgentCount > 0 && (
+        <div className="flex items-center gap-2">
+          {unreadUrgentCount > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                markAllAsRead();
+              }}
+              className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer mr-1"
+            >
+              Mark all read
+            </button>
+          )}
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              markAllAsRead();
-            }}
-            className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+            onClick={() => setIsBellOpen(false)}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Close notifications"
+            aria-label="Close notifications"
           >
-            Mark all read
+            <X className="w-4 h-4" />
           </button>
-        )}
+        </div>
       </div>
 
       {/* Notice Items List */}
@@ -807,30 +887,36 @@ export default function Layout({
 
   const renderProfileDropdown = () => (
     <div 
-      className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col py-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
+      className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 text-slate-900 dark:text-slate-100 overflow-hidden flex flex-col py-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
       onClick={(e) => e.stopPropagation()}
     >
       {!isAuthenticated ? (
         <>
           {/* Guest Header */}
-          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 text-left">
-            <div className="text-xs font-black text-slate-800 dark:text-slate-100">
-              Guest User
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 text-left flex items-center justify-between">
+            <div>
+              <div className="text-xs font-black text-slate-800 dark:text-slate-100">
+                Guest User
+              </div>
+              <div className="text-[10px] text-amber-500 font-extrabold uppercase tracking-wider mt-0.5">
+                Guest Portal
+              </div>
             </div>
-            <div className="text-[10px] text-amber-500 font-extrabold uppercase tracking-wider mt-0.5">
-              Guest Portal
-            </div>
+            <button
+              onClick={() => setIsProfileOpen(false)}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+              title="Close menu"
+              aria-label="Close menu"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="p-1.5">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsProfileOpen(false);
-                navigate('/login');
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left cursor-pointer"
+            <Link
+              to="/login"
+              onClick={() => setIsProfileOpen(false)}
+              className="px-3.5 py-2.5 rounded-xl text-sm font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left"
             >
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
                 <LogIn className="w-4 h-4 text-amber-600 dark:text-amber-400" />
@@ -839,55 +925,55 @@ export default function Layout({
                 <div className="leading-tight font-black">Portal Login</div>
                 <div className="text-[10px] text-slate-400 font-normal">Admin, Teacher, Student</div>
               </div>
-            </button>
+            </Link>
           </div>
         </>
       ) : (
         <>
           {/* Authenticated User Header */}
-          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 text-left">
-            <div className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
-              {userName || `Logged in as ${role}`}
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/80 text-left flex items-center justify-between">
+            <div className="min-w-0 pr-2">
+              <div className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                {userName || `Logged in as ${role}`}
+              </div>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-primary text-white">
+                  {role.toUpperCase()}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Portal</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-primary text-white">
-                {role.toUpperCase()}
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium">Portal</span>
-            </div>
+            <button
+              onClick={() => setIsProfileOpen(false)}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+              title="Close menu"
+              aria-label="Close menu"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="p-1.5 space-y-0.5 text-left">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsProfileOpen(false);
-                navigate('/profile');
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left cursor-pointer"
+            <Link
+              to="/profile"
+              onClick={() => setIsProfileOpen(false)}
+              className="px-3.5 py-2.5 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors"
             >
               <User className="w-4 h-4 text-slate-400" />
               <span>My Profile</span>
-            </button>
+            </Link>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsProfileOpen(false);
-                navigate(role === 'admin' ? '/' : role === 'teacher' ? '/teacher-salary' : '/account');
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors text-left cursor-pointer"
+            <Link
+              to="/"
+              onClick={() => setIsProfileOpen(false)}
+              className="px-3.5 py-2.5 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 transition-colors"
             >
               <LayoutDashboard className="w-4 h-4 text-amber-500" />
               <span>Portal Dashboard</span>
-            </button>
+            </Link>
 
             <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 setIsProfileOpen(false);
                 setShowLogoutConfirm(true);
               }}
@@ -914,15 +1000,24 @@ export default function Layout({
   }
 
   return (
-    <div className={`min-h-screen lg:h-screen lg:h-[100dvh] lg:max-h-screen lg:max-h-[100dvh] w-full flex flex-col bg-[#f3f4f6] dark:bg-[#0b0f19] text-[#1f2937] dark:text-[#f8fafc] font-sans print:h-auto print:bg-white print:relative print:inset-auto lg:overflow-hidden ${isMenuOpen ? 'h-screen max-h-screen overflow-hidden' : 'overflow-visible'}`}>
-      
-      {/* Spacer for Fixed Mobile Header */}
-      <div className="h-[56px] lg:hidden shrink-0 w-full" />
+    <div className={`min-h-screen lg:h-screen lg:h-[100dvh] lg:max-h-screen lg:max-h-[100dvh] w-full flex flex-col bg-[#f3f4f6] dark:bg-[#0b0f19] text-[#1f2937] dark:text-[#f8fafc] font-sans print:h-auto print:bg-white print:relative print:inset-auto lg:overflow-hidden ${(isMenuOpen || isBellOpen || isProfileOpen) ? 'h-screen max-h-screen overflow-hidden' : 'overflow-visible'}`}>
+      {/* Backdrop overlay when Notification Bell or Avatar Profile is open: locks screen scroll and provides click-outside dismissal */}
+      {(isBellOpen || isProfileOpen) && (
+        <div
+          className="fixed inset-0 z-40 bg-black/20 dark:bg-black/40 backdrop-blur-[0.5px] transition-opacity cursor-default print:hidden"
+          onClick={() => {
+            setIsBellOpen(false);
+            setIsProfileOpen(false);
+          }}
+          onTouchMove={(e) => e.preventDefault()}
+          onWheel={(e) => e.preventDefault()}
+        />
+      )}
 
-      {/* Mobile Header (Fixed Top on small screens) */}
+      {/* 1. Mobile Header (Fixed Top) */}
       <div className="lg:hidden bg-primary text-white px-2.5 py-2 flex justify-between items-center shrink-0 print:hidden shadow-md fixed top-0 left-0 right-0 z-50 h-[56px] w-full">
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="w-9 h-9 rounded-full bg-white p-0.5 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-full bg-white p-0.5 flex items-center justify-center shrink-0 shadow-sm">
             <img 
               src={logoUrl} 
               alt="Logo" 
@@ -937,10 +1032,10 @@ export default function Layout({
           </div>
           <div className="min-w-0">
             <div className="font-extrabold tracking-tight text-xs sm:text-sm whitespace-nowrap">SHIKSHANTAR</div>
-            <div className="text-[0.55rem] sm:text-[0.6rem] opacity-85 leading-none mb-0.5 whitespace-nowrap text-white/90 font-semibold">
-              Academy | Siraha
+            <div className="text-[0.55rem] sm:text-[0.6rem] font-black uppercase tracking-wide leading-none mb-0.5 whitespace-nowrap text-amber-300">
+              ACADEMY BASTIPUR
             </div>
-            <div className="text-[0.55rem] sm:text-[0.6rem] text-amber-300 font-extrabold uppercase tracking-wide leading-none whitespace-nowrap">
+            <div className="text-[0.55rem] sm:text-[0.6rem] text-amber-200/90 font-extrabold uppercase tracking-wide leading-none whitespace-nowrap">
               {isAuthenticated ? `${role === 'admin' ? 'Admin' : role === 'teacher' ? 'Teacher' : 'Student'} Portal` : 'Guest Portal'}
             </div>
           </div>
@@ -956,21 +1051,20 @@ export default function Layout({
            </div>
            <button 
               onClick={toggleThemeMode} 
-              className="p-1 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center pointer-events-auto shrink-0 cursor-pointer"
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center pointer-events-auto shrink-0"
               title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
-              aria-label="Toggle Theme"
            >
               {themeMode === 'dark' ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-gray-200" />}
            </button>
-           
-           {/* Notification Bell (Mobile & Tablet) */}
-           <div ref={mobileBellRef} className="relative">
+
+           {/* Bell Button (Mobile & Tablet) */}
+           <div className="relative">
              <button 
                onClick={() => {
                  setIsBellOpen(!isBellOpen);
                  setIsProfileOpen(false);
                }} 
-               className="relative p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+               className="relative p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0"
                aria-label="Notifications"
                title="Notifications"
              >
@@ -989,13 +1083,13 @@ export default function Layout({
            </div>
            
            {/* Profile Avatar Button (Mobile & Tablet) */}
-           <div ref={mobileProfileRef} className="relative">
+           <div className="relative">
              <button 
                onClick={() => {
                  setIsProfileOpen(!isProfileOpen);
                  setIsBellOpen(false);
                }} 
-               className="w-7.5 h-7.5 rounded-full bg-white/20 flex items-center justify-center border border-white/30 overflow-hidden hover:ring-2 hover:ring-white/50 transition-all shadow-sm shrink-0 cursor-pointer"
+               className="w-7.5 h-7.5 rounded-full bg-white/20 flex items-center justify-center border border-white/30 overflow-hidden hover:ring-2 hover:ring-white/50 transition-all shadow-sm shrink-0"
                aria-label="User Profile"
                title="User Profile"
              >
@@ -1018,71 +1112,76 @@ export default function Layout({
                setIsBellOpen(false);
                setIsProfileOpen(false);
              }} 
-             className="p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+             className="p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0"
              aria-label="Menu"
-             title="Menu (☰)"
            >
              {isMenuOpen ? <X className="w-5 h-5"/> : <Menu className="w-5 h-5"/>}
            </button>
         </div>
       </div>
 
-      {/* Desktop Header — Full Width, Sticky Top with Logo + School Name + ☰ Toggle + All Controls */}
-      <header className={`bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-2.5 sm:py-3 flex justify-between items-center shrink-0 z-40 hidden lg:flex print:hidden sticky top-0 transition-all duration-300 ${isHeaderScrolled ? 'shadow-md border-b border-orange-500/30' : 'shadow-[0_1px_3px_rgba(0,0,0,0.05)] border-b dark:border-slate-800'}`}>
-        {/* Left: ☰ Toggle, School Logo, School Name, Page Title */}
-        <div className="flex items-center gap-3 min-w-0">
+      {/* Spacer for Fixed Mobile Header */}
+      <div className="h-[56px] lg:hidden shrink-0 w-full" />
+
+      {/* 2. Desktop Full-Width Top Header */}
+      <header className={`w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 py-2.5 justify-between items-center shrink-0 z-50 print:hidden hidden lg:flex border-b border-slate-200/80 dark:border-slate-800 transition-all duration-200 ${isHeaderScrolled ? 'shadow-md border-orange-500/30' : 'shadow-[0_1px_3px_rgba(0,0,0,0.05)]'}`}>
+        {/* Left: Toggle + Logo + School Name + Page Title */}
+        <div className="flex items-center gap-3">
           <button 
-            onClick={toggleSidebar} 
-            className="p-2 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors cursor-pointer mr-0.5 focus:outline-hidden"
-            title={isSidebarCollapsed ? "Expand Sidebar (☰)" : "Collapse Sidebar (☰)"}
-            aria-label="Toggle Sidebar"
+            type="button"
+            onClick={toggleSidebarCollapse}
+            className="p-2 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-primary transition-all flex items-center justify-center cursor-pointer shadow-xs"
+            title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+            aria-label={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
-            <Menu className="w-5 h-5 text-gray-700 dark:text-gray-200" />
+            <Menu className="w-5 h-5" />
           </button>
-          
-          <div className="w-12 h-12 rounded-full bg-white p-0.5 shadow-sm border border-gray-200 dark:border-slate-700 flex items-center justify-center shrink-0">
-            <img 
-              src={logoUrl} 
-              alt="Shikshantar Academy Logo" 
-              referrerPolicy="no-referrer" 
-              className="w-full h-full object-contain rounded-full" 
-              fetchPriority="high"
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (target.src !== logoFallback) {
-                  target.src = logoFallback;
-                }
-              }}
-            />
-          </div>
 
-          <div className="flex flex-col leading-tight min-w-0 mr-3 select-none">
-            <div className="text-[1.05rem] lg:text-[1.28rem] font-black tracking-tight text-gray-900 dark:text-white font-display whitespace-nowrap">
-              SHIKSHANTAR
+          <Link to="/" className="flex items-center gap-3 group shrink-0">
+            <div className="w-[72px] h-[72px] rounded-full bg-white p-0.5 border border-slate-200 shadow-sm flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <img 
+                src={logoUrl} 
+                alt="Shikshantar Academy Logo" 
+                referrerPolicy="no-referrer" 
+                className="w-full h-full object-contain rounded-full" 
+                fetchPriority="high"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (target.src !== logoFallback) {
+                    target.src = logoFallback;
+                  }
+                }}
+              />
             </div>
-            <div className="text-[0.68rem] lg:text-[0.80rem] font-black text-amber-500 uppercase tracking-widest leading-none whitespace-nowrap mt-0.5">
-              ACADEMY SIRAHA
+            <div className="flex flex-col justify-center">
+              <span className="font-serif font-black text-[22px] text-[#0f284e] dark:text-white tracking-wide leading-none group-hover:text-primary transition-colors">
+                SHIKSHANTAR
+              </span>
+              <span className="text-[13px] font-black tracking-[0.14em] uppercase text-[#f59e0b] dark:text-amber-400 mt-1 leading-none">
+                ACADEMY BASTIPUR
+              </span>
             </div>
-          </div>
+          </Link>
 
-          <div className="hidden xl:flex items-center gap-2 pl-4 border-l border-gray-200 dark:border-slate-800 text-sm font-bold text-gray-700 dark:text-gray-200">
+          <div className="h-8 w-[1px] bg-slate-200 dark:bg-slate-700 mx-1.5" />
+
+          <div className="text-sm font-bold text-[#1f2937] dark:text-white flex items-center gap-2">
             <LayoutDashboard className="w-4 h-4 text-primary" />
             <span>{navigation.find(n => n.href === location.pathname)?.name || (location.pathname === '/' ? 'Home' : 'Portal')}</span>
           </div>
         </div>
 
-        {/* Right: Theme Toggle, Bell, User Role, Clock/Date, Avatar Profile */}
-        <div className="flex items-center gap-2 md:gap-4 lg:gap-6 shrink-0">
+        {/* Right: Theme Toggle, Bell, User Status, Profile */}
+        <div className="flex items-center gap-2 md:gap-4 lg:gap-5">
           <button 
             onClick={toggleThemeMode} 
             className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors flex items-center justify-center text-gray-700 dark:text-gray-200 cursor-pointer"
             title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            aria-label="Toggle Theme"
           >
-             {themeMode === 'dark' ? <Sun className="w-5 h-5 text-yellow-500" /> : <Moon className="w-5 h-5 text-gray-600" />}
+             {themeMode === 'dark' ? <Sun className="w-4.5 h-4.5 text-yellow-500" /> : <Moon className="w-4.5 h-4.5 text-gray-600" />}
           </button>
-          
-          <div ref={desktopBellRef} className="relative">
+
+          <div className="relative">
              <button 
                onClick={() => {
                  setIsBellOpen(!isBellOpen);
@@ -1092,7 +1191,7 @@ export default function Layout({
                aria-label="Notifications"
                title="Notifications"
              >
-                <Bell className="w-5 h-5 text-gray-700 dark:text-gray-200" />
+                <Bell className="w-4.5 h-4.5 text-gray-700 dark:text-gray-200" />
                 {unreadUrgentCount > 0 && (
                    <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center border-2 border-white dark:border-slate-900 text-white">
                       {unreadUrgentCount}
@@ -1100,154 +1199,195 @@ export default function Layout({
                 )}
              </button>
              {isBellOpen && (
-               <div className="absolute top-12 right-0 w-88 max-w-[380px] z-50 pointer-events-auto">
+               <div className="absolute top-12 right-0 w-88 max-w-[380px] z-50">
                  {renderNotificationDropdown()}
                </div>
              )}
           </div>
           
           <div className="text-right">
-            <div className="text-[0.8rem] font-bold flex items-center justify-end gap-2 text-[#1f2937] dark:text-gray-100">
-              <span className="px-2.5 py-0.5 rounded-full bg-primary text-white text-[10px] uppercase font-black tracking-widest shadow-sm">
+            <div className="text-[0.75rem] font-bold flex items-center justify-end gap-2 text-[#1f2937] dark:text-gray-100">
+              <span className="px-2 py-0.5 rounded-full bg-primary text-white text-[9.5px] uppercase font-black tracking-widest shadow-xs">
                  {isAuthenticated ? role.toUpperCase() : 'GUEST'}
               </span>
             </div>
-            <div className="text-[11px] text-[#6b7280] dark:text-gray-400 font-mono mt-1 font-semibold flex flex-col items-end">
-              <span className="text-[14px] text-gray-800 dark:text-gray-200 tracking-wider mb-0.5">{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', second:'2-digit' })}</span>
-              <span>{formatBSDate(currentTime)}<span className="hidden lg:inline"> | {academicYearString}</span></span>
+            <div className="text-[11px] text-[#6b7280] dark:text-gray-400 font-mono mt-0.5 font-semibold flex flex-col items-end leading-tight">
+              <span className="text-[13px] text-gray-800 dark:text-gray-200 tracking-wider font-bold">{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', second:'2-digit' })}</span>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">{formatBSDate(currentTime)}<span className="hidden lg:inline"> | {academicYearString}</span></span>
             </div>
           </div>
 
-          <div ref={desktopProfileRef} className="relative border-l border-gray-200 dark:border-slate-800 pl-3 md:pl-4 lg:pl-6 ml-1 md:ml-2">
-             <button 
-               onClick={() => {
-                 setIsProfileOpen(!isProfileOpen);
-                 setIsBellOpen(false);
-               }} 
-               className="w-10 h-10 rounded-full bg-[#f3f4f6] dark:bg-slate-800 flex items-center justify-center border border-[#e5e7eb] dark:border-slate-700 overflow-hidden shadow-sm hover:ring-2 hover:ring-primary/20 transition-all font-bold cursor-pointer"
-               aria-label="User Profile"
-               title="User Profile"
-             >
-               {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-               ) : (
-                  <User className="w-5 h-5 text-[#6b7280] dark:text-gray-300" />
-               )}
-             </button>
-
-             {isProfileOpen && (
-               <div className="absolute top-12 right-0 w-60 z-50 pointer-events-auto">
-                 {renderProfileDropdown()}
-               </div>
-             )}
-          </div>
-        </div>
-      </header>
-
-      {/* Main Body Row: Sidebar + Content Area */}
-      <div className="flex-1 flex flex-col lg:flex-row min-h-0 w-full overflow-hidden relative">
-        
-        {/* Desktop Sidebar Navigation */}
-        <aside 
-          className={`bg-[var(--primary)] dark:bg-slate-950 border-r border-white/5 text-white flex-col py-4 hidden lg:flex shrink-0 print:hidden h-full max-h-full overflow-hidden transition-[width] duration-300 ease-in-out ${
-            isSidebarCollapsed ? 'w-[72px]' : 'w-[245px]'
-          }`}
-        >
-          {/* User Profile Info */}
-          <div className={`flex items-center gap-3 py-1 shrink-0 ${isSidebarCollapsed ? 'justify-center px-2' : 'px-5'}`}>
-            <div 
-              className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/25 overflow-hidden shadow-inner cursor-pointer"
-              title={userName || (isAuthenticated ? `Logged in as ${role}` : 'Guest User')}
+          <div className="relative border-l border-gray-200 dark:border-slate-800 pl-3 md:pl-4">
+            <button 
+              onClick={() => {
+                setIsProfileOpen(!isProfileOpen);
+                setIsBellOpen(false);
+              }} 
+              className="w-9.5 h-9.5 rounded-full bg-[#f3f4f6] dark:bg-slate-800 flex items-center justify-center border border-[#e5e7eb] dark:border-slate-700 overflow-hidden shadow-xs hover:ring-2 hover:ring-primary/20 transition-all font-bold cursor-pointer"
+              aria-label="User Profile"
+              title="User Profile"
             >
               {avatarUrl ? (
                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                 <User className="w-5 h-5 text-white/90" />
+                 <User className="w-4.5 h-4.5 text-[#6b7280] dark:text-gray-300" />
               )}
-            </div>
-            {!isSidebarCollapsed && (
-              <div className="overflow-hidden min-w-0">
-                <div className="text-[0.82rem] font-extrabold truncate text-white">
-                   {isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}
-                </div>
-                <div className="text-[0.68rem] opacity-75 font-medium truncate capitalize text-slate-300">
-                   {isAuthenticated ? role : 'Guest Portal'}
-                </div>
+            </button>
+
+            {isProfileOpen && (
+              <div className="absolute top-12 right-0 w-60 z-50">
+                {renderProfileDropdown()}
               </div>
             )}
           </div>
+        </div>
+      </header>
 
-          {/* Line separator above the menu */}
-          <div className={`border-b-2 border-white/25 my-3 shrink-0 ${isSidebarCollapsed ? 'mx-3' : 'mx-5'}`} />
+      {/* 3. Main Body Container (Sidebar + Content Side-by-Side Under Top Header) */}
+      <div className="flex-1 flex flex-row min-h-0 w-full overflow-hidden relative">
+        {/* Desktop Sidebar Navigation */}
+        <aside className={`bg-[var(--primary)] dark:bg-slate-950 border-r border-white/5 text-white flex-col py-4 hidden lg:flex shrink-0 print:hidden h-full max-h-full transition-all duration-300 ease-in-out relative z-40 ${isSidebarCollapsed ? 'w-[68px] overflow-visible px-2' : 'w-[245px] overflow-hidden px-3'}`}>
+          {!isSidebarCollapsed ? (
+            <>
+              {/* Expanded User Profile Info */}
+              <div className="px-3 flex items-center gap-3 py-2 shrink-0 bg-white/10 rounded-2xl border border-white/10 shadow-xs mb-2">
+                <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/25 overflow-hidden shadow-inner">
+                  {avatarUrl ? (
+                     <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                     <User className="w-5 h-5 text-white/90" />
+                  )}
+                </div>
+                <div className="overflow-hidden">
+                  <div className="text-[0.82rem] font-extrabold truncate text-white">
+                     {isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}
+                  </div>
+                  <div className="text-[0.68rem] opacity-75 font-medium truncate capitalize text-slate-300">
+                     {isAuthenticated ? role : 'Guest Portal'}
+                  </div>
+                </div>
+              </div>
 
-          {/* Highlighted Menu Section with custom scrollbar */}
-          <div className={`flex-1 flex flex-col min-h-0 bg-slate-950/65 dark:bg-slate-950/80 rounded-2xl mb-3 p-1.5 border border-white/10 shadow-inner ${isSidebarCollapsed ? 'mx-2' : 'mx-3.5'}`}>
-            <nav className="flex-1 overflow-y-auto custom-scrollbar overflow-x-hidden">
-              <ul className="list-none p-0 m-0 pb-4">
-                {navigation.map((item, index) => {
-                  const Icon = item.icon;
-                  const showGroupHeader = index === 0 || navigation[index - 1].group !== item.group;
-                  return (
-                    <React.Fragment key={item.name}>
-                      {showGroupHeader && (
-                        isSidebarCollapsed ? (
-                          index !== 0 ? <li className="my-2 border-t border-white/10 mx-1" /> : null
-                        ) : (
-                          <li className={`px-4 py-2 text-[0.65rem] font-extrabold uppercase tracking-[1px] text-white/50 sticky top-0 z-10 bg-[var(--primary)]/95 backdrop-blur-sm ${index !== 0 ? 'mt-3 border-t border-white/5 pt-3' : ''}`}>
-                            {item.group as string}
-                          </li>
-                        )
-                      )}
-                      <li>
-                        <Link
-                          to={item.href}
-                          title={item.name}
-                          className={`text-[0.82rem] font-semibold cursor-pointer flex items-center transition-all rounded-xl my-0.5 ${
-                            isSidebarCollapsed 
-                              ? 'justify-center p-2.5 mx-auto w-10 h-10' 
-                              : 'px-4 py-2.5 gap-3 mx-1'
-                          } ${ 
-                            location.pathname === item.href 
-                              ? 'bg-amber-500 text-slate-950 font-black shadow-md' 
-                              : 'text-white/80 hover:bg-white/10 hover:text-white' 
-                          }`}
-                        >
-                          <Icon className="w-4 h-4 shrink-0" />
-                          {!isSidebarCollapsed && (
-                            <span className="whitespace-nowrap truncate">{item.name}</span>
+              {/* Bold line above the menu */}
+              <div className="border-b-2 border-white/20 mx-2 my-2 shrink-0" />
+
+              {/* Highlighted Menu Section with a different background color */}
+              <div className="flex-1 flex flex-col min-h-0 bg-slate-950/65 dark:bg-slate-950/80 rounded-2xl p-1.5 border border-white/10 shadow-inner">
+                <nav className="flex-1 overflow-y-auto custom-scrollbar overflow-x-hidden">
+                  <ul className="list-none p-0 m-0 pb-4">
+                    {navigation.map((item, index) => {
+                      const Icon = item.icon;
+                      const showGroupHeader = index === 0 || navigation[index - 1].group !== item.group;
+                      return (
+                        <React.Fragment key={item.name}>
+                          {showGroupHeader && (
+                            <li className={`px-4 py-2 text-[0.65rem] font-extrabold uppercase tracking-[1px] text-white/50 sticky top-0 z-10 bg-[var(--primary)]/95 backdrop-blur-sm ${index !== 0 ? 'mt-3 border-t border-white/5 pt-3' : ''}`}>
+                              {item.group as string}
+                            </li>
                           )}
-                        </Link>
-                      </li>
-                    </React.Fragment>
-                  );
-                })}
-              </ul>
-            </nav>
-          </div>
-          
-          {/* Academic Year Footer */}
-          <div className={`shrink-0 py-3 border-t border-white/10 mt-auto bg-slate-950/20 ${isSidebarCollapsed ? 'px-2 text-center' : 'px-5'}`}>
-            {!isSidebarCollapsed ? (
-              <>
-                <div className="text-[0.65rem] text-white/60 uppercase tracking-wider font-bold">Academic Year</div>
-                <div className="text-[0.85rem] font-bold text-white shadow-sm mt-0.5">{academicYearString}</div>
-              </>
-            ) : (
-              <div className="text-[0.65rem] font-bold text-amber-400" title={`Academic Year: ${academicYearString}`}>
-                2083
+                          <li>
+                            <Link
+                              to={item.href}
+                              className={`px-3.5 py-2.5 text-[0.82rem] font-semibold cursor-pointer flex items-center gap-3 transition-all rounded-xl my-0.5 ${ 
+                                location.pathname === item.href 
+                                  ? 'bg-amber-500 text-slate-950 font-black shadow-md' 
+                                  : 'text-white/80 hover:bg-white/10 hover:text-white' 
+                              }`}
+                            >
+                              <Icon className="w-4 h-4 shrink-0" />
+                              <span className="whitespace-nowrap">{item.name}</span>
+                            </Link>
+                          </li>
+                        </React.Fragment>
+                      );
+                    })}
+                  </ul>
+                </nav>
               </div>
-            )}
-          </div>
+              
+              <div className="shrink-0 px-4 py-2.5 border-t border-white/10 mt-auto bg-slate-950/20 rounded-xl">
+                <div className="text-[0.62rem] text-white/60 uppercase tracking-wider font-bold">Academic Year</div>
+                <div className="text-[0.82rem] font-bold text-white shadow-xs mt-0.5">{academicYearString}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Collapsed User Avatar */}
+              <div className="flex items-center justify-center py-1 shrink-0" title={userName || `Logged in as ${role}`}>
+                <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/25 overflow-hidden shadow-inner">
+                  {avatarUrl ? (
+                     <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                     <User className="w-5 h-5 text-white/90" />
+                  )}
+                </div>
+              </div>
+
+              <div className="border-b-2 border-white/20 mx-2 my-2 shrink-0" />
+
+              {/* Collapsed Menu Icon Rail with Gmail-Style Hover Flyouts */}
+              <div className="flex-1 flex flex-col min-h-0 bg-slate-950/65 dark:bg-slate-950/80 rounded-2xl p-1 border border-white/10 shadow-inner overflow-visible">
+                <nav className="flex-1 overflow-y-auto custom-scrollbar overflow-x-visible">
+                  <ul className="list-none p-0 m-0 pb-3 space-y-1">
+                    {navigation.map((item, index) => {
+                      const Icon = item.icon;
+                      const isNewGroup = index > 0 && navigation[index - 1].group !== item.group;
+                      const isItemActive = location.pathname === item.href;
+                      const isCurrentHovered = flyoutState?.name === item.name;
+                      return (
+                        <React.Fragment key={item.name}>
+                          {isNewGroup && (
+                            <li className="my-1 border-t border-white/15 mx-1" />
+                          )}
+                          <li className="flex justify-center">
+                            <Link
+                              to={item.href}
+                              onMouseEnter={(e) => handleNavMouseEnter(item.name, e.currentTarget)}
+                              onMouseLeave={handleNavMouseLeave}
+                              onFocus={(e) => handleNavMouseEnter(item.name, e.currentTarget)}
+                              onBlur={handleNavMouseLeave}
+                              onClick={() => {
+                                clearFlyoutTimeouts();
+                                setFlyoutState(null);
+                              }}
+                              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer ${ 
+                                isItemActive 
+                                  ? 'bg-amber-500 text-slate-950 font-black shadow-md' 
+                                  : isCurrentHovered
+                                  ? 'bg-white/20 text-white'
+                                  : 'text-white/80 hover:bg-white/15 hover:text-white' 
+                              }`}
+                              aria-label={item.name}
+                            >
+                              <Icon className="w-4.5 h-4.5 shrink-0" />
+                            </Link>
+                          </li>
+                        </React.Fragment>
+                      );
+                    })}
+                  </ul>
+                </nav>
+              </div>
+
+              {/* Collapsed Academic Year Badge */}
+              <div className="shrink-0 py-2 border-t border-white/10 mt-auto bg-slate-950/20 text-center" title={`Academic Year: ${currentBSYear} B.S. (${academicYearString})`}>
+                <span className="text-[0.65rem] font-black text-amber-400 bg-white/10 px-1.5 py-0.5 rounded-md">
+                  {currentBSYear}
+                </span>
+              </div>
+            </>
+          )}
         </aside>
 
-        {/* Main Content Area: Automatically gains/loses width dynamically */}
+        {/* Main Content Area */}
         <div 
           ref={mainRef}
           onScroll={handleScroll}
-          className="flex-1 flex flex-col min-w-0 min-h-0 h-auto lg:h-full lg:max-h-full print:h-auto print:overflow-visible relative overflow-visible lg:overflow-y-auto lg:overflow-x-hidden custom-scrollbar"
+          className={`flex-1 flex flex-col min-w-0 min-h-0 h-full ${
+            (isMenuOpen || isBellOpen || isProfileOpen) ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden'
+          } custom-scrollbar bg-[#F8FAFC] dark:bg-[#0b0f19] relative transition-all duration-300 print:h-auto print:overflow-visible`}
         >
-          {/* Scrollable Content */}
-          <main className="flex-1 flex flex-col min-h-0 overflow-visible print:overflow-visible print:p-0 relative bg-[#F8FAFC] dark:bg-[#0b0f19]">
+          {/* Scroll Progress Bar */}
           <div className="sticky top-0 left-0 right-0 h-[3px] bg-slate-100/10 dark:bg-slate-800/10 z-50 print:hidden w-full">
             <motion.div 
               className="h-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-400"
@@ -1256,7 +1396,7 @@ export default function Layout({
             />
           </div>
 
-          <div className="px-0 pb-8 sm:pb-6 w-full max-w-full min-w-0 flex-1 shrink-0 flex flex-col pt-3">
+          <div className="px-0 pb-24 sm:pb-5 w-full max-w-full min-w-0 flex-1 shrink-0 flex flex-col pt-3">
             <Breadcrumbs userRole={userRole} />
             <div className="w-full max-w-[1680px] mx-auto flex-1 px-3 sm:px-6 lg:px-8">
               <motion.div
@@ -1271,11 +1411,10 @@ export default function Layout({
             </div>
           </div>
 
-          {/* Persistent Global Footer */}
-          <Footer />
-        </main>
+          {/* Institutional School Footer */}
+          <Footer isAuthenticated={isAuthenticated} userRole={userRole} />
+        </div>
       </div>
-    </div>
 
       {/* Mobile Sliding Drawer Menu */}
       <AnimatePresence>
@@ -1303,7 +1442,7 @@ export default function Layout({
                   </div>
                   <div>
                     <div className="font-extrabold text-sm text-white">SHIKSHANTAR</div>
-                    <div className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Academy Siraha</div>
+                    <div className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Academy Bastipur</div>
                   </div>
                 </div>
                 <button onClick={() => setIsMenuOpen(false)} className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10">
@@ -1311,52 +1450,14 @@ export default function Layout({
                 </button>
               </div>
 
-              {/* User Info & Quick Portal Actions */}
-              <div className="px-4 py-3 bg-white/5 border-b border-white/10 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center border border-white/20 overflow-hidden shrink-0">
-                    {avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-white" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold text-white truncate">{isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}</div>
-                    <div className="text-[10px] text-amber-300 font-extrabold uppercase tracking-wider">{isAuthenticated ? `${role} Portal` : 'Guest Portal'}</div>
-                  </div>
+              {/* User Info */}
+              <div className="px-4 py-3 bg-white/5 flex items-center gap-3 border-b border-white/10 shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center border border-white/20 overflow-hidden">
+                  {avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-white" />}
                 </div>
-
-                {/* Quick Action Buttons inside Drawer */}
-                <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center gap-1.5">
-                  {isAuthenticated ? (
-                    <>
-                      <Link
-                        to="/profile"
-                        onClick={() => setIsMenuOpen(false)}
-                        className="flex-1 py-1.5 px-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
-                      >
-                        <User className="w-3.5 h-3.5" />
-                        <span>Profile</span>
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsMenuOpen(false);
-                          setShowLogoutConfirm(true);
-                        }}
-                        className="py-1.5 px-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <LogOut className="w-3.5 h-3.5" />
-                        <span>Logout</span>
-                      </button>
-                    </>
-                  ) : (
-                    <Link
-                      to="/login"
-                      onClick={() => setIsMenuOpen(false)}
-                      className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-colors shadow-sm"
-                    >
-                      <LogIn className="w-4 h-4" />
-                      <span>Portal Login</span>
-                    </Link>
-                  )}
+                <div>
+                  <div className="text-xs font-bold text-white">{isAuthenticated ? (userName || `Logged in as ${role}`) : 'Guest User'}</div>
+                  <div className="text-[10px] text-slate-300 capitalize">{isAuthenticated ? role : 'Guest Portal'}</div>
                 </div>
               </div>
 
@@ -1398,6 +1499,16 @@ export default function Layout({
           </div>
         )}
       </AnimatePresence>
+      {/* Click outside backdrop for notification and profile dropdowns */}
+      {(isBellOpen || isProfileOpen) && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/5 dark:bg-black/20" 
+          onClick={() => {
+            setIsBellOpen(false);
+            setIsProfileOpen(false);
+          }} 
+        />
+      )}
 
 
 
@@ -1525,6 +1636,79 @@ export default function Layout({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Gmail-Style Floating Hover Flyout for Collapsed Desktop Sidebar (Portaled to body to prevent overflow clipping) */}
+      {flyoutState && isSidebarCollapsed && (() => {
+        const activeItem = navigation.find(n => n.name === flyoutState.name);
+        if (!activeItem) return null;
+        const Icon = activeItem.icon;
+        const isActive = location.pathname === activeItem.href;
+
+        return createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              top: `${flyoutState.top}px`,
+              left: `${flyoutState.left}px`,
+              zIndex: 9999
+            }}
+            className="pointer-events-auto transition-opacity duration-150 animate-in fade-in-50 zoom-in-95"
+            onMouseEnter={handleFlyoutMouseEnter}
+            onMouseLeave={handleFlyoutMouseLeave}
+          >
+            {/* Invisible mouse travel bridge between icon and flyout */}
+            <div className="absolute -left-3.5 top-0 bottom-0 w-3.5 bg-transparent pointer-events-auto" />
+
+            <Link
+              to={activeItem.href}
+              onClick={() => {
+                clearFlyoutTimeouts();
+                setFlyoutState(null);
+              }}
+              className={`relative flex items-center gap-3 px-3.5 py-2.5 rounded-xl shadow-2xl border text-left cursor-pointer transition-all min-w-[195px] max-w-[285px] group block ${
+                isActive
+                  ? 'bg-amber-500 text-slate-950 font-black border-amber-400 shadow-amber-500/25 ring-2 ring-amber-400/30'
+                  : 'bg-slate-900/98 dark:bg-slate-950/98 text-white border-slate-700/80 hover:border-amber-400/80 shadow-black/60'
+              }`}
+            >
+              {/* Subtle triangle arrow pointing towards the icon */}
+              <div
+                className={`absolute -left-1.5 top-1/2 -translate-y-1/2 w-0 h-0 border-y-[6px] border-y-transparent border-r-[6px] ${
+                  isActive ? 'border-r-amber-500' : 'border-r-slate-900 dark:border-r-slate-950'
+                }`}
+              />
+
+              <div
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  isActive
+                    ? 'bg-black/15 text-slate-950'
+                    : 'bg-white/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors'
+                }`}
+              >
+                <Icon className="w-4.5 h-4.5 shrink-0" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div
+                  className={`text-xs font-bold truncate leading-tight ${
+                    isActive ? 'text-slate-950' : 'text-white'
+                  }`}
+                >
+                  {activeItem.name}
+                </div>
+                <div
+                  className={`text-[9.5px] font-bold uppercase tracking-wider mt-0.5 ${
+                    isActive ? 'text-slate-800' : 'text-slate-400'
+                  }`}
+                >
+                  {activeItem.group}
+                </div>
+              </div>
+            </Link>
+          </div>,
+          document.body
+        );
+      })()}
     </div>
   );
 }

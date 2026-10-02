@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Download, PieChart as PieChartIcon, Loader2, Search, User, ClipboardList } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -13,12 +14,15 @@ import { StudentResult } from '../data/resultsState';
 const EXAM_TYPES = ['Terminal 1', 'Unit Test 1', 'Terminal 2', 'Final Exam'];
 
 export default function Result() {
+  const [searchParams] = useSearchParams();
+  const urlStudentId = searchParams.get('studentId') || searchParams.get('id') || searchParams.get('uid');
+
   const [studentId, setStudentId] = useState('');
   const [results, setResults] = useState<StudentResult[]>([]);
   const [activeTab, setActiveTab] = useState<string>('Terminal 1');
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [searchStudentId, setSearchStudentId] = useState('');
+  const [searchStudentId, setSearchStudentId] = useState(urlStudentId || '');
   const [userRole, setUserRole] = useState('student');
   const [childrenList, setChildrenList] = useState<any[]>([]);
   const [selectedChildId, setSelectedChildId] = useState<string>('');
@@ -35,42 +39,61 @@ export default function Result() {
          
          const resolveIdsPromise = (async () => {
              const possibleIds = new Set<string>();
-             possibleIds.add(uid);
+             const trimmedUid = String(uid || '').trim();
+             if (trimmedUid) possibleIds.add(trimmedUid);
+
              try {
-                 const uDoc = await getDoc(doc(db, 'users', uid));
+                 const uDoc = await getDoc(doc(db, 'users', trimmedUid));
                  if (uDoc.exists()) {
                      const uData = uDoc.data();
                      possibleIds.add(uDoc.id);
-                     if (uData.studentId) possibleIds.add(String(uData.studentId));
-                     if (uData.rollNumber) possibleIds.add(String(uData.rollNumber));
-                     if (uData.rollNo) possibleIds.add(String(uData.rollNo));
+                     if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
+                     if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
+                     if (uData.emisNumber) possibleIds.add(String(uData.emisNumber).trim());
+                     if (uData.studentEmis) possibleIds.add(String(uData.studentEmis).trim());
+                     if (uData.legacyStudentId) possibleIds.add(String(uData.legacyStudentId).trim());
+                     if (uData.rollNumber) possibleIds.add(String(uData.rollNumber).trim());
+                     if (uData.rollNo) possibleIds.add(String(uData.rollNo).trim());
                  } else {
-                     // Try querying students collection first
+                     // Try resolving student by permanentStudentId
                      try {
-                         const sDoc = await getDoc(doc(db, 'students', uid));
-                         if (sDoc.exists()) {
-                             const sData = sDoc.data();
-                             possibleIds.add(sDoc.id);
-                             if (sData.studentId) possibleIds.add(String(sData.studentId));
-                             if (sData.rollNumber) possibleIds.add(String(sData.rollNumber));
-                             if (sData.rollNo) possibleIds.add(String(sData.rollNo));
-                         }
+                         const qPerm = query(collection(db, 'users'), where('permanentStudentId', '==', trimmedUid));
+                         const snapPerm = await getDocs(qPerm);
+                         snapPerm.forEach(docSnap => {
+                             possibleIds.add(docSnap.id);
+                             const uData = docSnap.data();
+                             if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
+                             if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
+                             if (uData.emisNumber) possibleIds.add(String(uData.emisNumber).trim());
+                             if (uData.studentEmis) possibleIds.add(String(uData.studentEmis).trim());
+                         });
                      } catch (_) {}
 
-                     // Try querying users by studentId if permitted
+                     // Try resolving student by studentId
                      try {
-                         const q1 = query(collection(db, 'users'), where('studentId', '==', uid));
+                         const q1 = query(collection(db, 'users'), where('studentId', '==', trimmedUid));
                          const qSnap1 = await getDocs(q1);
                          qSnap1.forEach(docSnap => {
                              possibleIds.add(docSnap.id);
                              const uData = docSnap.data();
-                             if (uData.studentId) possibleIds.add(String(uData.studentId));
-                             if (uData.rollNumber) possibleIds.add(String(uData.rollNumber));
-                             if (uData.rollNo) possibleIds.add(String(uData.rollNo));
+                             if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
+                             if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
+                             if (uData.emisNumber) possibleIds.add(String(uData.emisNumber).trim());
+                             if (uData.studentEmis) possibleIds.add(String(uData.studentEmis).trim());
                          });
-                     } catch (_) {
-                         // Query may not be permitted for standard users without admin/teacher claims
-                     }
+                     } catch (_) {}
+
+                     // Try resolving student by EMIS
+                     try {
+                         const qEmis = query(collection(db, 'users'), where('emisNumber', '==', trimmedUid));
+                         const snapEmis = await getDocs(qEmis);
+                         snapEmis.forEach(docSnap => {
+                             possibleIds.add(docSnap.id);
+                             const uData = docSnap.data();
+                             if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
+                             if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
+                         });
+                     } catch (_) {}
                  }
              } catch (e) {
                  // Fallback to uid directly
@@ -98,18 +121,36 @@ export default function Result() {
              return;
          }
 
-         // Fetch summaries and result details in parallel!
-         const summaryPromise = getDocs(query(collection(db, 'resultSummary'), where('studentId', 'in', idList)));
-         const resultsPromise = getDocs(query(collection(db, 'results'), where('studentId', 'in', idList)));
+         // Fetch summaries and result details across all resolved student identities
+         const summaryQueries = [
+             getDocs(query(collection(db, 'resultSummary'), where('studentId', 'in', idList.slice(0, 30))))
+         ];
+         const resultsQueries = [
+             getDocs(query(collection(db, 'results'), where('studentId', 'in', idList.slice(0, 30))))
+         ];
 
-         const [summarySnap, resultsSnap] = await Promise.all([summaryPromise, resultsPromise]);
+         try {
+             summaryQueries.push(getDocs(query(collection(db, 'resultSummary'), where('studentUid', 'in', idList.slice(0, 30)))));
+         } catch (_) {}
+         try {
+             resultsQueries.push(getDocs(query(collection(db, 'results'), where('studentUid', 'in', idList.slice(0, 30)))));
+         } catch (_) {}
 
-         const summaryList: any[] = [];
-         summarySnap.forEach(doc => {
-             if (publishedExamIds.has(doc.data().examId)) {
-                 summaryList.push({ id: doc.id, ...doc.data() });
-             }
+         const [summarySnaps, resultsSnaps] = await Promise.all([
+             Promise.all(summaryQueries),
+             Promise.all(resultsQueries)
+         ]);
+
+         const summaryMap = new Map<string, any>();
+         summarySnaps.forEach(snap => {
+             snap.forEach(doc => {
+                 if (publishedExamIds.has(doc.data().examId)) {
+                     summaryMap.set(doc.id, { id: doc.id, ...doc.data() });
+                 }
+             });
          });
+
+         const summaryList = Array.from(summaryMap.values());
 
          if (summaryList.length === 0) {
              setResults([]);
@@ -118,15 +159,24 @@ export default function Result() {
          }
 
          const resultsByExamId: Record<string, any> = {};
-         resultsSnap.forEach(doc => {
-             const sub = doc.data();
-             if (!resultsByExamId[sub.examId]) resultsByExamId[sub.examId] = {};
-             resultsByExamId[sub.examId][sub.subject] = {
-                 fullMarks: sub.fullMarks, obtained: sub.marks
-             };
+         resultsSnaps.forEach(snap => {
+             snap.forEach(doc => {
+                 const sub = doc.data();
+                 if (!resultsByExamId[sub.examId]) resultsByExamId[sub.examId] = {};
+                 resultsByExamId[sub.examId][sub.subject] = {
+                     fullMarks: sub.fullMarks, 
+                     obtained: sub.marks,
+                     thMarks: sub.thMarks,
+                     prMarks: sub.prMarks,
+                     thFull: sub.thFull,
+                     prFull: sub.prFull,
+                     thPass: sub.thPass,
+                     prPass: sub.prPass
+                 };
+             });
          });
          
-         // Calculate dynamic highest marks for each exam
+         // Calculate dynamic highest marks for each exam if needed
          const currentRole = localStorage.getItem('userRole') || 'student';
          if (currentRole !== 'student' && currentRole !== 'guest') {
              for (const sum of summaryList) {
@@ -151,10 +201,16 @@ export default function Result() {
          }
 
          const parsedData: StudentResult[] = summaryList.map(sum => ({
-              studentId: sum.studentId,
+              studentUid: sum.studentUid || sum.studentId,
+              studentId: sum.permanentStudentId || sum.studentId,
+              permanentStudentId: sum.permanentStudentId || sum.studentId,
+              studentEmis: sum.studentEmis || '',
               studentName: sum.studentName,
+              academicYear: sum.academicYear || '',
               class: sum.class,
-              rollNo: sum.rollNo || '',
+              section: sum.section || 'A',
+              rollNumberSnapshot: sum.rollNumberSnapshot || sum.rollNo || '',
+              rollNo: sum.rollNo || sum.rollNumberSnapshot || '',
               examType: sum.examType,
               examId: sum.examId,
               subjects: resultsByExamId[sum.examId] || {},
@@ -166,7 +222,7 @@ export default function Result() {
               grade: sum.grade,
               gpa: sum.gpa || 0,
               rank: sum.rank || 0,
-              published: true, // We filtered by published
+              published: true,
               classTeacherRemark: sum.classTeacherRemark || ''
          }));
 
@@ -200,7 +256,10 @@ export default function Result() {
                setUserRole(role);
                localStorage.setItem('userRole', role);
 
-               if (role === 'student') {
+               if (urlStudentId) {
+                   uidToUse = urlStudentId;
+                   setSearchStudentId(urlStudentId);
+               } else if (role === 'student') {
                    if (userData.children && userData.children.length > 0) {
                        setChildrenList(userData.children);
                        const activeId = selectedChildId || userData.children[0].studentId;
@@ -210,7 +269,7 @@ export default function Result() {
                        uidToUse = activeId;
                        localStorage.setItem('studentId', activeId);
                    } else {
-                       uidToUse = userData.studentId || user.uid;
+                       uidToUse = userData.permanentStudentId || userData.studentId || user.uid;
                        localStorage.setItem('studentId', uidToUse);
                    }
                } else {
@@ -218,7 +277,10 @@ export default function Result() {
                }
            } else {
                setUserRole(role);
-               if (role === 'student') {
+               if (urlStudentId) {
+                   uidToUse = urlStudentId;
+                   setSearchStudentId(urlStudentId);
+               } else if (role === 'student') {
                    uidToUse = localStorage.getItem('studentId') || user.uid;
                } else {
                    uidToUse = localStorage.getItem('adminSearchStudentId');
@@ -240,7 +302,7 @@ export default function Result() {
     return () => {
        unsubAuth();
     };
-  }, [selectedChildId]);
+  }, [selectedChildId, urlStudentId]);
 
   const handleChildChange = (childId: string) => {
      setSelectedChildId(childId);

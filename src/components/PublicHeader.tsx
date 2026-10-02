@@ -195,7 +195,7 @@ export default function PublicHeader({
           
           {/* School Brand Identity */}
           <Link to="/" className="flex items-center gap-3 group shrink-0">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white p-1 border border-slate-200 shadow-sm flex items-center justify-center group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 sm:w-[60px] sm:h-[60px] lg:w-[70px] lg:h-[70px] rounded-full bg-white p-1 border border-slate-200 shadow-sm flex items-center justify-center group-hover:scale-105 transition-transform">
               <img 
                 src="/logo.png" 
                 alt="Shikshantar Academy Logo" 
@@ -205,12 +205,12 @@ export default function PublicHeader({
                 }}
               />
             </div>
-            <div>
-              <div className="font-serif font-black text-base sm:text-lg lg:text-xl text-[#0A2540] dark:text-white tracking-tight leading-none group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
-                SHIKSHANTAR ACADEMY
+            <div className="flex flex-col justify-center">
+              <div className="font-serif font-black text-base sm:text-lg lg:text-[22px] text-[#0A2540] dark:text-white tracking-wide leading-none">
+                SHIKSHANTAR
               </div>
-              <div className="text-[10px] sm:text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider uppercase mt-0.5">
-                Bastipur, Karjanha-05, Siraha
+              <div className="text-[10px] sm:text-[11px] lg:text-[13px] font-black text-[#f59e0b] dark:text-amber-400 tracking-[0.14em] uppercase mt-1 leading-none">
+                ACADEMY BASTIPUR
               </div>
             </div>
           </Link>

@@ -29,6 +29,7 @@ const ROUTE_CONFIG: BreadcrumbRouteMap = {
   'admin': { title: 'School Administration' },
   'admin-admissions': { title: 'Admission Approvals', parent: 'admin' },
   'user-approvals': { title: 'User Verification', parent: 'admin' },
+  'student-profile': { title: 'Student Profile', parent: 'user-approvals' },
   'iemis': { title: 'Government IEMIS Export', parent: 'admin' },
   'profile': { title: 'My Profile' },
   'settings': { title: 'System & Theme Settings', parent: 'admin' },

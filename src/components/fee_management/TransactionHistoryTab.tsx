@@ -14,7 +14,7 @@ import 'nepali-datepicker-reactjs/dist/index.css';
 import NepaliDate from 'nepali-date-converter';
 import { exportToPDF } from '../../lib/pdfExport';
 import { exportToExcel, exportMultiSheetExcel } from '../../lib/excelExport';
-import { recordLedgerAuditLog } from '../../lib/auditLogger';
+import { recordLedgerAuditLog, buildAuthoritativeAuditPayload } from '../../lib/auditLogger';
 import { cancelPaymentTransaction } from '../../lib/paymentCancellationEngine';
 import { processPaymentRefund, deleteSystemTransactionSafe } from '../../lib/paymentRefundEngine';
 import SecurityPasswordConfirmModal from './SecurityPasswordConfirmModal';
@@ -165,22 +165,36 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
         return;
       }
 
-      const batch = writeBatch(db);
-      batch.delete(doc(db, 'cash_ledger', targetEntry.id));
-      await batch.commit();
-
-      await recordLedgerAuditLog({
+      const opId = `OP_CASH_DEL_${targetEntry.id}`;
+      const auditPayload = await buildAuthoritativeAuditPayload({
+        operationId: opId,
+        category: 'financial',
+        targetType: 'cash_ledger',
+        targetId: targetEntry.id,
         transactionId: targetEntry.id,
         receipt: targetEntry.receipt || targetEntry.id,
         studentName: targetEntry.category || 'Cash Register Entry',
         studentClass: '-',
         actionType: 'TRANSACTION_DELETED',
+        action: 'TRANSACTION_DELETED',
+        beforeState: {
+          id: targetEntry.id,
+          type: targetEntry.type || 'Expense',
+          category: targetEntry.category,
+          amount: targetEntry.amount,
+          remarks: targetEntry.remarks || ''
+        },
+        afterState: { deleted: true },
         previousValue: targetEntry ? `Type: ${targetEntry.type || 'Expense'} | Category: ${targetEntry.category} | Amount: NRs. ${Number(targetEntry.amount || 0).toLocaleString()} | Remarks: ${targetEntry.remarks || 'None'}` : `Cash Entry ID: ${targetEntry.id}`,
         newValue: 'CASH REGISTER ENTRY PERMANENTLY REMOVED',
-        reason: reason || 'Cash register entry deleted with password verification',
-        adminName,
-        adminEmail
-      });
+        reason: reason || 'Cash register entry deleted with password verification'
+      }, opId);
+
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'cash_ledger', targetEntry.id));
+      batch.set(doc(db, 'ledger_audit_logs', opId), auditPayload);
+      batch.set(doc(db, 'audit_logs', opId), auditPayload);
+      await batch.commit();
 
       setDeleteCashModalTarget(null);
     } catch (err) {
@@ -932,22 +946,38 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
               });
           }
           
-          await batch.commit();
-
-          await recordLedgerAuditLog({
+          const opId = `OP_CASH_EDIT_${editModalTx.id}_${Date.now()}`;
+          const auditPayload = await buildAuthoritativeAuditPayload({
+              operationId: opId,
+              category: 'financial',
+              targetType: 'cash_ledger',
+              targetId: editModalTx.id,
               transactionId: editModalTx.id,
               receipt: editModalTx.receipt || editModalTx.id,
               studentId: editModalTx.studentId || '',
               studentName: editModalTx.studentName || editModalTx.category || 'General Ledger',
               studentClass: editModalTx.class || '-',
               actionType: isLinkedOrSystem ? 'REMARKS_MODIFIED' : 'AMOUNT_MODIFIED',
+              action: isLinkedOrSystem ? 'REMARKS_MODIFIED' : 'AMOUNT_MODIFIED',
+              beforeState: {
+                  amount: oldAmount,
+                  remarks: oldRemarks
+              },
+              afterState: {
+                  amount: isLinkedOrSystem ? oldAmount : newAmt,
+                  remarks: isLinkedOrSystem ? ((oldRemarks ? oldRemarks + '\n' : '') + `Admin Note: ${editRemarks}`) : ((oldRemarks ? oldRemarks + '\n' : '') + `Edited: ${editRemarks}`)
+              },
               previousValue: `Amount: NRs. ${Number(oldAmount).toLocaleString()} | Particulars: ${editModalTx.isSystem ? (editModalTx.studentName + ' (' + (editModalTx.class || '-') + ')') : editModalTx.category} | Remarks: ${oldRemarks || 'None'}`,
               newValue: isLinkedOrSystem 
                 ? `Amount: NRs. ${Number(oldAmount).toLocaleString()} (Protected Immutable) | Remarks: ${editRemarks || 'Modified by Admin'}`
                 : `Amount: NRs. ${newAmt.toLocaleString()} | Updated Remarks: ${editRemarks || 'Modified by Admin'}`,
-              reason: editRemarks.trim() || 'Particulars/remarks modified by administrator',
-              adminName: activeAdminName
-          });
+              reason: editRemarks.trim() || 'Particulars/remarks modified by administrator'
+          }, opId);
+
+          batch.set(doc(db, 'ledger_audit_logs', opId), auditPayload);
+          batch.set(doc(db, 'audit_logs', opId), auditPayload);
+          
+          await batch.commit();
 
           setEditModalTx(null);
           onRefresh();

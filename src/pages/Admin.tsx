@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import {
   BookOpen,
+  User,
   Users,
   Folder,
   AlertCircle,
@@ -43,6 +44,7 @@ import {
 import { UploadTab } from "../components/admin/UploadTab";
 import { ManualEntryTab } from "../components/admin/ManualEntryTab";
 import { ViewManageTab } from "../components/admin/ViewManageTab";
+import { IndividualStudentResultTab } from "../components/admin/IndividualStudentResultTab";
 import { EnquiriesTab } from "../components/admin/EnquiriesTab";
 import { AuditLogsTab } from "../components/admin/AuditLogsTab";
 
@@ -148,9 +150,14 @@ export default function Admin() {
         const parsedData: StudentResult[] = summaryList.map((sum) => {
           const exm = examsMap[sum.examId];
           return {
+            studentUid: sum.studentUid || sum.studentId,
             studentId: sum.studentId,
+            permanentStudentId: sum.permanentStudentId || sum.studentId,
+            studentEmis: sum.studentEmis || sum.emisNumber || "",
             studentName: sum.studentName,
+            academicYear: sum.academicYear || "",
             class: sum.class,
+            section: sum.section || "A",
             rollNo: sum.rollNo || "",
             examType: sum.examType,
             examId: sum.examId,
@@ -393,6 +400,12 @@ export default function Admin() {
         >
           <BookOpen className="w-4 h-4" /> Published Results & Reports
         </button>
+        <button
+          onClick={() => setActiveTab("student_result")}
+          className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "student_result" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+        >
+          <User className="w-4 h-4" /> Individual Student Result
+        </button>
         {userRole === "admin" && (
           <button
             onClick={() => setActiveTab("enquiries")}
@@ -451,6 +464,16 @@ export default function Admin() {
                 allClasses={DEFAULT_CLASSES}
                 data={data}
                 setStatus={setStatus}
+                userRole={userRole}
+                assignedClasses={assignedClasses}
+                teacherProfile={teacherProfile}
+              />
+            )}
+            {activeTab === "student_result" && (
+              <IndividualStudentResultTab
+                data={data}
+                allClasses={DEFAULT_CLASSES}
+                dynamicExamTypes={dynamicExamTypes}
                 userRole={userRole}
                 assignedClasses={assignedClasses}
                 teacherProfile={teacherProfile}

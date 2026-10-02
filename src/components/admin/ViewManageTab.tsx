@@ -3,6 +3,7 @@ import { Search, Edit2, Trash2, X, Save, BellRing, CheckCircle2, Download, FileA
 import { StudentResult } from '../../data/resultsState';
 import { doc, writeBatch, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { recordBatchAuditLog } from '../../lib/auditLogger';
 import jsPDF from 'jspdf';
 import { toCanvas } from 'html-to-image';
 import JSZip from 'jszip';
@@ -108,7 +109,15 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
   const filteredData = useMemo(() => {
      if (!searchTerm) return baseData;
      const s = searchTerm.toLowerCase();
-     return baseData.filter(r => (r.studentName?.toLowerCase().includes(s) || r.studentId?.toLowerCase().includes(s)));
+     return baseData.filter(r => (
+       r.studentName?.toLowerCase().includes(s) || 
+       r.studentId?.toLowerCase().includes(s) ||
+       r.permanentStudentId?.toLowerCase().includes(s) ||
+       r.studentUid?.toLowerCase().includes(s) ||
+       r.studentEmis?.toLowerCase().includes(s) ||
+       String(r.rollNo || '').toLowerCase().includes(s) ||
+       String(r.rollNumberSnapshot || '').toLowerCase().includes(s)
+     ));
   }, [baseData, searchTerm]);
 
   const allSubjectsForView = useMemo(() => {
@@ -142,6 +151,17 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
      return { max, min, avg, passPct: (pass / filteredData.length) * 100, subAvg };
   }, [filteredData, allSubjectsForView]);
 
+  const getNepalGPA = (pct: number) => {
+    if (pct >= 90) return 4.0;
+    if (pct >= 80) return 3.6;
+    if (pct >= 70) return 3.2;
+    if (pct >= 60) return 2.8;
+    if (pct >= 50) return 2.4;
+    if (pct >= 40) return 2.0;
+    if (pct >= 35) return 1.6;
+    return 0.0;
+  };
+
   const getGrade = (marks: number | "AB", fm: number) => {
     if (marks === "AB") return 'NG';
     const pct = (marks / fm) * 100;
@@ -156,7 +176,7 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
   };
 
   const saveEdit = async () => {
-     if(!editReason) { setStatus({type: 'error', message: 'Reason for edit is required in log.'}); return; }
+     if(!editReason || !editReason.trim()) { setStatus({type: 'error', message: 'Reason for edit is required in audit log.'}); return; }
      if(!editingRecord) return;
      
      try {
@@ -169,39 +189,83 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
          });
          editingRecord.total = total;
          editingRecord.fullTotal = full;
-         editingRecord.percentage = (total/full)*100;
+         editingRecord.percentage = full > 0 ? (total / full) * 100 : 0;
          editingRecord.grade = getGrade(total, full);
-         // GPA approx
-         editingRecord.gpa = Number((editingRecord.percentage/25).toFixed(1));
+         // Canonical Nepal GPA calculation
+         editingRecord.gpa = getNepalGPA(editingRecord.percentage);
 
+         const primaryUid = editingRecord.studentUid || editingRecord.studentId;
          const examId = `${editingRecord.examType.replace(/\s+/g, '_')}_${editingRecord.class}`;
-         const summaryDocId = `${examId}_${editingRecord.studentId}`;
+         const summaryDocId = `${examId}_${primaryUid}`;
+
+         // Fetch previous record state for audit before/after comparison
+         const prevRecord = (data as StudentResult[]).find(r => 
+           (r.studentUid === editingRecord.studentUid || r.studentId === editingRecord.studentId || r.permanentStudentId === editingRecord.studentId) &&
+           r.examType === editingRecord.examType &&
+           String(r.class) === String(editingRecord.class)
+         );
+
+         const prevMarksSummary = prevRecord?.subjects || {};
+         const newMarksSummary = editingRecord.subjects || {};
 
          let batch = writeBatch(db);
-         batch.update(doc(db, 'resultSummary', summaryDocId), {
+         batch.set(doc(db, 'resultSummary', summaryDocId), {
              total: editingRecord.total,
              fullTotal: editingRecord.fullTotal,
              percentage: editingRecord.percentage,
              grade: editingRecord.grade,
              gpa: editingRecord.gpa
-         });
+         }, { merge: true });
 
          for (const [subName, subInfo] of Object.entries(editingRecord.subjects)) {
-             const subjectDocId = `${examId}_${editingRecord.studentId}_${subName.replace(/\s+/g, '')}`;
-             batch.update(doc(db, 'results', subjectDocId), {
+             const subjectDocId = `${examId}_${primaryUid}_${subName.replace(/\s+/g, '')}`;
+             batch.set(doc(db, 'results', subjectDocId), {
                  marks: (subInfo as any).obtained
-             });
-             batch.set(doc(db, 'results_secure', editingRecord.studentId, 'records', subjectDocId), {
+             }, { merge: true });
+             batch.set(doc(db, 'results_secure', primaryUid, 'records', subjectDocId), {
                  marks: (subInfo as any).obtained
              }, { merge: true });
          }
+
+         // Bind immutable audit log write into the same batch transaction
+         await recordBatchAuditLog(batch, {
+             category: 'academic',
+             actionType: 'MARK_MODIFIED',
+             targetType: 'student_result',
+             targetId: summaryDocId,
+             studentId: editingRecord.permanentStudentId || editingRecord.studentId,
+             studentUid: primaryUid,
+             studentName: editingRecord.studentName,
+             studentClass: String(editingRecord.class),
+             academicYear: editingRecord.academicYear || `${new Date().getFullYear()} BS`,
+             beforeState: {
+                 total: prevRecord?.total ?? 0,
+                 percentage: prevRecord?.percentage ?? 0,
+                 grade: prevRecord?.grade ?? '',
+                 gpa: prevRecord?.gpa ?? 0,
+                 subjects: prevMarksSummary
+             },
+             afterState: {
+                 total: editingRecord.total,
+                 percentage: editingRecord.percentage,
+                 grade: editingRecord.grade,
+                 gpa: editingRecord.gpa,
+                 subjects: newMarksSummary
+             },
+             previousValue: JSON.stringify(prevMarksSummary),
+             newValue: JSON.stringify(newMarksSummary),
+             reason: editReason.trim(),
+             result: 'SUCCESS',
+             operationId: `AUDIT_EDIT_${summaryDocId}_${Date.now()}`
+         });
          
          await batch.commit();
 
-         setStatus({type: 'success', message: 'Record saved successfully.'}); // triggers reload
+         setStatus({type: 'success', message: 'Record and audit log saved successfully.'}); // triggers reload
          setEditingRecord(null);
          setEditReason('');
      } catch (err: any) {
+         console.error("Result update failed:", err);
          setStatus({type: 'error', message: "Update failed: " + err.message});
      }
   };
@@ -210,21 +274,21 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
      const option = deleteOption || 'both';
      
      try {
-         // In a real app we'd get the examId this way
-         const stdRow = filteredData.find(d => d.studentId === stdId && d.examType === examType);
+         const stdRow = filteredData.find(d => (d.studentUid === stdId || d.studentId === stdId || d.permanentStudentId === stdId) && d.examType === examType);
          if (!stdRow) return;
+         const primaryUid = stdRow.studentUid || stdRow.studentId || stdId;
          const examId = stdRow.examId || `${stdRow.examType.replace(/\s+/g, '_')}_${stdRow.class}`;
 
          let batch = writeBatch(db);
-         if (examId && stdId) {
-             batch.delete(doc(db, 'resultSummary', `${examId}_${stdId}`));
+         if (examId && primaryUid) {
+             batch.delete(doc(db, 'resultSummary', `${examId}_${primaryUid}`));
          }
          
-         for (const subName of Object.keys(stdRow.subjects)) {
-             const subjectDocId = `${examId}_${stdId}_${subName.replace(/\s+/g, '')}`;
+         for (const subName of Object.keys(stdRow.subjects || {})) {
+             const subjectDocId = `${examId}_${primaryUid}_${subName.replace(/\s+/g, '')}`;
              batch.delete(doc(db, 'results', subjectDocId));
-             if (option === 'both' && stdId && stdId.trim()) {
-                 batch.delete(doc(db, 'results_secure', stdId, 'records', subjectDocId));
+             if (option === 'both' && primaryUid && primaryUid.trim()) {
+                 batch.delete(doc(db, 'results_secure', primaryUid, 'records', subjectDocId));
              }
          }
          
@@ -234,7 +298,7 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
               const resultsQuery = query(
                   collection(db, 'results'),
                   where('examId', '==', examId),
-                  where('studentId', '==', stdId)
+                  where('studentId', 'in', [primaryUid, stdRow.studentId, stdRow.permanentStudentId || primaryUid])
               );
               const resultsSnap = await getDocs(resultsQuery);
               if (!resultsSnap.empty) {

@@ -1,12 +1,56 @@
 import React, { useState, useEffect } from 'react';
 import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import fileSaver from 'file-saver';
+const saveAs = (fileSaver as any)?.saveAs || fileSaver;
 import { Upload, CheckCircle2, AlertCircle, Download, FileEdit } from 'lucide-react';
 
 import { doc, writeBatch, collection, getDocs, query, where, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { recordAuditLog } from '../../lib/auditLogger';
 
-export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assignedClasses, assignedSubjects, teacherProfile }: any) {
+const CLASS_SUBJECTS: Record<string, string[]> = {
+  'PG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
+  'Nursery': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
+  'LKG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
+  'UKG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
+  '1': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'],
+  '2': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'],
+  '3': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'],
+  '4': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science'],
+  '5': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science'],
+  '6': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
+  '7': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
+  '8': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
+  '9': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Opt Math', 'Opt II'],
+  '10': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Opt Math', 'Opt II']
+};
+
+export const getNepalGPA = (pct: number) => {
+  if (pct >= 90) return 4.0;
+  if (pct >= 80) return 3.6;
+  if (pct >= 70) return 3.2;
+  if (pct >= 60) return 2.8;
+  if (pct >= 50) return 2.4;
+  if (pct >= 40) return 2.0;
+  if (pct >= 35) return 1.6;
+  return 0.0;
+};
+
+export const getGrade = (marks: number | 'AB', fm: number, pm?: number) => {
+  if (marks === 'AB') return 'NG';
+  if (pm !== undefined && typeof marks === 'number' && marks < pm) return 'NG';
+  const pct = fm > 0 && typeof marks === 'number' ? (marks / fm) * 100 : 0;
+  if (pct >= 90) return 'A+';
+  if (pct >= 80) return 'A';
+  if (pct >= 70) return 'B+';
+  if (pct >= 60) return 'B';
+  if (pct >= 50) return 'C+';
+  if (pct >= 40) return 'C';
+  if (pct >= 30) return 'D';
+  return 'NG';
+};
+
+export function UploadTab({ EXAM_TYPES, allClasses, data, setStatus, userRole, assignedClasses, assignedSubjects, teacherProfile }: any) {
   const [examCategory, setExamCategory] = useState<'Test' | 'Terminal'>('Test');
   const [uploadExamType, setUploadExamType] = useState('');
   const [uploadClass, setUploadClass] = useState('');
@@ -34,30 +78,119 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
     }
   }, [isTeacher, teacherClass, allowedClasses, uploadClass]);
 
+  // Helper to dynamically resolve full marks and TH/PR breakdown for a class & subject
+  const resolveSubjectConfig = (cls: string, subjName: string) => {
+    // 1. Check if existing results records store explicit configured values for this subject
+    if (Array.isArray(data) && data.length > 0) {
+      for (const r of data) {
+        if (String(r.class) === String(cls) && r.subjects && r.subjects[subjName]) {
+          const s = r.subjects[subjName];
+          const thF = s.thFull !== undefined ? s.thFull : (s.thFullMarks !== undefined ? s.thFullMarks : 75);
+          const prF = s.prFull !== undefined ? s.prFull : (s.prFullMarks !== undefined ? s.prFullMarks : 25);
+          const thP = s.thPass !== undefined ? s.thPass : (s.thPassMarks !== undefined ? s.thPassMarks : Math.round(thF * 0.4));
+          const prP = s.prPass !== undefined ? s.prPass : (s.prPassMarks !== undefined ? s.prPassMarks : Math.round(prF * 0.4));
+          const fm = s.fullMarks !== undefined ? s.fullMarks : (thF + prF);
+          return {
+            fullMarks: fm,
+            thFull: thF,
+            prFull: prF,
+            thPass: thP,
+            prPass: prP,
+            hasTh: thF > 0,
+            hasPr: prF > 0
+          };
+        }
+      }
+    }
+
+    // 2. Standard class defaults
+    const theoryOnlySubjects = ['Drawing', 'Rhymes', 'GK', 'Moral Science'];
+    if (theoryOnlySubjects.includes(subjName)) {
+      return {
+        fullMarks: 100,
+        thFull: 100,
+        prFull: 0,
+        thPass: 40,
+        prPass: 0,
+        hasTh: true,
+        hasPr: false
+      };
+    }
+
+    return {
+      fullMarks: 100,
+      thFull: 75,
+      prFull: 25,
+      thPass: 30,
+      prPass: 10,
+      hasTh: true,
+      hasPr: true
+    };
+  };
+
+  const getAllowedSubjectsForClass = (cls: string): string[] => {
+    const defaultList = CLASS_SUBJECTS[cls] || ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'];
+    const customSubjectsFromData = new Set<string>(defaultList);
+    
+    if (Array.isArray(data)) {
+      data.filter(r => String(r.class) === String(cls)).forEach(r => {
+        if (r.subjects) {
+          Object.keys(r.subjects).forEach(s => customSubjectsFromData.add(s));
+        }
+      });
+    }
+
+    let list = Array.from(customSubjectsFromData);
+    if (userRole === 'teacher') {
+      const isClassTeacher = String(cls).replace(/^Class\s+/i, '').trim() === String(teacherProfile?.class || '').replace(/^Class\s+/i, '').trim();
+      if (!isClassTeacher) {
+        const assigned = Array.isArray(assignedSubjects) ? assignedSubjects : [];
+        list = list.filter(subj => assigned.includes(subj));
+      }
+    }
+    return list;
+  };
+
   const downloadTemplate = async () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Template");
-    ws.columns = [
+    const targetClass = uploadClass || '10';
+    const classSubjs = getAllowedSubjectsForClass(targetClass);
+
+    const cols: any[] = [
       { header: 'StudentId', key: 'StudentId', width: 15 },
       { header: 'Name', key: 'Name', width: 25 },
-      { header: 'Class', key: 'Class', width: 10 },
-      { header: 'Mathematics (TH)', key: 'Mathematics (TH)', width: 20 },
-      { header: 'Mathematics (PR)', key: 'Mathematics (PR)', width: 20 },
-      { header: 'Science', key: 'Science', width: 20 }
+      { header: 'Class', key: 'Class', width: 10 }
     ];
 
-    ws.addRow({
-      'StudentId': 'S101',
+    const sampleRow: Record<string, any> = {
+      'StudentId': 'STU-000001',
       'Name': 'John Doe',
-      'Class': uploadClass || '10',
-      'Mathematics (TH)': 65,
-      'Mathematics (PR)': 20,
-      'Science': 90
+      'Class': targetClass
+    };
+
+    classSubjs.forEach(subj => {
+      const cnf = resolveSubjectConfig(targetClass, subj);
+      if (cnf.hasTh && cnf.hasPr) {
+        cols.push({ header: `${subj} (TH)`, key: `${subj} (TH)`, width: 18 });
+        cols.push({ header: `${subj} (PR)`, key: `${subj} (PR)`, width: 18 });
+        sampleRow[`${subj} (TH)`] = Math.round(cnf.thFull * 0.8);
+        sampleRow[`${subj} (PR)`] = Math.round(cnf.prFull * 0.85);
+      } else if (cnf.hasTh) {
+        cols.push({ header: `${subj} (TH)`, key: `${subj} (TH)`, width: 18 });
+        sampleRow[`${subj} (TH)`] = Math.round(cnf.thFull * 0.8);
+      } else {
+        cols.push({ header: subj, key: subj, width: 18 });
+        sampleRow[subj] = Math.round(cnf.fullMarks * 0.8);
+      }
     });
+
+    ws.columns = cols;
+    ws.addRow(sampleRow);
 
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `Template_Class_${uploadClass || 'X'}_${uploadExamType}.xlsx`);
+    saveAs(blob, `Template_Class_${targetClass}_${uploadExamType || 'Exam'}.xlsx`);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,13 +239,15 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
       });
 
       let parsedData = rows;
-      if (parsedData.length > 0 && !('StudentId' in parsedData[0]) && !('Roll no.' in parsedData[0])) {
-        setStatus({ type: 'error', message: 'Excel must have "StudentId" or "Roll no." column.' });
+      if (parsedData.length > 0 && !('StudentId' in parsedData[0]) && !('Roll no.' in parsedData[0]) && !('Roll No' in parsedData[0])) {
+        setStatus({ type: 'error', message: 'Excel must have a "StudentId" or "Roll no." column.' });
         return;
       }
 
       parsedData = parsedData.map(row => {
-        if ('Roll no.' in row && !('StudentId' in row)) row['StudentId'] = row['Roll no.'];
+        if (!('StudentId' in row) && ('Roll no.' in row || 'Roll No' in row)) {
+          row['StudentId'] = row['Roll no.'] || row['Roll No'];
+        }
         row['ExamType'] = uploadExamType; 
         row['Class'] = String(row['Class'] || uploadClass);
         return row;
@@ -121,16 +256,64 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
       if (userRole === 'teacher') {
         parsedData = parsedData.filter(row => allowedClasses.includes(String(row['Class'])));
       }
+
+      const allowedClassSubjects = getAllowedSubjectsForClass(uploadClass);
       
       parsedData = parsedData.map(r => {
-         let errs = [];
-         if (!r.Name) errs.push('Missing Name');
+         let errs: string[] = [];
+         if (!r.Name || !String(r.Name).trim()) errs.push('Missing Student Name');
+         if (!r.StudentId || !String(r.StudentId).trim()) errs.push('Missing Student ID');
+
          Object.keys(r).forEach(k => {
-             const lowerK = k.toLowerCase().replace(/[^a-z]/g, '');
-             if(!['studentid', 'rollno', 'roll', 'id', 'name', 'class', 'examtype', 'fullmarksdata', 'rank', '_errors'].includes(lowerK)) {
-                 if (r[k] !== 'AB' && r[k] !== 'ab' && !isNaN(Number(r[k])) && Number(r[k]) > 100) {
-                     errs.push(`${k} marks > 100`);
-                 }
+             const lowerK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+             if (['studentid', 'rollno', 'roll', 'id', 'name', 'class', 'examtype', 'fullmarksdata', 'rank', '_errors'].includes(lowerK)) {
+                 return;
+             }
+
+             let baseSubj = k;
+             let type: 'TH' | 'PR' | 'TOTAL' = 'TOTAL';
+             if (k.toUpperCase().endsWith('(TH)')) {
+                 baseSubj = k.substring(0, k.length - 4).trim();
+                 type = 'TH';
+             } else if (k.toUpperCase().endsWith('(PR)')) {
+                 baseSubj = k.substring(0, k.length - 4).trim();
+                 type = 'PR';
+             }
+
+             // Check if subject is valid for class
+             const isMatch = allowedClassSubjects.some(s => s.toLowerCase() === baseSubj.toLowerCase());
+             if (!isMatch) {
+                 errs.push(`Subject "${baseSubj}" is not part of Class ${uploadClass} curriculum`);
+                 return;
+             }
+
+             // Resolve config for validation
+             const matchedCanonicalSubj = allowedClassSubjects.find(s => s.toLowerCase() === baseSubj.toLowerCase()) || baseSubj;
+             const cnf = resolveSubjectConfig(uploadClass, matchedCanonicalSubj);
+             const rawVal = r[k];
+
+             if (rawVal === undefined || rawVal === null || String(rawVal).trim() === '') {
+                 return; // Empty cell is allowed
+             }
+
+             if (String(rawVal).toUpperCase() === 'AB') {
+                 return; // Absent is valid
+             }
+
+             const numVal = Number(rawVal);
+             if (isNaN(numVal)) {
+                 errs.push(`${k}: Invalid non-numeric value "${rawVal}"`);
+                 return;
+             }
+
+             if (numVal < 0) {
+                 errs.push(`${k}: Marks cannot be negative (${numVal})`);
+                 return;
+             }
+
+             const maxAllowed = type === 'TH' ? cnf.thFull : (type === 'PR' ? cnf.prFull : cnf.fullMarks);
+             if (numVal > maxAllowed) {
+                 errs.push(`${k}: Marks (${numVal}) exceed maximum configured full marks (${maxAllowed})`);
              }
          });
          return {...r, _errors: errs};
@@ -138,6 +321,7 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
 
       setPreviewData(parsedData);
     } catch (error) {
+      console.error('Error parsing Excel file:', error);
       setStatus({ type: 'error', message: 'Error parsing Excel file.' });
     }
     e.target.value = '';
@@ -145,6 +329,13 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
 
   const confirmAndSave = async () => {
       if (!previewData) return;
+
+      const totalErrors = previewData.reduce((sum, r) => sum + (r._errors?.length || 0), 0);
+      if (totalErrors > 0) {
+          setStatus({ type: 'error', message: `Cannot save Excel data: Found ${totalErrors} validation error(s). Please fix the errors in your spreadsheet before uploading.` });
+          return;
+      }
+
       setStatus({ type: 'info', message: 'Saving to Firebase...' });
 
       const validData = previewData.map(r => {
@@ -160,22 +351,50 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
               class: uploadClass,
               academicYear: new Date().getFullYear().toString(),
               published: false
+          }, { merge: true });
+
+          // Fetch student user records for this class to link stable identities
+          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student'), where('class', '==', uploadClass)));
+          const usersMap = new Map<string, any>();
+          usersSnap.forEach(d => {
+             const u = d.data();
+             const obj = { uid: d.id, ...u };
+             usersMap.set(d.id, obj);
+             if (u.studentId) usersMap.set(String(u.studentId).trim().toLowerCase(), obj);
+             if (u.permanentStudentId) usersMap.set(String(u.permanentStudentId).trim().toLowerCase(), obj);
+             if (u.emisNumber) usersMap.set(String(u.emisNumber).trim().toLowerCase(), obj);
+             if (u.rollNumber) usersMap.set(String(u.rollNumber).trim().toLowerCase(), obj);
+             if (u.rollNo) usersMap.set(String(u.rollNo).trim().toLowerCase(), obj);
+             if (u.fullName) usersMap.set(String(u.fullName).trim().toLowerCase(), obj);
+             if (u.name) usersMap.set(String(u.name).trim().toLowerCase(), obj);
           });
 
-          // We will use batches
+          const allowedClassSubjects = getAllowedSubjectsForClass(uploadClass);
+
           let batch = writeBatch(db);
           let operationCount = 0;
           let resultsCount = 0;
 
           for (const newRow of validData) {
-              const studentId = String(newRow.StudentId || newRow['Roll no.']);
+              const inputId = String(newRow.StudentId || newRow['Roll no.'] || '').trim();
+              const inputName = String(newRow.Name || '').trim().toLowerCase();
+              const matchedUser = usersMap.get(inputId.toLowerCase()) || (inputName ? usersMap.get(inputName) : null);
+
+              const resolvedUid = matchedUser?.uid || inputId;
+              const resolvedPermId = matchedUser?.permanentStudentId || matchedUser?.studentId || inputId;
+              const resolvedEmis = matchedUser?.emisNumber || matchedUser?.studentEmis || '';
+              const resolvedRoll = matchedUser?.rollNumber || matchedUser?.rollNo || (newRow['Roll no.'] ? String(newRow['Roll no.']) : '');
+              const resolvedName = newRow.Name || matchedUser?.fullName || matchedUser?.name || 'Student';
+              const resolvedSection = matchedUser?.section || 'A';
+              const acadYear = new Date().getFullYear().toString();
+
               let total = 0;
               let fullTotal = 0;
 
               // Group subjects
-              const subjectMap: Record<string, any> = {};
+              const subjectMap: Record<string, { th?: any, pr?: any, total?: any }> = {};
               for (const k of Object.keys(newRow)) {
-                  if (['StudentId', 'Name', 'Class', 'ExamType', 'Roll no.', 'Roll'].includes(k)) continue;
+                  if (['StudentId', 'Name', 'Class', 'ExamType', 'Roll no.', 'Roll No', 'Roll'].includes(k)) continue;
                   
                   let baseSubj = k;
                   let type = 'TOTAL';
@@ -187,10 +406,12 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
                       type = 'PR';
                   }
 
+                  const matchedCanonicalSubj = allowedClassSubjects.find(s => s.toLowerCase() === baseSubj.toLowerCase()) || baseSubj;
+
                   if (userRole === 'teacher') {
                       const assigned = Array.isArray(assignedSubjects) ? assignedSubjects : [];
                       const isClassTeacherOfSelected = String(uploadClass).replace(/^Class\s+/i, '').trim() === String(teacherProfile?.class || '').replace(/^Class\s+/i, '').trim();
-                      if (!isClassTeacherOfSelected && !assigned.includes(baseSubj)) {
+                      if (!isClassTeacherOfSelected && !assigned.includes(matchedCanonicalSubj)) {
                           continue;
                       }
                   }
@@ -198,62 +419,71 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
                   const rawVal = newRow[k] === 'AB' || newRow[k] === 'ab' ? 'AB' : newRow[k];
                   const numericVal = typeof rawVal === 'number' ? rawVal : (!isNaN(Number(rawVal)) && rawVal !== 'AB' && String(rawVal).trim() !== '' ? Number(rawVal) : rawVal);
 
-                  if (!subjectMap[baseSubj]) subjectMap[baseSubj] = { th: undefined, pr: undefined, total: undefined };
-                  if (type === 'TH') subjectMap[baseSubj].th = numericVal;
-                  else if (type === 'PR') subjectMap[baseSubj].pr = numericVal;
-                  else subjectMap[baseSubj].total = numericVal;
+                  if (!subjectMap[matchedCanonicalSubj]) subjectMap[matchedCanonicalSubj] = { th: undefined, pr: undefined, total: undefined };
+                  if (type === 'TH') subjectMap[matchedCanonicalSubj].th = numericVal;
+                  else if (type === 'PR') subjectMap[matchedCanonicalSubj].pr = numericVal;
+                  else subjectMap[matchedCanonicalSubj].total = numericVal;
               }
 
-              // Write individual subject results
+              // Write individual subject results using dynamic subject configuration
               for (const subj of Object.keys(subjectMap)) {
                   const svals = subjectMap[subj];
+                  const cnf = resolveSubjectConfig(uploadClass, subj);
+
                   let finalTh: any = svals.th;
                   let finalPr: any = svals.pr;
                   
-                  let fm = 0;
-                  let thFm = 0;
-                  let prFm = 0;
-                  let thPm = 0;
-                  let prPm = 0;
-                  
-                  if (finalTh !== undefined && finalPr !== undefined) {
-                      fm = 100; thFm = 75; prFm = 25;
-                      thPm = 30; prPm = 10;
-                  } else if (finalTh !== undefined) {
-                      fm = 75; thFm = 75; thPm = 30;
-                  } else if (finalPr !== undefined) {
-                      fm = 25; prFm = 25; prPm = 10;
-                  } else {
-                      fm = 100;
-                  }
+                  const fm = cnf.fullMarks;
+                  const thFm = cnf.thFull;
+                  const prFm = cnf.prFull;
+                  const thPm = cnf.thPass;
+                  const prPm = cnf.prPass;
 
-                  const sumObtained = (finalTh === 'AB' ? 0 : (finalTh || 0)) + (finalPr === 'AB' ? 0 : (finalPr || 0));
-                  const isCompleteAB = (finalTh === 'AB' && finalPr === 'AB') || (svals.total === 'AB');
-                  let obtainedTotal = isCompleteAB ? 'AB' : sumObtained;
+                  const isThAB = finalTh === 'AB';
+                  const isPrAB = finalPr === 'AB';
+                  const sumObtained = (isThAB ? 0 : (finalTh || 0)) + (isPrAB ? 0 : (finalPr || 0));
+                  const isCompleteAB = (isThAB && isPrAB) || (svals.total === 'AB');
+                  let obtainedTotal: number | 'AB' = isCompleteAB ? 'AB' : sumObtained;
                   
                   if (svals.total !== undefined && finalTh === undefined && finalPr === undefined) {
-                      obtainedTotal = svals.total;
+                      obtainedTotal = svals.total === 'AB' ? 'AB' : Number(svals.total) || 0;
                   }
 
-                  const subjectDocId = `${examId}_${studentId}_${subj.replace(/\s+/g, '')}`;
+                  const subjectDocId = `${examId}_${resolvedUid}_${subj.replace(/\s+/g, '')}`;
                   
                   batch.set(doc(db, 'results', subjectDocId), {
-                      studentId: studentId,
+                      studentUid: resolvedUid,
+                      studentId: resolvedPermId,
+                      permanentStudentId: resolvedPermId,
+                      studentEmis: resolvedEmis,
                       examId: examId,
                       subject: subj,
                       marks: obtainedTotal,
                       fullMarks: fm,
-                      ...(finalTh !== undefined ? { thMarks: finalTh, thFull: thFm, thPass: thPm } : {}),
-                      ...(finalPr !== undefined ? { prMarks: finalPr, prFull: prFm, prPass: prPm } : {})
+                      class: String(newRow.Class || uploadClass),
+                      section: resolvedSection,
+                      academicYear: acadYear,
+                      rollNo: resolvedRoll,
+                      rollNumberSnapshot: resolvedRoll,
+                      ...(cnf.hasTh ? { thMarks: finalTh, thFull: thFm, thPass: thPm } : {}),
+                      ...(cnf.hasPr ? { prMarks: finalPr, prFull: prFm, prPass: prPm } : {})
                   });
-                  batch.set(doc(db, 'results_secure', studentId, 'records', subjectDocId), {
-                      studentId: studentId,
+                  batch.set(doc(db, 'results_secure', resolvedUid, 'records', subjectDocId), {
+                      studentUid: resolvedUid,
+                      studentId: resolvedPermId,
+                      permanentStudentId: resolvedPermId,
+                      studentEmis: resolvedEmis,
                       examId: examId,
                       subject: subj,
                       marks: obtainedTotal,
                       fullMarks: fm,
-                      ...(finalTh !== undefined ? { thMarks: finalTh, thFull: thFm, thPass: thPm } : {}),
-                      ...(finalPr !== undefined ? { prMarks: finalPr, prFull: prFm, prPass: prPm } : {})
+                      class: String(newRow.Class || uploadClass),
+                      section: resolvedSection,
+                      academicYear: acadYear,
+                      rollNo: resolvedRoll,
+                      rollNumberSnapshot: resolvedRoll,
+                      ...(cnf.hasTh ? { thMarks: finalTh, thFull: thFm, thPass: thPm } : {}),
+                      ...(cnf.hasPr ? { prMarks: finalPr, prFull: prFm, prPass: prPm } : {})
                   });
                   operationCount++;
                   
@@ -268,32 +498,29 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
               }
 
               const pct = fullTotal > 0 ? (total / fullTotal) * 100 : 0;
-              const getGrade = (marks: number, fm: number) => {
-                if(isNaN(marks)) return '';
-                const p = (marks / fm) * 100;
-                if (p >= 90) return 'A+';
-                if (p >= 80) return 'A';
-                if (p >= 70) return 'B+';
-                if (p >= 60) return 'B';
-                if (p >= 50) return 'C+';
-                if (p >= 40) return 'C';
-                if (p >= 30) return 'D';
-                return 'NG';
-              };
+              const canonicalGrade = getGrade(total, fullTotal);
+              const canonicalGPA = getNepalGPA(pct);
 
-              const summaryDocId = `${examId}_${studentId}`;
+              const summaryDocId = `${examId}_${resolvedUid}`;
               batch.set(doc(db, 'resultSummary', summaryDocId), {
-                  studentId: studentId,
-                  studentName: newRow.Name,
-                  class: String(newRow.Class),
+                  studentUid: resolvedUid,
+                  studentId: resolvedPermId,
+                  permanentStudentId: resolvedPermId,
+                  studentEmis: resolvedEmis,
+                  studentName: resolvedName,
+                  class: String(newRow.Class || uploadClass),
+                  section: resolvedSection,
+                  academicYear: acadYear,
+                  rollNo: resolvedRoll,
+                  rollNumberSnapshot: resolvedRoll,
                   examId: examId,
                   examType: uploadExamType,
                   total: total,
                   fullTotal: fullTotal,
                   percentage: pct,
-                  grade: getGrade(total, fullTotal),
-                  rank: 0, // rank will be calculated later or left as 0
-                  gpa: Number((pct/25).toFixed(1))
+                  grade: canonicalGrade,
+                  rank: 0,
+                  gpa: canonicalGPA
               });
               operationCount++;
               resultsCount++;
@@ -305,6 +532,24 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
               }
           }
           await batch.commit();
+
+          // Write audit log event for the bulk Excel upload
+          try {
+              await recordAuditLog({
+                  category: 'academic',
+                  actionType: 'RESULTS_SAVED',
+                  targetType: 'class_exam_results',
+                  targetId: examId,
+                  studentClass: String(uploadClass),
+                  academicYear: new Date().getFullYear().toString(),
+                  reason: `Excel mark upload for Class ${uploadClass} - ${uploadExamType} (${resultsCount} students)`,
+                  previousValue: 'Previous/Draft state',
+                  newValue: `Uploaded and calculated results for ${resultsCount} students in Class ${uploadClass} (${uploadExamType})`,
+                  result: 'SUCCESS'
+              });
+          } catch (auditErr) {
+              console.warn('Audit log write error for excel upload:', auditErr);
+          }
 
           setStatus({ type: 'success', message: `Results for Class ${uploadClass} - ${uploadExamType} saved successfully. ${resultsCount} students updated.` });
           setPreviewData(null);
@@ -352,6 +597,24 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
         batch.update(doc(db, 'exams', examId), { published: true });
         
         await batch.commit();
+
+        try {
+            await recordAuditLog({
+                category: 'academic',
+                actionType: 'EXAM_PUBLISHED',
+                targetType: 'class_exam_results',
+                targetId: examId,
+                studentClass: String(uploadClass),
+                academicYear: new Date().getFullYear().toString(),
+                reason: `Calculated ranks and published results for Class ${uploadClass} - ${uploadExamType}`,
+                previousValue: 'Draft/Unpublished',
+                newValue: `Published results for ${allStudents.length} students`,
+                result: 'SUCCESS'
+            });
+        } catch (auditErr) {
+            console.warn('Audit logging failed for exam publication:', auditErr);
+        }
+
         setStatus({type: 'success', message: `Results and Ranks Published successfully for Class ${uploadClass}.`});
     } catch(err: any) {
         setStatus({type: 'error', message: 'Publish failed: ' + err.message});
@@ -385,7 +648,7 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
             </select>
         ) : (
             <input 
-                type="text"
+                type="text" 
                 value={uploadExamType} 
                 onChange={e => setUploadExamType(e.target.value)} 
                 className="w-full px-4 py-2 border rounded-lg mb-4 border-primary text-primary focus:ring-2 focus:ring-primary outline-none h-[42px]"
@@ -434,12 +697,13 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
       <div className="flex-1 border-primary text-primary p-6 rounded-lg border border-gray-200">
           <h3 className="font-bold text-gray-800 mb-4 border-b pb-2 flex items-center gap-2"><FileEdit className="w-5 h-5"/> Upload Requirements</h3>
           <button onClick={downloadTemplate} className="mb-4 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-gray-100 transition-colors w-full justify-center">
-             <Download className="w-4 h-4" /> Download Sample Template
+             <Download className="w-4 h-4" /> Download Sample Template for Class {uploadClass || 'Selection'}
           </button>
           <ul className="text-sm text-gray-600 space-y-2 list-disc pl-4 mb-4">
             <li>Must include a <code className="bg-white px-1 border rounded">StudentId</code> or <code className="bg-white px-1 border rounded">Roll no.</code></li>
             <li>Must include a <code className="bg-white px-1 border rounded">Name</code> column.</li>
-            <li>Subject columns should contain absolute numbers or "AB" for absent.</li>
+            <li>Subject columns must match Class curriculum (e.g. <code className="bg-white px-1 border rounded">English (TH)</code>, <code className="bg-white px-1 border rounded">Science (PR)</code>).</li>
+            <li>Subject marks must be numbers within configured full marks or <code className="bg-white px-1 border rounded">AB</code> for absent.</li>
           </ul>
           <div className="bg-orange-50 text-orange-800 p-3 rounded-lg border border-orange-200 text-sm flex gap-2">
              <AlertCircle className="w-5 h-5 flex-shrink-0" />
@@ -452,7 +716,12 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
                   <div className="p-4 border-b flex justify-between items-center">
-                     <h3 className="font-bold text-lg">Preview Data Form ({previewData.length} students)</h3>
+                     <div>
+                       <h3 className="font-bold text-lg">Preview Data ({previewData.length} students)</h3>
+                       {previewData.some(r => r._errors && r._errors.length > 0) && (
+                         <p className="text-xs text-red-600 font-bold mt-0.5">⚠️ Errors detected in highlighted rows. Hover over the error icon to inspect details.</p>
+                       )}
+                     </div>
                      <div className="flex gap-2">
                          <button onClick={() => setPreviewData(null)} className="px-4 py-2 rounded-lg bg-gray-100 font-bold text-gray-600 hover:bg-gray-200">Cancel</button>
                          <button onClick={confirmAndSave} className="px-4 py-2 rounded-lg bg-primary text-white font-bold hover:bg-primary-dark flex items-center gap-2">
@@ -466,20 +735,24 @@ export function UploadTab({ EXAM_TYPES, allClasses, setStatus, userRole, assigne
                               <tr className="bg-gray-100">
                                   <th className="p-2 border">Student ID</th>
                                   <th className="p-2 border">Name</th>
-                                  {Object.keys(previewData[0] || {}).filter(k=>!['StudentId','Roll no.','Name','Class','ExamType','_errors'].includes(k)).map(k => (
+                                  {Object.keys(previewData[0] || {}).filter(k=>!['StudentId','Roll no.','Roll No','Name','Class','ExamType','_errors'].includes(k)).map(k => (
                                       <th key={k} className="p-2 border">{k}</th>
                                   ))}
                               </tr>
                           </thead>
                           <tbody>
                               {previewData.map((row, i) => (
-                                  <tr key={i} className={row._errors.length > 0 ? "bg-red-50" : "hover:opacity-90"}>
+                                  <tr key={i} className={row._errors && row._errors.length > 0 ? "bg-red-50" : "hover:opacity-90"}>
                                       <td className="p-2 border">{row.StudentId || row['Roll no.']}</td>
                                       <td className="p-2 border font-bold flex items-center gap-2">
                                           {row.Name}
-                                          {row._errors.length > 0 && <span title={row._errors.join(', ')} className="text-red-500 cursor-help"><AlertCircle className="w-4 h-4"/></span>}
+                                          {row._errors && row._errors.length > 0 && (
+                                            <span title={row._errors.join('; ')} className="text-red-500 cursor-help flex items-center gap-1 text-xs">
+                                              <AlertCircle className="w-4 h-4 shrink-0"/> {row._errors[0]}
+                                            </span>
+                                          )}
                                       </td>
-                                      {Object.keys(row).filter(k=>!['StudentId','Roll no.','Name','Class','ExamType','_errors'].includes(k)).map(k => (
+                                      {Object.keys(row).filter(k=>!['StudentId','Roll no.','Roll No','Name','Class','ExamType','_errors'].includes(k)).map(k => (
                                           <td key={k} className="p-2 border">{row[k]}</td>
                                       ))}
                                   </tr>

@@ -9,7 +9,7 @@ import CashReceiptModal, { CashReceiptData } from './CashReceiptModal';
 import BillingCoverageReconciliationModal from './BillingCoverageReconciliationModal';
 import { FinancialAuditRepairModal } from './FinancialAuditRepairModal';
 import { getStudentBillingCoverage, getStudentYearCoverage } from '../../lib/nepaliBillingCoverage';
-import { recordLedgerAuditLog } from '../../lib/auditLogger';
+import { recordLedgerAuditLog, buildAuthoritativeAuditPayload } from '../../lib/auditLogger';
 import { NumericInput } from '../common/NumericInput';
 import {
     executeCashFeePayment,
@@ -822,7 +822,14 @@ export default function SimpleStudentLedgerTab({
     // Filtered students
     const filteredStudents = uniqueStudents.filter(s => {
         const matchClass = selectedClass ? s.class === selectedClass : true;
-        const matchSearch = searchTerm ? String(s.name).toLowerCase().includes(searchTerm.toLowerCase()) || String(s.rollNumber || '').includes(searchTerm) : true;
+        const q = searchTerm.toLowerCase();
+        const matchSearch = searchTerm ? (
+            String(s.name || '').toLowerCase().includes(q) ||
+            String(s.rollNumber || '').toLowerCase().includes(q) ||
+            String(s.studentId || '').toLowerCase().includes(q) ||
+            String(s.permanentStudentId || '').toLowerCase().includes(q) ||
+            String(s.emisNumber || s.studentEmis || '').toLowerCase().includes(q)
+        ) : true;
         return matchClass && matchSearch;
     }).sort((a, b) => Number(a.rollNumber || 0) - Number(b.rollNumber || 0));
 
@@ -1757,23 +1764,42 @@ export default function SimpleStudentLedgerTab({
                 timestamp: serverTimestamp()
             });
 
-            await batch.commit();
-
             const prevSummary = `Status: ${editingLedgerRow.status || 'due'} | Paid: NRs. ${Number(editingLedgerRow.paidAmount || 0).toLocaleString()} | Due: NRs. ${Number(editingLedgerRow.dueAmount || 0).toLocaleString()} | Month: ${editingLedgerRow.month} (${editingLedgerRow.type || 'Tuition Fee'})`;
             const newSummary = `Status: ${overrideStatus} | Paid: NRs. ${Number(overridePaidAmount || 0).toLocaleString()} | Due: NRs. ${Number(overrideDueAmount || 0).toLocaleString()} | Page No: ${overrideLedgerPageNo || 'None'}`;
 
-            await recordLedgerAuditLog({
+            const opId = `OP_OVERRIDE_${editingLedgerRow.feeDocId || editingLedgerRow.id}_${Date.now()}`;
+            const auditPayload = await buildAuthoritativeAuditPayload({
+                operationId: opId,
+                category: 'financial',
+                targetType: 'studentFees',
+                targetId: editingLedgerRow.feeDocId || editingLedgerRow.id,
                 studentId: editingLedgerRow.studentId,
                 studentName: editingLedgerRow.studentName,
                 studentClass: editingLedgerRow.studentClass,
                 actionType: 'MANUAL_OVERRIDE',
+                action: 'MANUAL_OVERRIDE',
+                beforeState: {
+                    status: editingLedgerRow.status || 'due',
+                    paidAmount: Number(editingLedgerRow.paidAmount || 0),
+                    dueAmount: Number(editingLedgerRow.dueAmount || 0),
+                    month: editingLedgerRow.month,
+                    type: editingLedgerRow.type
+                },
+                afterState: {
+                    status: overrideStatus,
+                    paidAmount: Number(overridePaidAmount || 0),
+                    dueAmount: Number(overrideDueAmount || 0),
+                    ledgerPageNo: overrideLedgerPageNo
+                },
                 previousValue: prevSummary,
                 newValue: newSummary,
-                reason: overrideReason?.trim() || 'Manual ledger row override',
-                adminName: operatorName,
-                adminUid: operatorUid,
-                adminEmail: currentAuthUser?.email || undefined
-            });
+                reason: overrideReason?.trim() || 'Manual ledger row override'
+            }, opId);
+
+            batch.set(doc(db, 'ledger_audit_logs', opId), auditPayload);
+            batch.set(doc(db, 'audit_logs', opId), auditPayload);
+
+            await batch.commit();
 
             onRefresh();
             setEditingLedgerRow(null);

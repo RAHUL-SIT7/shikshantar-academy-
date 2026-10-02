@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CreditCard, Wallet, TrendingUp, AlertTriangle, Users, BookOpen, Clock, LogOut, GraduationCap, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -14,14 +15,28 @@ import TransactionHistoryTab from '../components/fee_management/TransactionHisto
 import LedgerAuditLogTab from '../components/fee_management/LedgerAuditLogTab';
 
 export default function AccountAdmin() {
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {
-    return 'fee_structure';
+    return searchParams.get('tab') || 'fee_structure';
   });
   const [ledgerFilterStatus, setLedgerFilterStatus] = useState('All');
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [userRole, setUserRole] = useState('admin');
-  const [targetStudentId, setTargetStudentId] = useState<string | undefined>(undefined);
+  const [targetStudentId, setTargetStudentId] = useState<string | undefined>(() => {
+    return searchParams.get('studentId') || undefined;
+  });
   const [prefillPayment, setPrefillPayment] = useState<any>(null);
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    const studentIdParam = searchParams.get('studentId');
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
+    if (studentIdParam) {
+      setTargetStudentId(studentIdParam);
+    }
+  }, [searchParams]);
 
   
   const [loading, setLoading] = useState(true);

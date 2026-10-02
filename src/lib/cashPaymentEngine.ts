@@ -13,7 +13,7 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import { formatBSDate, getBSYearMonthDate } from './nepaliDate';
-import { recordLedgerAuditLog } from './auditLogger';
+import { recordLedgerAuditLog, getAuthoritativeActor } from './auditLogger';
 
 export const NEPALI_MONTHS = [
   'Baisakh', 'Jestha', 'Ashadh', 'Shrawan', 'Bhadra', 'Ashwin',
@@ -313,6 +313,9 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
   const firestoreDb = params.customDb || db;
   const txDocRef = doc(firestoreDb, 'transactions', txId);
   const cashLedgerDocRef = doc(collection(firestoreDb, 'cash_ledger'));
+
+  // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
+  const authoritativeActor = await getAuthoritativeActor();
 
   // Run atomic transaction
   return await runTransaction(firestoreDb, async (transaction) => {
@@ -647,10 +650,10 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
     });
 
     // 7. Atomic Audit Log Creation (recorded inside the same transaction)
-    const auditLogRef = doc(collection(firestoreDb, 'ledger_audit_logs'));
-    const systemAuditLogRef = doc(collection(firestoreDb, 'audit_logs'));
-    const auditLogId = auditLogRef.id;
     const opId = params.paymentGroupId || `OP_PAY_${txId}`;
+    const auditLogRef = doc(firestoreDb, 'ledger_audit_logs', opId);
+    const systemAuditLogRef = doc(firestoreDb, 'audit_logs', opId);
+    const auditLogId = opId;
 
     const beforeState = {
       studentId: studentId,
@@ -699,12 +702,12 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
       newValue: `Cash Tendered: NRs. ${cashTendered.toLocaleString()} | Applied: NRs. ${breakdown.amountApplied.toLocaleString()} | Change Returned: NRs. ${breakdown.changeReturned.toLocaleString()}${breakdown.isExcess ? ` | Excess (${params.excessDecision}): NRs. ${breakdown.excessAmount.toLocaleString()}` : ''}`,
       reason: fullRemarks,
       result: 'SUCCESS',
-      actorUid: operatorUid,
-      adminUid: operatorUid,
-      actorName: operatorName,
-      adminName: operatorName,
-      actorRole: 'admin',
-      adminTier: (localStorage.getItem('adminTier') as any) || 'primary',
+      actorUid: authoritativeActor.actorUid || operatorUid,
+      adminUid: authoritativeActor.adminUid || operatorUid,
+      actorName: authoritativeActor.actorName || operatorName,
+      adminName: authoritativeActor.adminName || operatorName,
+      actorRole: authoritativeActor.actorRole || 'admin',
+      adminTier: authoritativeActor.adminTier || 'primary',
       date: bsDate,
       dateBS: bsDate,
       timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
