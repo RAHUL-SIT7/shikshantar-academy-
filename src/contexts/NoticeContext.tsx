@@ -3,8 +3,10 @@ import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 
-import NepaliDate from 'nepali-date-converter';
+import NepaliDateImport from 'nepali-date-converter';
+const NepaliDate: any = (NepaliDateImport as any)?.default || NepaliDateImport;
 import { safeDispatchEvent } from '../lib/safeEvents';
+import { isBsDateExpired, isBSDateString, parseToNepaliDate } from '../lib/nepaliDate';
 
 export interface Notice {
   id: string;
@@ -14,6 +16,8 @@ export interface Notice {
   targets: string[];
   recipientUids?: string[];
   date: string;
+  validUntil?: string;
+  isPinned?: boolean;
   message?: string;
   attachmentUrl?: string;
   attachmentType?: string;
@@ -42,52 +46,48 @@ interface NoticeContextType {
 
 const NoticeContext = createContext<NoticeContextType | undefined>(undefined);
 
-const isWithinTwoMonths = (notice: Notice): boolean => {
-  let createdDate: Date | null = null;
-  
-  if (notice.timestamp) {
-    if (typeof notice.timestamp === 'string') {
-      createdDate = new Date(notice.timestamp);
-    } else if (typeof notice.timestamp.toDate === 'function') {
-      createdDate = notice.timestamp.toDate();
-    } else if (notice.timestamp.seconds !== undefined) {
-      createdDate = new Date(notice.timestamp.seconds * 1000);
-    }
-  }
-  
-  if (!createdDate && notice.date) {
-    try {
-      const dStr = notice.date.split('T')[0];
-      const year = parseInt(dStr.substring(0, 4), 10);
-      if (year > 2040) {
-        // Bikram Sambat format e.g. 2081-11-15 or 2082/05/12
-        const parts = dStr.split(/[-/]/).map(Number);
-        if (parts.length === 3) {
-          const nd = new NepaliDate(parts[0], parts[1] - 1, parts[2]);
-          createdDate = nd.toJsDate();
-        }
-      } else {
-        createdDate = new Date(notice.date);
-      }
-    } catch {
-      createdDate = new Date(notice.date);
-    }
-  }
-  
-  // If date calculation is unknown or invalid, treat notice as active
-  if (!createdDate || isNaN(createdDate.getTime())) {
-    return true; 
-  }
-  
-  const now = new Date();
-  const diffTime = now.getTime() - createdDate.getTime();
-  const diffDays = diffTime / (1000 * 60 * 60 * 24);
-  
-  const maxDays = notice.displayDurationDays !== undefined && !isNaN(Number(notice.displayDurationDays))
-    ? Number(notice.displayDurationDays)
-    : 60;
+export const isNoticePopupEligible = (notice: Notice, referenceDate: Date = new Date()): boolean => {
+  if (!notice || notice.status !== 'Published') return false;
 
-  return diffDays <= maxDays;
+  // 1. Explicit Expiry Date Check (B.S. date)
+  if (notice.validUntil && isBsDateExpired(notice.validUntil)) {
+    return false;
+  }
+
+  // 2. Authoritative Popup Duration in Days (Default is strictly 7 days)
+  const durationDays = (notice.displayDurationDays !== undefined && !isNaN(Number(notice.displayDurationDays)) && Number(notice.displayDurationDays) > 0)
+    ? Number(notice.displayDurationDays)
+    : 7;
+
+  // 3. Compute publication NepaliDate safely
+  let pubNepaliDate: any;
+  if (notice.date && isBSDateString(notice.date)) {
+    pubNepaliDate = parseToNepaliDate(notice.date);
+  } else if (notice.timestamp) {
+    pubNepaliDate = parseToNepaliDate(notice.timestamp);
+  } else if (notice.date) {
+    pubNepaliDate = parseToNepaliDate(notice.date);
+  } else {
+    pubNepaliDate = parseToNepaliDate(referenceDate);
+  }
+
+  const todayNepali = parseToNepaliDate(referenceDate);
+
+  // Compare days elapsed using Gregorian conversion of canonical BS dates at noon
+  const pubJsDate = pubNepaliDate.toJsDate ? pubNepaliDate.toJsDate() : new Date();
+  const todayJsDate = todayNepali.toJsDate ? todayNepali.toJsDate() : new Date();
+
+  const pubMidnight = new Date(pubJsDate.getFullYear(), pubJsDate.getMonth(), pubJsDate.getDate()).getTime();
+  const todayMidnight = new Date(todayJsDate.getFullYear(), todayJsDate.getMonth(), todayJsDate.getDate()).getTime();
+
+  const diffDays = Math.floor((todayMidnight - pubMidnight) / (1000 * 60 * 60 * 24));
+
+  // If notice date is in future (diffDays < 0) or older than allowed popup duration (diffDays > durationDays), ineligible for popup
+  if (diffDays < 0 || diffDays > durationDays) {
+    return false;
+  }
+
+  return true;
 };
 
 export function NoticeProvider({ children }: { children: React.ReactNode }) {
@@ -225,10 +225,10 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
 
     const currentUserId = auth.currentUser?.uid || 'guest';
 
-    // Find the latest unread notice published within the last 2 months (60 days)
+    // Find the latest unread notice that is eligible for popup (within validUntil / 7-day duration)
     const unreadRecentNotices = notices.filter((notice) => {
-      // 1. Must be published within 2 months
-      if (!isWithinTwoMonths(notice)) return false;
+      // 1. Must be currently eligible for pop-up display
+      if (!isNoticePopupEligible(notice)) return false;
 
       // 2. Must not be dismissed in current session
       const sessionDismissed = sessionStorage.getItem(`dismissed_notice_popup_${notice.id}_${currentUserId}`);
