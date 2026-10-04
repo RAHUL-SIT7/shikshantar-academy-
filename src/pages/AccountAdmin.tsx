@@ -13,6 +13,7 @@ import StudentLedgerDetailTab from '../components/fee_management/StudentLedgerDe
 import RemitBillsGeneratorTab from '../components/fee_management/RemitBillsGeneratorTab';
 import TransactionHistoryTab from '../components/fee_management/TransactionHistoryTab';
 import LedgerAuditLogTab from '../components/fee_management/LedgerAuditLogTab';
+import FamilyConsolidatedBillingTab from '../components/fee_management/FamilyConsolidatedBillingTab';
 
 export default function AccountAdmin() {
   const [searchParams] = useSearchParams();
@@ -288,6 +289,7 @@ export default function AccountAdmin() {
   const ALL_TABS = [
      { id: 'fee_structure', label: 'Fee Structure & Scholarships', roles: ['admin'] },
      { id: 'remit_bills_generator', label: 'Remit Bills Generator', roles: ['admin'] },
+     { id: 'family_billing', label: 'Family Consolidated Billing', roles: ['admin'] },
      { id: 'simple_ledger', label: 'Cash Collection Counter', roles: ['admin'] },
      { id: 'student_laser', label: 'Student Ledger Details', roles: ['admin'] },
      { id: 'transaction_history', label: 'Daily Register & Undo Log', roles: ['admin'] },
@@ -509,6 +511,21 @@ export default function AccountAdmin() {
                   )}
                  
                  {activeTab === 'reports' && <ReportsAnalyticsTab students={studentsData} transactions={transactionsData} />}
+
+                 {activeTab === 'family_billing' && (
+                     <div className="mt-4">
+                        <FamilyConsolidatedBillingTab
+                            students={studentsData}
+                            remitBills={remitBillsData}
+                            academicYear={academicYear}
+                            onRefresh={fetchFeeData}
+                            onViewStudentLedger={(studentId) => {
+                              setTargetStudentId(studentId);
+                              setActiveTab("student_laser");
+                            }}
+                         />
+                     </div>
+                 )}
 
                  {activeTab === 'remit_bills_generator' && (
                      <RemitBillsGeneratorTab 

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { collection, onSnapshot, query, orderBy, limit, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { formatBSDate } from '../../lib/nepaliDate';
+import { formatBSDate, formatBSDateTime } from '../../lib/nepaliDate';
 import { exportToExcel } from '../../lib/excelExport';
 
 export interface AuditRecord {
@@ -66,9 +66,10 @@ export default function LedgerAuditLogTab({ transactions = [], students = [] }: 
                 const data = docSnap.data();
                 const ts = data.timestamp;
                 let formattedTime = data.timestampStr || '';
-                if (!formattedTime && ts) {
-                    const d = ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
-                    formattedTime = `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                if (data.dateBS) {
+                    formattedTime = data.dateBS;
+                } else if (ts) {
+                    formattedTime = formatBSDateTime(ts.seconds ? new Date(ts.seconds * 1000) : ts);
                 }
 
                 return {
@@ -148,8 +149,7 @@ export default function LedgerAuditLogTab({ transactions = [], students = [] }: 
             const ts = tx.timestamp;
             let formattedTime = '';
             if (ts) {
-                const d = ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
-                formattedTime = `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                formattedTime = formatBSDateTime(ts.seconds ? new Date(ts.seconds * 1000) : ts);
             } else {
                 formattedTime = tx.date || 'Recent';
             }

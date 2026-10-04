@@ -69,7 +69,7 @@ export const ReportCardTemplate = forwardRef<HTMLDivElement, ReportCardProps>(
                      Shikshantar Academy
                    </h1>
                    <h2 className="text-sm font-bold text-gray-600 tracking-widest uppercase mb-1">
-                     Karjanhana Municipality, Bastipur-5, Siraha, Nepal
+                     Bastipur, Karjanha-05, Siraha, Nepal
                    </h2>
                    <div className="inline-block mt-2 bg-[#1a2b4c] text-white px-6 py-1.5 rounded-full shadow-sm">
                       <span className="text-xs uppercase tracking-[0.2em] font-bold">
@@ -80,15 +80,15 @@ export const ReportCardTemplate = forwardRef<HTMLDivElement, ReportCardProps>(
             </div>
 
             <div className="text-center font-black text-xl mb-4 text-[#1a2b4c] uppercase tracking-widest py-2 border border-blue-100 rounded">
-               {student.examType} - 2082
+               {student.academicYear ? (student.examType?.includes(student.academicYear) ? student.examType : `${student.examType} - ${student.academicYear}`) : student.examType}
             </div>
 
             {/* Student Info Card */}
             <div className="border-[#1a2b4c] text-primary border rounded-lg p-3 mb-4 grid grid-cols-2 gap-y-2 text-sm font-bold uppercase tracking-wide flex-none">
                 <div className="col-span-2 md:col-span-1 border-r border-[#1a2b4c]/10">Name: <span className="font-bold text-[#1a2b4c] ml-2 text-base normal-case">{student.studentName}</span></div>
                 <div className="col-span-2 md:col-span-1 pl-4">Class: <span className="font-bold text-[#1a2b4c] ml-2">{student.class}</span></div>
-                <div className="col-span-2 md:col-span-1 border-r border-[#1a2b4c]/10 pt-2 border-t border-[#1a2b4c]/10">Regd No: <span className="font-bold text-[#1a2b4c] ml-2">{student.studentId || student.rollNo}</span></div>
-                <div className="col-span-2 md:col-span-1 pl-4 pt-2 border-t border-[#1a2b4c]/10">Roll No: <span className="font-bold text-[#1a2b4c] ml-2">{student.rollNo || '-'}</span></div>
+                <div className="col-span-2 md:col-span-1 border-r border-[#1a2b4c]/10 pt-2 border-t border-[#1a2b4c]/10">Regd No: <span className="font-bold text-[#1a2b4c] ml-2">{student.permanentStudentId || student.studentId || student.studentEmis || student.emisNumber || student.rollNo || '-'}</span></div>
+                <div className="col-span-2 md:col-span-1 pl-4 pt-2 border-t border-[#1a2b4c]/10">Roll No: <span className="font-bold text-[#1a2b4c] ml-2">{student.rollNo || student.rollNumberSnapshot || '-'}</span></div>
             </div>
 
             {/* Marks Table */}
@@ -108,7 +108,7 @@ export const ReportCardTemplate = forwardRef<HTMLDivElement, ReportCardProps>(
                      </tr>
                   </thead>
                      <tbody className="bg-transparent bg-pink-50/20">
-                     {Object.entries(student.subjects).map(([sub, rawMarks], i) => {
+                     {Object.entries(student.subjects || {}).map(([sub, rawMarks], i) => {
                          const marks: any = rawMarks;
                          const fm = marks.fullMarks;
                          const pm = marks.thPass !== undefined ? (marks.thPass + (marks.prPass || 0)) : Math.round(fm * 0.4);

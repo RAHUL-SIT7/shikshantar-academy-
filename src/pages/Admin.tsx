@@ -27,6 +27,8 @@ import {
   DollarSign,
   Inbox,
   ShieldCheck,
+  GraduationCap,
+  BookMarked,
 } from "lucide-react";
 import {
   BarChart,
@@ -45,8 +47,11 @@ import { UploadTab } from "../components/admin/UploadTab";
 import { ManualEntryTab } from "../components/admin/ManualEntryTab";
 import { ViewManageTab } from "../components/admin/ViewManageTab";
 import { IndividualStudentResultTab } from "../components/admin/IndividualStudentResultTab";
+import { ResultPreparationTab } from "../components/admin/ResultPreparationTab";
 import { EnquiriesTab } from "../components/admin/EnquiriesTab";
 import { AuditLogsTab } from "../components/admin/AuditLogsTab";
+import { CustomSubjectsTab } from "../components/admin/CustomSubjectsTab";
+import { AcademicPromotionTab } from "../components/admin/AcademicPromotionTab";
 
 import { StudentResult } from "../data/resultsState";
 
@@ -133,9 +138,7 @@ export default function Admin() {
       const updateState = () => {
         const resultsBySummaryId: Record<string, any> = {};
         resultsList.forEach((sub) => {
-          const mapId = `${sub.examId}_${sub.studentId}`;
-          if (!resultsBySummaryId[mapId]) resultsBySummaryId[mapId] = {};
-          resultsBySummaryId[mapId][sub.subject] = {
+          const subjectData = {
             fullMarks: sub.fullMarks,
             obtained: sub.marks,
             thMarks: sub.thMarks,
@@ -145,10 +148,26 @@ export default function Admin() {
             thPass: sub.thPass,
             prPass: sub.prPass,
           };
+
+          const addMapping = (id?: string) => {
+            if (!id) return;
+            const mapId = `${sub.examId}_${id}`;
+            if (!resultsBySummaryId[mapId]) resultsBySummaryId[mapId] = {};
+            resultsBySummaryId[mapId][sub.subject] = subjectData;
+          };
+
+          addMapping(sub.studentId);
+          addMapping(sub.studentUid);
+          addMapping(sub.permanentStudentId);
         });
 
         const parsedData: StudentResult[] = summaryList.map((sum) => {
           const exm = examsMap[sum.examId];
+          const matchedSubjects =
+            resultsBySummaryId[`${sum.examId}_${sum.studentId}`] ||
+            (sum.permanentStudentId ? resultsBySummaryId[`${sum.examId}_${sum.permanentStudentId}`] : undefined) ||
+            (sum.studentUid ? resultsBySummaryId[`${sum.examId}_${sum.studentUid}`] : undefined) ||
+            {};
           return {
             studentUid: sum.studentUid || sum.studentId,
             studentId: sum.studentId,
@@ -161,8 +180,7 @@ export default function Admin() {
             rollNo: sum.rollNo || "",
             examType: sum.examType,
             examId: sum.examId,
-            subjects:
-              resultsBySummaryId[`${sum.examId}_${sum.studentId}`] || {},
+            subjects: matchedSubjects,
             total: sum.total,
             fullTotal: sum.fullTotal,
             percentage: sum.percentage,
@@ -383,6 +401,12 @@ export default function Admin() {
       {/* Tabs Header */}
       <div className="flex overflow-x-auto bg-white rounded-xl border border-gray-200 p-2 gap-2 shadow-sm font-bold scrollbar-hide">
         <button
+          onClick={() => setActiveTab("prep")}
+          className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "prep" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+        >
+          <GraduationCap className="w-4 h-4" /> Result Preparation
+        </button>
+        <button
           onClick={() => setActiveTab("manual")}
           className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "manual" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
         >
@@ -422,6 +446,22 @@ export default function Admin() {
             <ShieldCheck className="w-4 h-4" /> Audit Logs
           </button>
         )}
+        {userRole === "admin" && (
+          <button
+            onClick={() => setActiveTab("custom_subjects")}
+            className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "custom_subjects" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          >
+            <BookMarked className="w-4 h-4" /> Custom Subjects
+          </button>
+        )}
+        {userRole === "admin" && (
+          <button
+            onClick={() => setActiveTab("promotion")}
+            className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "promotion" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          >
+            <GraduationCap className="w-4 h-4" /> Academic Promotion
+          </button>
+        )}
       </div>
 
       {/* Tab Contents */}
@@ -433,6 +473,18 @@ export default function Admin() {
           </div>
         ) : (
           <>
+            {activeTab === "prep" && (
+              <ResultPreparationTab
+                EXAM_TYPES={EXAM_TYPES}
+                allClasses={DEFAULT_CLASSES}
+                data={data}
+                setStatus={setStatus}
+                userRole={userRole}
+                assignedClasses={assignedClasses}
+                assignedSubjects={assignedSubjects}
+                teacherProfile={teacherProfile}
+              />
+            )}
             {activeTab === "upload" && (
               <UploadTab
                 EXAM_TYPES={EXAM_TYPES}
@@ -481,6 +533,20 @@ export default function Admin() {
             )}
             {activeTab === "enquiries" && userRole === "admin" && <EnquiriesTab />}
             {activeTab === "audit_logs" && userRole === "admin" && <AuditLogsTab />}
+            {activeTab === "custom_subjects" && userRole === "admin" && (
+              <CustomSubjectsTab
+                allClasses={DEFAULT_CLASSES}
+                setStatus={setStatus}
+                userRole={userRole}
+              />
+            )}
+            {activeTab === "promotion" && userRole === "admin" && (
+              <AcademicPromotionTab
+                allClasses={DEFAULT_CLASSES}
+                setStatus={setStatus}
+                userRole={userRole}
+              />
+            )}
           </>
         )}
       </div>

@@ -1,9 +1,65 @@
-import NepaliDate from 'nepali-date-converter';
+import NepaliDateImport from 'nepali-date-converter';
 
-const parseToNepaliDate = (date: any) => {
+const NepaliDate: any = (NepaliDateImport as any)?.default || NepaliDateImport;
+
+export const NEPALI_MONTHS = [
+  'Baisakh',
+  'Jestha',
+  'Ashadh',
+  'Shrawan',
+  'Bhadra',
+  'Ashwin',
+  'Kartik',
+  'Mangsir',
+  'Poush',
+  'Magh',
+  'Falgun',
+  'Chaitra'
+];
+
+export const NEPALI_MONTHS_NEP = [
+  'बैशाख',
+  'जेठ',
+  'असार',
+  'श्रावण',
+  'भाद्र',
+  'आश्विन',
+  'कार्तिक',
+  'मंसिर',
+  'पौष',
+  'माघ',
+  'फाल्गुन',
+  'चैत्र'
+];
+
+/**
+ * Returns the Nepali month name by index (0-indexed or 1-indexed)
+ */
+export const getNepaliMonthName = (monthIndex: number): string => {
+  const idx = monthIndex >= 1 && monthIndex <= 12 ? monthIndex - 1 : monthIndex;
+  return NEPALI_MONTHS[idx] || NEPALI_MONTHS[0];
+};
+
+/**
+ * Checks if a string represents a Bikram Sambat (B.S.) date string (year >= 2000 and <= 2150)
+ */
+export const isBSDateString = (dateStr?: string): boolean => {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const clean = dateStr.trim().replace(/\//g, '-');
+  const match = clean.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  return year >= 2000 && year <= 2150;
+};
+
+/**
+ * Robust, timezone-safe parsing from various date representations into NepaliDate instance.
+ * Avoids UTC midnight day-shift bugs by parsing Gregorian date-only strings at noon local time.
+ */
+export const parseToNepaliDate = (date: any): NepaliDate => {
   if (!date) return new NepaliDate(new Date());
 
-  if (typeof date === 'object') {
+  if (typeof date === 'object' && date !== null) {
     if ('seconds' in date && typeof date.seconds === 'number') {
       return new NepaliDate(new Date(date.seconds * 1000));
     }
@@ -15,74 +71,104 @@ const parseToNepaliDate = (date: any) => {
     }
   }
 
-  if (typeof date === 'string') {
-    const dStr = date.split('T')[0];
-    const year = parseInt(dStr.substring(0, 4), 10);
-    // If year > 2040, assume it's already a BS string
-    if (year > 2040 && dStr.includes('-')) {
-      const [y, m, d] = dStr.split('-').map(Number);
-      return new NepaliDate(y, m - 1, d);
-    }
+  if (typeof date === 'number') {
     return new NepaliDate(new Date(date));
   }
-  return new NepaliDate(new Date(date));
+
+  if (typeof date === 'string') {
+    const clean = date.trim().replace(/\//g, '-');
+    const dStr = clean.split('T')[0];
+    const parts = dStr.split('-');
+    if (parts.length >= 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10);
+      const day = parseInt(parts[2], 10);
+
+      // If year > 2040, it is already a BS date representation
+      if (year > 2040 && !isNaN(month) && !isNaN(day)) {
+        return new NepaliDate(year, Math.max(0, month - 1), Math.max(1, day));
+      }
+
+      // If Gregorian date-only string (e.g. "2026-03-15"), parse at local noon (12:00) to prevent timezone drift
+      if (year <= 2040 && !isNaN(month) && !isNaN(day)) {
+        const localNoon = new Date(year, month - 1, day, 12, 0, 0);
+        return new NepaliDate(localNoon);
+      }
+    }
+    try {
+      return new NepaliDate(new Date(date));
+    } catch {
+      return new NepaliDate(new Date());
+    }
+  }
+
+  return new NepaliDate(new Date());
 };
 
+/**
+ * Formats date into B.S. standard YYYY-MM-DD (e.g. 2083-06-17)
+ */
 export const formatBSDateYMD = (date: Date | string | number | any): string => {
+  if (!date) return '';
   try {
     const nd = parseToNepaliDate(date);
-    return nd.format('YYYY-MM-DD'); 
-  } catch(e) {
+    return nd.format('YYYY-MM-DD');
+  } catch {
     if (typeof date === 'string') return date.split('T')[0];
-    if (typeof date === 'object' && date !== null && 'seconds' in date) {
-      return new Date(date.seconds * 1000).toISOString().split('T')[0];
-    }
-    try {
-      return new Date(date).toISOString().split('T')[0];
-    } catch {
-      return '';
-    }
+    return '';
   }
-}
+};
 
-export const formatBSDate = (date: Date | string | number | any): string => {
+/**
+ * Formats date into standard user-facing B.S. date string (e.g. 17 Ashwin 2083 or 17 Ashwin 2083 B.S.)
+ */
+export const formatBSDate = (date: Date | string | number | any, withSuffix: boolean = false): string => {
+  if (!date) return '';
   try {
     const nd = parseToNepaliDate(date);
-    return nd.format('DD MMMM YYYY'); 
-  } catch(e) {
+    const formatted = nd.format('DD MMMM YYYY');
+    return withSuffix ? `${formatted} B.S.` : formatted;
+  } catch {
     if (typeof date === 'string') return date;
-    if (typeof date === 'object' && date !== null && 'seconds' in date) {
-      return new Date(date.seconds * 1000).toLocaleDateString();
-    }
-    try {
-      return new Date(date).toLocaleDateString();
-    } catch {
-      return '';
-    }
+    return '';
   }
-}
+};
 
+/**
+ * Formats date and time into standard user-facing B.S. date-time string (e.g. 17 Ashwin 2083, 11:30 AM)
+ */
 export const formatBSDateTime = (date: Date | string | number | any): string => {
+  if (!date) return '';
   try {
     const nd = parseToNepaliDate(date);
-    const d = typeof date === 'string' && parseInt(date.substring(0,4)) > 2040 
-       ? new Date() // fallback for time if it's pure BS date string without time
-       : (typeof date === 'object' && date?.seconds ? new Date(date.seconds * 1000) : new Date(date));
-       
-    return nd.format('DD MMMM YYYY') + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); 
-  } catch(e) {
-    if (typeof date === 'string') return date;
+    let timeDate: Date;
     if (typeof date === 'object' && date !== null && 'seconds' in date) {
-      return new Date(date.seconds * 1000).toLocaleString();
+      timeDate = new Date(date.seconds * 1000);
+    } else if (date instanceof Date) {
+      timeDate = date;
+    } else if (typeof date === 'number') {
+      timeDate = new Date(date);
+    } else if (typeof date === 'string' && !isBSDateString(date)) {
+      timeDate = new Date(date);
+    } else {
+      timeDate = new Date();
     }
-    try {
-      return new Date(date).toLocaleString();
-    } catch {
-      return '';
-    }
-  }
-}
 
+    const timeStr = isNaN(timeDate.getTime())
+      ? ''
+      : timeDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const formatted = nd.format('DD MMMM YYYY');
+    return timeStr ? `${formatted}, ${timeStr}` : formatted;
+  } catch {
+    if (typeof date === 'string') return date;
+    return '';
+  }
+};
+
+/**
+ * Returns current Bikram Sambat year, month (0-indexed), and date
+ */
 export const getBSYearMonthDate = (date: Date = new Date()) => {
   try {
     const nd = new NepaliDate(date);
@@ -91,26 +177,32 @@ export const getBSYearMonthDate = (date: Date = new Date()) => {
       month: nd.getMonth(),
       date: nd.getDate()
     };
-  } catch (e) {
+  } catch {
     return { year: date.getFullYear() + 57, month: 0, date: 1 };
   }
-}
+};
 
+/**
+ * Returns today's B.S. date string in YYYY-MM-DD
+ */
 export const getTodayBSDateYMD = (): string => {
   try {
     return new NepaliDate(new Date()).format('YYYY-MM-DD');
-  } catch (e) {
+  } catch {
     return '';
   }
 };
 
+/**
+ * Normalizes B.S. date string formatting with dashes
+ */
 export const normalizeBSDateStr = (dateStr?: string): string => {
   if (!dateStr) return '';
   return dateStr.replace(/\//g, '-').trim();
 };
 
 /**
- * Returns -1 if date1 < date2, 0 if equal, 1 if date1 > date2
+ * Returns -1 if date1 < date2, 0 if equal, 1 if date1 > date2 in BS chronology
  */
 export const compareBSDates = (date1?: string, date2?: string): number => {
   const d1 = normalizeBSDateStr(date1);

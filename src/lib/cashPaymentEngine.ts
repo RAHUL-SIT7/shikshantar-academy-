@@ -102,12 +102,16 @@ export const sanitizeDigitsOnly = (val: string | number | undefined | null): str
 
 /**
  * Parses a value into a safe non-negative integer (NPR).
+ * Rejects negative numbers, negative string inputs, null, and undefined by returning 0.
  */
 export const parseIntegerAmount = (val: any): number => {
+  if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') {
     return Math.max(0, Math.floor(isNaN(val) ? 0 : val));
   }
-  const digits = sanitizeDigitsOnly(val);
+  const str = String(val).trim();
+  if (str.startsWith('-')) return 0;
+  const digits = sanitizeDigitsOnly(str);
   const parsed = parseInt(digits, 10);
   return isNaN(parsed) ? 0 : Math.max(0, parsed);
 };

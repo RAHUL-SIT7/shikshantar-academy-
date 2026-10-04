@@ -106,13 +106,18 @@ export default function NoticeBoard() {
         if (n.status !== 'Published') return false;
         // Check Expiry using authentic Nepali BS date comparison
         if (n.validUntil && isBsDateExpired(n.validUntil)) return false;
+
+        // If notice has explicit recipient UIDs, user MUST be an included recipient
+        if (n.recipientUids && Array.isArray(n.recipientUids) && n.recipientUids.length > 0) {
+          if (!currentUserId || currentUserId === 'guest' || !n.recipientUids.includes(currentUserId)) return false;
+        }
         
         if (n.targets?.includes('All')) return true;
 
         if (role === 'teacher' || role === 'Teacher') {
            return n.targets?.includes('Teachers Only');
         } else if (role === 'student') {
-           return n.targets?.includes('Students Only') || (studentClass ? n.targets?.includes(`Class ${studentClass}`) : false);
+           return n.targets?.includes('Students Only') || n.targets?.includes('Student') || (studentClass ? (n.targets?.includes(`Class ${studentClass}`) || n.targets?.includes(studentClass)) : false);
         } else {
            // guest or parent
            return n.targets?.includes('Guest User');

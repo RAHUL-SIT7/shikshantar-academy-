@@ -27,7 +27,10 @@ assert(serverSrc.includes("Approximate Location:"), "Email body must include 'Ap
 assert(serverSrc.includes("IP Address:"), "Email body must include 'IP Address:'");
 assert(serverSrc.includes("Date & Time:"), "Email body must include 'Date & Time:'");
 assert(serverSrc.includes("If this was not you, open Login Activity in your profile and revoke the unfamiliar session."), "Revocation instructions must match exact brief");
-console.log("[PASS] 3. Email alert subject and content verified against exact specifications");
+assert(serverSrc.includes("OPEN SHIKSHANTAR ACADEMY WEBSITE"), "CTA button text must be OPEN SHIKSHANTAR ACADEMY WEBSITE");
+assert(serverSrc.includes("https://www.shikshantaracademy.edu.np/"), "CTA button URL must be https://www.shikshantaracademy.edu.np/");
+assert(serverSrc.includes("Shikshantar Academy • Security & Account Protection"), "Email footer must be preserved");
+console.log("[PASS] 3. Email alert subject, content, and official website CTA verified against exact specifications");
 
 // 4. Verify Server-Side ID Token Verification
 assert(serverSrc.includes("admin.auth().verifyIdToken"), "Backend must authoritatively verify Firebase ID token");

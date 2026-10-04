@@ -57,7 +57,7 @@ const addSchoolHeaderToSheet = async (
   sheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
 
   sheet.mergeCells(`A2:${lastColLetter}2`);
-  sheet.getCell('A2').value = 'Karjanhana Municipality, Bastipur-5, Siraha, Nepal | academyshikshantar@gmail.com | +977 9709867048, +977 9807790805';
+  sheet.getCell('A2').value = 'Bastipur, Karjanha-05, Siraha, Nepal | shikshantaracademy@gmail.com | +977 9709867048, +977 9807790805';
   sheet.getCell('A2').font = { size: 12, bold: true, color: { argb: 'FF2563EB' } }; // Blue-600
   sheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'center' };
 

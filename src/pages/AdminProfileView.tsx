@@ -5,6 +5,7 @@ import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 
 import { doc, getDoc, updateDoc, collection, query, orderBy, limit, getDocs, where, onSnapshot } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useNavigate } from 'react-router-dom';
+import { formatBSDateTime, formatBSDate } from '../lib/nepaliDate';
 
 function formatTimeAgo(isoString?: string): string {
   if (!isoString) return 'Just now';
@@ -26,16 +27,7 @@ function formatTimeAgo(isoString?: string): string {
 function formatActivityDate(isoString?: string): string {
   if (!isoString) return 'Recent';
   try {
-    const d = new Date(isoString);
-    return d.toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    }) + ', ' + d.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
+    return formatBSDateTime(isoString);
   } catch {
     return isoString;
   }

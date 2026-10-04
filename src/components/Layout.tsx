@@ -1032,11 +1032,8 @@ export default function Layout({
           </div>
           <div className="min-w-0">
             <div className="font-extrabold tracking-tight text-xs sm:text-sm whitespace-nowrap">SHIKSHANTAR</div>
-            <div className="text-[0.55rem] sm:text-[0.6rem] font-black uppercase tracking-wide leading-none mb-0.5 whitespace-nowrap text-amber-300">
+            <div className="text-[0.55rem] sm:text-[0.6rem] font-black uppercase tracking-wide leading-none whitespace-nowrap text-amber-300">
               ACADEMY BASTIPUR
-            </div>
-            <div className="text-[0.55rem] sm:text-[0.6rem] text-amber-200/90 font-extrabold uppercase tracking-wide leading-none whitespace-nowrap">
-              {isAuthenticated ? `${role === 'admin' ? 'Admin' : role === 'teacher' ? 'Teacher' : 'Student'} Portal` : 'Guest Portal'}
             </div>
           </div>
         </div>
@@ -1082,8 +1079,8 @@ export default function Layout({
              )}
            </div>
            
-           {/* Profile Avatar Button (Mobile & Tablet) */}
-           <div className="relative">
+           {/* Profile Avatar Button (Mobile & Tablet) - Hidden on mobile for guest users to reduce congestion */}
+           <div className={`relative ${!isAuthenticated ? 'hidden sm:block' : ''}`}>
              <button 
                onClick={() => {
                  setIsProfileOpen(!isProfileOpen);
@@ -1488,6 +1485,22 @@ export default function Layout({
                     </React.Fragment>
                   );
                 })}
+
+                {/* Login to Portal for Guest Users (Moved from Mobile Header Avatar) */}
+                {!isAuthenticated && (
+                  <Link
+                    to="/login"
+                    onClick={() => setIsMenuOpen(false)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-3 transition-colors ${
+                      location.pathname === '/login'
+                        ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                        : 'text-white/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <LogIn className="w-4 h-4 shrink-0" />
+                    <span>Login to Portal</span>
+                  </Link>
+                )}
               </nav>
 
               {/* Academic Year Footer */}

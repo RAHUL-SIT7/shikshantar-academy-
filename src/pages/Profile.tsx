@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc, collection, query, where, getDocs, onSnapshot }
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useNavigate, Link } from 'react-router-dom';
 import { formatRemitBillItems } from '../lib/remitBillUtils';
+import { formatBSDateTime, formatBSDate } from '../lib/nepaliDate';
 import AdminProfileView from './AdminProfileView';
 
 function formatTimeAgo(isoString?: string): string {
@@ -28,16 +29,7 @@ function formatTimeAgo(isoString?: string): string {
 function formatActivityDate(isoString?: string): string {
   if (!isoString) return 'Recent';
   try {
-    const d = new Date(isoString);
-    return d.toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    }) + ', ' + d.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
+    return formatBSDateTime(isoString);
   } catch {
     return isoString;
   }
@@ -77,9 +69,11 @@ export default function Profile() {
   const [designation, setDesignation] = useState('Teacher');
   const [department, setDepartment] = useState('Academics');
   const [qualification, setQualification] = useState('');
+  const [mainSubject, setMainSubject] = useState('');
   const [primaryClassTeacher, setPrimaryClassTeacher] = useState('');
   const [assignedClasses, setAssignedClasses] = useState<string[]>([]);
   const [assignedSubjects, setAssignedSubjects] = useState<string[]>([]);
+  const [teachingAssignments, setTeachingAssignments] = useState<any[]>([]);
   const [joiningDate, setJoiningDate] = useState('');
 
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
@@ -146,6 +140,7 @@ export default function Profile() {
               setDesignation(data.designation || 'Teacher / Faculty');
               setDepartment(data.department || 'Academics');
               setQualification(data.qualification || data.degree || '');
+              setMainSubject(data.mainSubject || data.specialization || '');
               
               // Class Teacher assignment mapping
               const primaryClass = data.primaryClassTeacher || data.classTeacherOf || data.classTeacherFor || (data.class ? `Class ${data.class}` : '');
@@ -156,6 +151,10 @@ export default function Profile() {
               
               const subjects = data.assignedSubjects || data.teacherSubjects || data.subjects || ['General Subjects'];
               setAssignedSubjects(Array.isArray(subjects) ? subjects : [subjects]);
+              
+              if (data.teachingAssignments && Array.isArray(data.teachingAssignments)) {
+                setTeachingAssignments(data.teachingAssignments);
+              }
               
               setJoiningDate(data.joiningDate || data.admissionDate || (data.createdAt ? new Date(data.createdAt).toLocaleDateString() : '1 Shrawan 2080 B.S.'));
             } else {
@@ -547,49 +546,74 @@ export default function Profile() {
                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Department</p>
                    <p className="text-sm font-bold text-gray-800">{department}</p>
                  </div>
+                 {mainSubject && (
+                   <div>
+                     <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Main Subject</p>
+                     <p className="text-sm font-bold text-indigo-900">{mainSubject}</p>
+                   </div>
+                 )}
                  {qualification && (
-                   <div className="col-span-2">
+                   <div className={mainSubject ? "" : "col-span-2"}>
                      <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Qualification</p>
                      <p className="text-sm font-bold text-gray-800">{qualification}</p>
                    </div>
                  )}
               </div>
 
-              {/* Assigned Classes */}
-              <div className="pt-2 border-t border-gray-200">
-                <p className="text-[11px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
-                  <BookOpen className="w-3.5 h-3.5 text-indigo-500" /> Assigned Classes
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {assignedClasses.length > 0 ? (
-                    assignedClasses.map((cls, idx) => (
-                      <span key={idx} className="bg-white border border-gray-200 text-gray-800 text-xs font-bold px-2.5 py-1 rounded-md shadow-xs">
-                        {cls}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-xs text-gray-400 font-medium">All General Classes</span>
-                  )}
+              {/* Exact Teaching Assignments if available */}
+              {teachingAssignments.length > 0 ? (
+                <div className="pt-2 border-t border-gray-200">
+                  <p className="text-[11px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                    <BookOpen className="w-3.5 h-3.5 text-indigo-500" /> Teaching Assignments (Class → Subject)
+                  </p>
+                  <div className="space-y-1.5">
+                    {teachingAssignments.map((a: any, idx: number) => (
+                      <div key={idx} className="bg-white border border-gray-200 text-gray-800 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center justify-between">
+                        <span className="text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded">{a.class?.startsWith('Class') ? a.class : `Class ${a.class}`}</span>
+                        <span className="text-gray-700">{a.subject}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Assigned Classes */}
+                  <div className="pt-2 border-t border-gray-200">
+                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                      <BookOpen className="w-3.5 h-3.5 text-indigo-500" /> Assigned Classes
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {assignedClasses.length > 0 ? (
+                        assignedClasses.map((cls, idx) => (
+                          <span key={idx} className="bg-white border border-gray-200 text-gray-800 text-xs font-bold px-2.5 py-1 rounded-md shadow-xs">
+                            {cls}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400 font-medium">All General Classes</span>
+                      )}
+                    </div>
+                  </div>
 
-              {/* Assigned Subjects */}
-              <div className="pt-2 border-t border-gray-200">
-                <p className="text-[11px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
-                  <Award className="w-3.5 h-3.5 text-indigo-500" /> Assigned Subjects
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {assignedSubjects.length > 0 ? (
-                    assignedSubjects.map((sub, idx) => (
-                      <span key={idx} className="bg-indigo-50 text-indigo-800 border border-indigo-100 text-xs font-bold px-2.5 py-1 rounded-md">
-                        {sub}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-xs text-gray-400 font-medium">Assigned by Administration</span>
-                  )}
-                </div>
-              </div>
+                  {/* Assigned Subjects */}
+                  <div className="pt-2 border-t border-gray-200">
+                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                      <Award className="w-3.5 h-3.5 text-indigo-500" /> Assigned Subjects
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {assignedSubjects.length > 0 ? (
+                        assignedSubjects.map((sub, idx) => (
+                          <span key={idx} className="bg-indigo-50 text-indigo-800 border border-indigo-100 text-xs font-bold px-2.5 py-1 rounded-md">
+                            {sub}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400 font-medium">Assigned by Administration</span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Quick Navigation Shortcuts */}
               <div className="pt-3 border-t border-gray-200 flex gap-2">

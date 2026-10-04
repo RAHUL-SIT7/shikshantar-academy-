@@ -33,7 +33,7 @@ export const exportToPDF = async (
     // @ts-ignore
     pdf.setTextColor(37, 99, 235); // Blue-600
     pdf.setFont('helvetica', 'bold');
-    pdf.text('Karjanhana Municipality, Bastipur-5, Siraha, Nepal | academyshikshantar@gmail.com | +977 9709867048, +977 9807790805', pageWidth / 2, 24, { align: 'center' });
+    pdf.text('Bastipur, Karjanha-05, Siraha, Nepal | shikshantaracademy@gmail.com | +977 9709867048, +977 9807790805', pageWidth / 2, 24, { align: 'center' });
 
     pdf.setFontSize(14);
     // @ts-ignore

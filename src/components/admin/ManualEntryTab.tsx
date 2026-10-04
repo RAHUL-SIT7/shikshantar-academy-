@@ -4,6 +4,7 @@ import { StudentResult } from '../../data/resultsState';
 import { doc, writeBatch, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { recordAuditLog } from '../../lib/auditLogger';
+import { canTeacherAccessSubject, canPublishClassResult } from '../../lib/resultPreparationEngine';
 
 const CLASS_SUBJECTS: any = {
   'PG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
@@ -86,17 +87,7 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
     if (selectedClass) {
       let list = CLASS_SUBJECTS[selectedClass] || allSubjects || [];
       if (userRole === 'teacher') {
-        const normalizeClass = (cls: string) => {
-          if (!cls) return '';
-          return String(cls).replace(/^Class\s+/i, '').trim();
-        };
-        const isClassTeacherOfSelected = normalizeClass(selectedClass) === normalizeClass(teacherProfile?.class);
-
-        // If not the class teacher of the selected class, restrict to assigned subjects
-        if (!isClassTeacherOfSelected) {
-          const assigned = Array.isArray(assignedSubjects) ? assignedSubjects : [];
-          list = list.filter((subj: string) => assigned.includes(subj));
-        }
+        list = list.filter((subj: string) => canTeacherAccessSubject(userRole, teacherProfile, selectedClass, subj));
       }
       setActiveSubjects(list);
       setSelectedSubjects(list); 
@@ -738,6 +729,10 @@ export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setS
 
   const publishResults = async () => {
     if (!selectedClass || !examType) return;
+    if (!canPublishClassResult(userRole, teacherProfile, selectedClass)) {
+      setStatus({ type: 'error', message: 'Publishing results is restricted to Administrators and the assigned Class Teacher for this class.' });
+      return;
+    }
     setStatus({type: 'info', message: 'Calculating ranks and publishing results...'});
     try {
         const examId = `${examType.replace(/\s+/g, '_')}_${selectedClass}`;

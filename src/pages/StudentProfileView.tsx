@@ -26,12 +26,15 @@ import {
 } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { getStudentAcademicEnrollments, AcademicEnrollment } from '../lib/academicPromotionEngine';
+import { formatBSDate } from '../lib/nepaliDate';
 
 export default function StudentProfileView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const [student, setStudent] = useState<any | null>(null);
+  const [enrollments, setEnrollments] = useState<AcademicEnrollment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState<string>('admin');
@@ -84,6 +87,12 @@ export default function StudentProfileView() {
           setError(`Student record not found for ID "${cleanId}".`);
         } else {
           setStudent(foundData);
+          try {
+            const enrList = await getStudentAcademicEnrollments(foundData.id || cleanId);
+            setEnrollments(enrList);
+          } catch (e) {
+            console.warn('Could not load enrollment history:', e);
+          }
         }
       } catch (err: any) {
         console.error('Error fetching student profile:', err);
@@ -141,11 +150,7 @@ export default function StudentProfileView() {
   let registeredDate = 'Registered Record';
   if (student.createdAt) {
     try {
-      registeredDate = new Date(student.createdAt).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
+      registeredDate = formatBSDate(student.createdAt);
     } catch (_) {}
   }
 
@@ -429,6 +434,58 @@ export default function StudentProfileView() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* 2B. ACADEMIC ENROLLMENT HISTORY */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <Layers className="w-5 h-5 text-indigo-600" />
+              <h2 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-100">
+                Academic Enrollment History ({enrollments.length})
+              </h2>
+            </div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Immutable Records
+            </span>
+          </div>
+
+          {enrollments.length > 0 ? (
+            <div className="space-y-2.5">
+              {enrollments.map((enr, idx) => (
+                <div
+                  key={enr.id || idx}
+                  className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-slate-900 dark:text-white">
+                        {enr.academicYear || `${enr.bsYear} B.S.`}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                        Class {enr.class} {enr.section ? `• Sec ${enr.section}` : ''}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                        Roll {enr.rollNumber || enr.roll || '-'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-400 mt-1">
+                      Enrollment ID: {enr.enrollmentId || enr.id}
+                      {enr.promotionOutcome && <span> • Outcome: {enr.promotionOutcome}</span>}
+                    </div>
+                  </div>
+
+                  <span className="capitalize px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 self-start sm:self-auto">
+                    {enr.status || 'Active'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-xl text-center text-xs text-slate-500">
+              Initial academic enrollment record for this student will be recorded upon first academic progression.
+            </div>
+          )}
         </div>
 
         {/* 3. GUARDIAN & FAMILY DETAILS */}

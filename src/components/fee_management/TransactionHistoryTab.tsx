@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { formatBSDate } from '../../lib/nepaliDate';
+import { formatBSDate, formatBSDateTime } from '../../lib/nepaliDate';
 import { Search, Printer, Edit2, CornerUpLeft, Download, Calendar, Filter, ChevronRight, ChevronDown, Receipt, FileDown, X, Undo2, Plus, Trash2, ArrowUpRight, ArrowDownRight, UserCheck, Lock } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { db, auth } from '../../firebase';
@@ -1271,8 +1271,8 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                            <div className="flex flex-col">
                               <span className="text-xs font-bold text-gray-700">{tx.date}</span>
                               {tx.timestamp && (
-                                 <span className="text-[10px] text-gray-400 font-medium mt-0.5" title="A.D. Date and Time">
-                                   {new Date(tx.timestamp.seconds ? tx.timestamp.seconds * 1000 : tx.timestamp).toLocaleDateString()} {new Date(tx.timestamp.seconds ? tx.timestamp.seconds * 1000 : tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                 <span className="text-[10px] text-gray-400 font-medium mt-0.5" title="B.S. Date and Time">
+                                   {formatBSDateTime(tx.timestamp)}
                                  </span>
                               )}
                            </div>

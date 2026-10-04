@@ -12,6 +12,7 @@ export interface Notice {
   priority: string;
   status: string;
   targets: string[];
+  recipientUids?: string[];
   date: string;
   message?: string;
   attachmentUrl?: string;
@@ -173,6 +174,14 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
         // Apply role and targets filtering (admin sees all)
         const currentUserId = auth.currentUser?.uid;
         if (role !== 'admin') {
+          // If notice has explicit recipient UIDs, user MUST be an included recipient
+          fetched = fetched.filter((n) => {
+            if (n.recipientUids && Array.isArray(n.recipientUids) && n.recipientUids.length > 0) {
+              return Boolean(currentUserId && n.recipientUids.includes(currentUserId));
+            }
+            return true;
+          });
+
           if (role === 'teacher') {
             fetched = fetched.filter(
               (n) => Array.isArray(n.targets) && (n.targets.includes('All') || n.targets.includes('Teachers Only'))
@@ -183,7 +192,8 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
                 Array.isArray(n.targets) &&
                 (n.targets.includes('All') ||
                   n.targets.includes('Students Only') ||
-                  (studentClass && n.targets.includes(`Class ${studentClass}`)))
+                  n.targets.includes('Student') ||
+                  (studentClass && (n.targets.includes(`Class ${studentClass}`) || n.targets.includes(studentClass))))
             );
           } else {
             // Guest or logged out

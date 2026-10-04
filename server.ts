@@ -37,16 +37,54 @@ async function startServer() {
     next();
   });
 
+  function isAllowedCorsOrigin(origin: string | undefined): boolean {
+    if (!origin) return false;
+    try {
+      const parsed = new URL(origin);
+      const protocol = parsed.protocol;
+      const hostname = parsed.hostname.toLowerCase();
+
+      // Only http and https protocols permitted
+      if (protocol !== 'http:' && protocol !== 'https:') return false;
+
+      // 1. Production institutional domain and subdomains
+      if (hostname === 'shikshantaracademy.edu.np' || hostname === 'www.shikshantaracademy.edu.np') {
+        return true;
+      }
+
+      // 2. Strict Localhost development origins
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return true;
+      }
+
+      // 3. Exact Cloud Run environment for this deployment
+      if (process.env.APP_URL) {
+        try {
+          const appUrl = new URL(process.env.APP_URL);
+          if (hostname === appUrl.hostname.toLowerCase()) {
+            return true;
+          }
+        } catch (_) {}
+      }
+
+      // 4. Strict AI Studio Cloud Run preview/dev pattern for this applet instance
+      const aiStudioPattern = /^ais-(dev|pre)-uc6g6uxuccqm7lfda3ldzd-[a-z0-9]+\.asia-east1\.run\.app$/;
+      if (aiStudioPattern.test(hostname)) {
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
     if (origin) {
-      const isAllowed =
-        origin.startsWith('http://localhost:') ||
-        origin.startsWith('https://localhost:') ||
-        origin.endsWith('.run.app') ||
-        origin.includes('shikshantaracademy.edu.np');
-      if (isAllowed) {
+      if (isAllowedCorsOrigin(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       }
@@ -193,6 +231,180 @@ async function startServer() {
     } catch (error) {
       console.error('Birthday Error:', error);
       res.status(500).json({ error: 'Failed to send birthday wishes.' });
+    }
+  });
+
+  // Idempotency cache for published emails: Set of examId + studentUid/email
+  const sentResultPublicationEmails = new Set<string>();
+
+  // Result Publication Email Notification Route
+  app.post('/api/results/send-publication-emails', rateLimiter(30, 60000), async (req: Request, res: Response) => {
+    try {
+      const authUser = await verifyUserAuth(req, res);
+      if (!authUser) return;
+
+      const { examId, examType, className, academicYear, students } = req.body;
+      if (!examId || !examType || !className || !Array.isArray(students) || students.length === 0) {
+        return res.status(400).json({ error: 'Missing required parameters (examId, examType, className, students array).' });
+      }
+
+      // Check caller authorization in Firestore
+      const callerDoc = await admin.firestore().collection('users').doc(authUser.uid).get();
+      const callerData = callerDoc.data() || {};
+      const callerRole = (callerData.role || 'teacher').toLowerCase();
+
+      const normalizeCls = (c: string) => String(c || '').replace(/^Class\s+/i, '').trim().toLowerCase();
+      const targetClsNorm = normalizeCls(className);
+
+      if (callerRole !== 'admin') {
+        const primaryClass = normalizeCls(callerData.primaryClassTeacher || callerData.class || '');
+        if (primaryClass !== targetClsNorm) {
+          return res.status(403).json({ error: 'Forbidden: Only administrators or the assigned Class Teacher can publish results and dispatch emails for this class.' });
+        }
+        const teacherYear = (callerData.primaryClassTeacherYear || callerData.classAssignedYear || '').trim().replace(/[^0-9]/g, '');
+        const targetYear = (academicYear || '').trim().replace(/[^0-9]/g, '');
+        if (teacherYear && targetYear && !targetYear.includes(teacherYear) && !teacherYear.includes(targetYear)) {
+          return res.status(403).json({ error: 'Forbidden: Teacher is not authorized as Class Teacher for this academic session.' });
+        }
+      }
+
+      const smtpUser = process.env.SMTP_USER || process.env.VITE_SMTP_EMAIL;
+      const smtpPass = process.env.SMTP_PASSWORD || process.env.VITE_SMTP_PASSWORD;
+      const hasRealSmtp = Boolean(smtpUser && smtpPass && smtpUser !== 'school@gmail.com');
+
+      let transporter: any = null;
+      if (hasRealSmtp) {
+        transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: { user: smtpUser, pass: smtpPass }
+        });
+      }
+
+      let sentCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+      const resultsSummary: any[] = [];
+
+      for (const std of students) {
+        const studentEmail = (std.email || '').trim();
+        const studentName = std.name || 'Student';
+        const studentIdentifier = std.studentId || std.studentUid || studentEmail;
+
+        if (!studentEmail || !studentEmail.includes('@')) {
+          skippedCount++;
+          resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'SKIPPED_NO_EMAIL' });
+          continue;
+        }
+
+        const idempotencyKey = `${examId}_${studentIdentifier}_${studentEmail}`;
+        const cleanKey = idempotencyKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+        if (sentResultPublicationEmails.has(idempotencyKey)) {
+          skippedCount++;
+          resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'SKIPPED_ALREADY_SENT' });
+          continue;
+        }
+
+        // Check persistent Firestore dispatch record to ensure crash-proof idempotency
+        try {
+          const dispatchDoc = await admin.firestore().collection('publication_email_dispatches').doc(cleanKey).get();
+          if (dispatchDoc.exists) {
+            sentResultPublicationEmails.add(idempotencyKey);
+            skippedCount++;
+            resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'SKIPPED_ALREADY_SENT' });
+            continue;
+          }
+        } catch (_) {}
+
+        const subject = 'Result Published — Shikshantar Academy';
+        const textBody = `Dear ${studentName},
+
+Your ${examType} result for Class ${className} has been published by Shikshantar Academy.
+
+Academic Year:
+${academicYear || 'Current Academic Session'}
+
+You can now log in to the Shikshantar Academy portal to view your result and report card.
+
+Regards,
+Shikshantar Academy`;
+
+        const htmlBody = `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <div style="text-align: center; border-bottom: 2px solid #3b82f6; padding-bottom: 16px; margin-bottom: 20px;">
+              <h2 style="color: #1e3a8a; margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">SHIKSHANTAR ACADEMY</h2>
+              <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Bastipur, Karjanha-05, Siraha, Nepal</p>
+            </div>
+
+            <p style="font-size: 15px; color: #1e293b; line-height: 1.6;">Dear <strong>${studentName}</strong>,</p>
+            <p style="font-size: 14px; color: #334155; line-height: 1.6;">Your <strong>${examType}</strong> result for <strong>Class ${className}</strong> has been officially published by Shikshantar Academy.</p>
+
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 20px 0;">
+              <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;"><strong>Academic Session:</strong> ${academicYear || 'Current Academic Session'}</p>
+              <p style="margin: 0; font-size: 13px; color: #475569;"><strong>Class / Level:</strong> Class ${className}</p>
+            </div>
+
+            <p style="font-size: 14px; color: #334155; line-height: 1.6;">You can now log in to the Shikshantar Academy online portal to view your complete mark breakdown, terminal ranking, and download your official report card.</p>
+
+            <div style="margin: 28px 0; text-align: center;">
+              <a href="${process.env.APP_URL || 'https://shikshantaracademy.edu.np'}/results" style="background: #1e40af; color: #ffffff; padding: 12px 28px; font-weight: 700; font-size: 14px; text-decoration: none; border-radius: 8px; display: inline-block;">View Official Result</a>
+            </div>
+
+            <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 28px; color: #64748b; font-size: 12px; line-height: 1.5;">
+              <p style="margin: 0;">Regards,<br><strong>Examination Committee</strong><br>Shikshantar Academy<br>Email: shikshantaracademy@gmail.com</p>
+            </div>
+          </div>
+        `;
+
+        try {
+          if (hasRealSmtp && transporter) {
+            await transporter.sendMail({
+              from: `"Shikshantar Academy Examination" <${smtpUser}>`,
+              to: studentEmail,
+              subject,
+              text: textBody,
+              html: htmlBody
+            });
+            sentResultPublicationEmails.add(idempotencyKey);
+            sentCount++;
+            resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'DELIVERED' });
+          } else {
+            console.log(`[RESULT PUBLICATION SIMULATED EMAIL] To: ${studentEmail} | Exam: ${examType} | Class: ${className}`);
+            sentResultPublicationEmails.add(idempotencyKey);
+            sentCount++;
+            resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'DELIVERED_SIMULATED' });
+          }
+
+          // Persist dispatch record in Firestore for crash-proof idempotency
+          try {
+            await admin.firestore().collection('publication_email_dispatches').doc(cleanKey).set({
+              examId,
+              studentIdentifier,
+              studentEmail,
+              studentName,
+              className,
+              academicYear,
+              sentAt: new Date().toISOString()
+            });
+          } catch (_) {}
+        } catch (mailErr: any) {
+          console.warn(`[RESULT EMAIL ERROR] Failed for ${studentEmail}:`, mailErr.message);
+          failedCount++;
+          resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'FAILED', error: mailErr.message });
+        }
+      }
+
+      return res.json({
+        success: true,
+        examId,
+        totalSent: sentCount,
+        skippedCount,
+        failedCount,
+        simulated: !hasRealSmtp,
+        results: resultsSummary
+      });
+    } catch (err: any) {
+      console.error('[SECURITY] Error in /api/results/send-publication-emails:', err);
+      return res.status(500).json({ error: 'Internal server error while processing publication emails: ' + err.message });
     }
   });
 
@@ -649,7 +861,10 @@ ${details.ipAddress}
 Date & Time:
 ${details.dateTimeStr}
 
-If this was not you, open Login Activity in your profile and revoke the unfamiliar session.`;
+If this was not you, open Login Activity in your profile and revoke the unfamiliar session.
+
+OPEN SHIKSHANTAR ACADEMY WEBSITE:
+https://www.shikshantaracademy.edu.np/`;
 
     const htmlBody = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1e293b; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
@@ -692,6 +907,12 @@ If this was not you, open Login Activity in your profile and revoke the unfamili
         <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0; line-height: 1.5;">
           If this was not you, open Login Activity in your profile and revoke the unfamiliar session.
         </p>
+
+        <div style="margin: 20px 0; text-align: center;">
+          <a href="https://www.shikshantaracademy.edu.np/" target="_blank" rel="noopener noreferrer" style="display: inline-block; background-color: #1e40af; color: #ffffff; padding: 12px 24px; font-size: 13px; font-weight: 700; text-decoration: none; border-radius: 8px; letter-spacing: 0.3px;">
+            OPEN SHIKSHANTAR ACADEMY WEBSITE
+          </a>
+        </div>
 
         <div style="padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center;">
           Shikshantar Academy • Security & Account Protection

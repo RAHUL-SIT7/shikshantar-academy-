@@ -157,10 +157,10 @@ service cloud.firestore {
           (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
           (exists(/databases/$(database)/documents/studentFees/$(targetId)) && get(/databases/$(database)/documents/studentFees/$(targetId)).data != getAfter(/databases/$(database)/documents/studentFees/$(targetId)).data)
         )) ||
-        // I. Permitted Financial Maintenance & Maintenance Operations
-        (actionType in ['LEDGER_RECONCILIATION_REPAIR', 'TEST_TRANSACTION_PURGED', 'EXCESS_APPROVED_ADVANCE', 'EXCESS_APPROVED_RETURN']) ||
-        // J. Academic Examination & Mark Management Audit Operations
-        (actionType in ['MARK_MODIFIED', 'RESULT_EDITED', 'MARK_ENTRY', 'EXAM_PUBLISHED', 'RESULTS_SAVED'])
+        // I. Permitted Financial Maintenance & Billing Operations
+        (actionType in ['LEDGER_RECONCILIATION_REPAIR', 'TEST_TRANSACTION_PURGED', 'EXCESS_APPROVED_ADVANCE', 'EXCESS_APPROVED_RETURN', 'FAMILY_PAYMENT_COLLECTED', 'FAMILY_STATEMENT_GENERATED', 'BILL_REISSUED', 'PAYMENT_ALLOCATED', 'PAYMENT_REVERSED', 'ADVANCE_CREATED', 'ADVANCE_APPLIED', 'REFUND_CREATED']) ||
+        // J. Academic Examination, Mark, Custom Subject & Promotion Audit Operations
+        (actionType in ['MARK_MODIFIED', 'RESULT_EDITED', 'MARK_ENTRY', 'EXAM_PUBLISHED', 'RESULTS_SAVED', 'PREPARATION_INITIALIZED', 'CORRECTION_REQUESTED', 'RESULT_REVIEWED', 'NOTIFICATION_FAILURE', 'SUBJECT_CREATED', 'SUBJECT_EDITED', 'SUBJECT_ARCHIVED', 'SUBJECT_RESTORED', 'SUBJECT_DELETED', 'PROMOTION_PREPARED', 'STUDENT_PROMOTED', 'STUDENT_RETAINED', 'STUDENT_TRANSFERRED', 'STUDENT_GRADUATED', 'STUDENT_MARKED_INACTIVE', 'ENROLLMENT_CREATED'])
       );
     }
 
@@ -232,7 +232,25 @@ service cloud.firestore {
 
     match /exams/{examId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isTeacher();
+      allow write: if isAdmin() || (
+        isTeacher() && (
+          // Subject teachers can only update unpublished draft status/notes
+          (!('published' in request.resource.data) || request.resource.data.published == false || 
+           // Only the Class Teacher of that class or Admin can set published == true
+           (hasUserDoc() && (
+             getUserData().primaryClassTeacher == request.resource.data.class ||
+             getUserData().class == request.resource.data.class ||
+             getUserData().primaryClassTeacher == ('Class ' + request.resource.data.class) ||
+             getUserData().class == ('Class ' + request.resource.data.class)
+           ))
+          )
+        )
+      );
+    }
+
+    match /custom_subjects/{subjectId} {
+      allow read: if isSignedIn() && (isAdmin() || isTeacher());
+      allow write: if isAdmin();
     }
 
     match /results/{resultId} {
@@ -242,8 +260,21 @@ service cloud.firestore {
     }
 
     match /resultSummary/{summaryId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher() || (resource != null && isStudentOwner(resource.data.studentId)));
-      allow create, update: if isAdmin() || isTeacher();
+      allow read: if isSignedIn() && (isAdmin() || isTeacher() || (resource != null && resource.data.published == true && isStudentOwner(resource.data.studentId)));
+      allow create, update: if isAdmin() || (
+        isTeacher() && (
+          // Subject teachers can only update unpublished draft summary
+          (!('published' in request.resource.data) || request.resource.data.published == false ||
+           // Only the Class Teacher of that class or Admin can publish class result
+           (hasUserDoc() && (
+             getUserData().primaryClassTeacher == request.resource.data.class ||
+             getUserData().class == request.resource.data.class ||
+             getUserData().primaryClassTeacher == ('Class ' + request.resource.data.class) ||
+             getUserData().class == ('Class ' + request.resource.data.class)
+           ))
+          )
+        )
+      );
       allow delete: if isAdmin();
     }
 

@@ -4,6 +4,7 @@ import { StudentResult } from '../../data/resultsState';
 import { doc, writeBatch, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { recordBatchAuditLog } from '../../lib/auditLogger';
+import { canPublishClassResult } from '../../lib/resultPreparationEngine';
 import jsPDF from 'jspdf';
 import { toCanvas } from 'html-to-image';
 import JSZip from 'jszip';
@@ -65,37 +66,42 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
      }
      if (filterClass) f = f.filter(r => String(r.class) === filterClass);
 
-     // Rank Assignment within the full set (grouped by class and exam)
-     let withStats = [...f];
+     // Rank Assignment: Preserve authoritative stored rank whenever present (> 0)
+     // Only calculate fallback rank when authoritative rank is genuinely absent
+     let withStats = f.map(r => ({ ...r }));
      
-     const groups: Record<string, StudentResult[]> = {};
-     withStats.forEach(r => {
-         const key = `${r.class}_${r.examType}`;
-         if (!groups[key]) groups[key] = [];
-         groups[key].push(r);
-     });
+     const needsFallbackRank = withStats.some(r => !r.rank || Number(r.rank) <= 0);
+     if (needsFallbackRank) {
+       const groups: Record<string, StudentResult[]> = {};
+       withStats.forEach(r => {
+           // Complete academic context grouping: academicYear + class + section + examType
+           const key = `${r.academicYear || ''}_${r.class}_${r.section || ''}_${r.examType}`;
+           if (!groups[key]) groups[key] = [];
+           groups[key].push(r);
+       });
 
-     Object.values(groups).forEach(group => {
-         group.sort((a, b) => b.total - a.total);
-         let currentRank = 1;
-         let prevTotal = -1;
-         let sameRankCount = 0;
-         group.forEach((r, idx) => {
-             if (r.total === prevTotal) {
-                 r.rank = currentRank;
-                 sameRankCount++;
-             } else {
-                 if (idx === 0) {
-                     currentRank = 1;
-                 } else {
-                     currentRank += sameRankCount;
-                 }
-                 r.rank = currentRank;
-                 sameRankCount = 1;
-                 prevTotal = r.total;
-             }
-         });
-     });
+       Object.values(groups).forEach(group => {
+           group.sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
+           let currentRank = 1;
+           let prevTotal = -1;
+           let sameRankCount = 0;
+           group.forEach((r, idx) => {
+               if (r.total === prevTotal) {
+                   if (!r.rank || Number(r.rank) <= 0) r.rank = currentRank;
+                   sameRankCount++;
+               } else {
+                   if (idx === 0) {
+                       currentRank = 1;
+                   } else {
+                       currentRank += sameRankCount;
+                   }
+                   if (!r.rank || Number(r.rank) <= 0) r.rank = currentRank;
+                   sameRankCount = 1;
+                   prevTotal = r.total;
+               }
+           });
+       });
+     }
 
      withStats.sort((a, b) => {
          if (a.class !== b.class) return String(a.class || '').localeCompare(String(b.class || ''));
@@ -450,6 +456,11 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
          return;
      }
 
+     if (userRole === 'teacher' && filterClass && !canPublishClassResult(userRole, teacherProfile, filterClass)) {
+         setStatus({type: 'error', message: 'Publishing results is restricted to Administrators and the primary Class Teacher for this class.'});
+         return;
+     }
+
      const uniqueStudentIds = Array.from(new Set(baseData.map(r => r.studentId)));
      setPublishConfirmModal({
          show: true, 
@@ -675,7 +686,7 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
                    currentRow++;
                    ws.mergeCells(`A${currentRow}:J${currentRow}`);
                    const addressCell = ws.getCell(`A${currentRow}`);
-                   addressCell.value = "Karjanhana Municipality, Bastipur-5, Siraha, Nepal | academyshikshantar@gmail.com | +977 9709867048, +977 9807790805";
+                   addressCell.value = "Bastipur, Karjanha-05, Siraha, Nepal | shikshantaracademy@gmail.com | +977 9709867048, +977 9807790805";
                    addressCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1976D2' } };
                    addressCell.alignment = { horizontal: 'center', vertical: 'middle' };
 

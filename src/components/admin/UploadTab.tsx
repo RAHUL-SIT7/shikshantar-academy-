@@ -7,6 +7,7 @@ import { Upload, CheckCircle2, AlertCircle, Download, FileEdit } from 'lucide-re
 import { doc, writeBatch, collection, getDocs, query, where, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { recordAuditLog } from '../../lib/auditLogger';
+import { canTeacherAccessSubject } from '../../lib/resultPreparationEngine';
 
 const CLASS_SUBJECTS: Record<string, string[]> = {
   'PG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
@@ -409,9 +410,7 @@ export function UploadTab({ EXAM_TYPES, allClasses, data, setStatus, userRole, a
                   const matchedCanonicalSubj = allowedClassSubjects.find(s => s.toLowerCase() === baseSubj.toLowerCase()) || baseSubj;
 
                   if (userRole === 'teacher') {
-                      const assigned = Array.isArray(assignedSubjects) ? assignedSubjects : [];
-                      const isClassTeacherOfSelected = String(uploadClass).replace(/^Class\s+/i, '').trim() === String(teacherProfile?.class || '').replace(/^Class\s+/i, '').trim();
-                      if (!isClassTeacherOfSelected && !assigned.includes(matchedCanonicalSubj)) {
+                      if (!canTeacherAccessSubject(userRole, teacherProfile, uploadClass, matchedCanonicalSubj)) {
                           continue;
                       }
                   }

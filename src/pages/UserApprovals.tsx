@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Shield, Search, CheckCircle2, AlertCircle, User, Mail, Smartphone, BadgeCheck, MoreHorizontal, Trash2, Edit3, X, Filter, UserPlus, Users, UserCheck, ShieldCheck, Lock, Eye, EyeOff, ChevronDown, Calendar, KeyRound, Copy, Check, AlertTriangle } from 'lucide-react';
+import { Shield, Search, CheckCircle2, AlertCircle, User, Mail, Smartphone, BadgeCheck, MoreHorizontal, Trash2, Edit3, X, Filter, UserPlus, Users, UserCheck, ShieldCheck, Lock, Eye, EyeOff, ChevronDown, Calendar, KeyRound, Copy, Check, AlertTriangle, BookOpen, Plus, Layers, GraduationCap, Briefcase } from 'lucide-react';
 import { db, auth, firebaseConfig } from '../firebase';
 import { doc, onSnapshot, collection, updateDoc, deleteDoc, setDoc, getDoc, getDocs, query, where, runTransaction } from 'firebase/firestore';
 import { onAuthStateChanged, getAuth } from 'firebase/auth';
@@ -11,6 +11,22 @@ import NepaliADDatePicker from '../components/NepaliADDatePicker';
 import { checkDuplicateStudentRoll, checkDuplicateStudentRollInFirestore, extractStudentRoll } from '../lib/studentValidation';
 import { recordAuditLog, buildAuthoritativeAuditPayload, getAuthoritativeActor } from '../lib/auditLogger';
 import { generateNextStudentId, generateNextTeacherId, generateNextAdminId, assertEmisIsUnique, recordStudentEnrollment, getCurrentBSAcademicYear, ensurePermanentIdentitiesForExistingUsers } from '../lib/permanentIdentityEngine';
+import { formatBSDate, formatBSDateTime } from '../lib/nepaliDate';
+import {
+  TeachingAssignment,
+  TEACHER_CLASSES,
+  STANDARD_SUBJECTS,
+  normalizeClass,
+  getClassConfiguredSubjects,
+  validateTeachingAssignment,
+  addTeachingAssignment,
+  bulkAssignSubjectToClasses,
+  removeTeachingAssignment,
+  deriveLegacyAssignedClasses,
+  deriveLegacyAssignedSubjects,
+  groupAssignmentsByClass
+} from '../lib/teacherAssignmentEngine';
+import { createCustomSubject } from '../lib/customSubjectEngine';
 
 // Initialize a secondary Firebase app to create users without signing out the admin
 const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
@@ -24,37 +40,10 @@ const secondaryAuth = (() => {
   }
 })();
 
-const TEACHER_CLASSES = [
-  'Play Group',
-  'Nursery',
-  'LKG',
-  'UKG',
-  '1',
-  '2',
-  '3',
-  '4',
-  '5',
-  '6',
-  '7',
-  '8',
-  '9',
-  '10'
-];
-
-const STANDARD_SUBJECTS = [
-  "Mathematics",
-  "Science",
-  "English",
-  "Nepali",
-  "Social Studies",
-  "Computer",
-  "HPE",
-  "Opt. Math"
-];
-
 interface UserProfile {
   id: string;
   email?: string;
+  authEmail?: string;
   role?: 'student' | 'teacher' | 'admin';
   adminTier?: 'primary' | 'secondary';
   fullName?: string;
@@ -95,6 +84,14 @@ interface UserProfile {
   computerFee?: number;
   assignedClasses?: string[];
   assignedSubjects?: string[];
+  teachingAssignments?: TeachingAssignment[];
+  mainSubject?: string;
+  specialization?: string;
+  primaryClassTeacher?: string;
+  qualification?: string;
+  designation?: string;
+  department?: string;
+  joiningDate?: string;
   classAssignedYear?: string;
   createdAt?: string;
 }
@@ -328,6 +325,16 @@ export default function UserApprovals() {
         rawUpdateData.permanentTeacherId = editingUser.permanentTeacherId;
         rawUpdateData.teacherId = editingUser.teacherId;
         rawUpdateData.staffId = editingUser.teacherId;
+        rawUpdateData.primaryClassTeacher = editingUser.primaryClassTeacher || editingUser.class || '';
+        rawUpdateData.class = editingUser.primaryClassTeacher || editingUser.class || '';
+        rawUpdateData.mainSubject = editingUser.mainSubject || '';
+        rawUpdateData.specialization = editingUser.mainSubject || '';
+        rawUpdateData.qualification = editingUser.qualification || '';
+        rawUpdateData.designation = editingUser.designation || 'Teacher / Faculty';
+        rawUpdateData.department = editingUser.department || 'Academics';
+        rawUpdateData.teachingAssignments = editingUser.teachingAssignments || [];
+        rawUpdateData.assignedClasses = deriveLegacyAssignedClasses(editingUser.teachingAssignments || [], editingUser.primaryClassTeacher || editingUser.class);
+        rawUpdateData.assignedSubjects = deriveLegacyAssignedSubjects(editingUser.teachingAssignments || [], editingUser.mainSubject);
       } else if (editingUser.role === 'admin') {
         rawUpdateData.permanentAdminId = editingUser.permanentAdminId;
         rawUpdateData.adminId = editingUser.adminId;
@@ -1128,6 +1135,12 @@ export default function UserApprovals() {
     scholarshipAmount: 0,
     assignedClasses: [] as string[],
     assignedSubjects: [] as string[],
+    teachingAssignments: [] as TeachingAssignment[],
+    mainSubject: '',
+    primaryClassTeacher: '',
+    qualification: '',
+    designation: 'Teacher / Faculty',
+    department: 'Academics',
     emisNumber: '',
     fatherName: '',
     motherName: '',
@@ -1142,6 +1155,25 @@ export default function UserApprovals() {
   });
   const [isCreating, setIsCreating] = useState(false);
   const [copiedPassword, setCopiedPassword] = useState(false);
+
+  // Teacher Assignment UI State for New Teacher
+  const [newAssignClass, setNewAssignClass] = useState('1');
+  const [newAssignSubject, setNewAssignSubject] = useState('Mathematics');
+  const [newAssignSection, setNewAssignSection] = useState('All');
+  const [newBulkSubject, setNewBulkSubject] = useState('Mathematics');
+  const [newBulkClasses, setNewBulkClasses] = useState<string[]>([]);
+  const [newShowBulk, setNewShowBulk] = useState(false);
+  const [newCustomSubject, setNewCustomSubject] = useState('');
+  const [customSubjectsList, setCustomSubjectsList] = useState<string[]>([]);
+
+  // Teacher Assignment UI State for Edit Teacher
+  const [editAssignClass, setEditAssignClass] = useState('1');
+  const [editAssignSubject, setEditAssignSubject] = useState('Mathematics');
+  const [editAssignSection, setEditAssignSection] = useState('All');
+  const [editBulkSubject, setEditBulkSubject] = useState('Mathematics');
+  const [editBulkClasses, setEditBulkClasses] = useState<string[]>([]);
+  const [editShowBulk, setEditShowBulk] = useState(false);
+  const [editCustomSubject, setEditCustomSubject] = useState('');
 
   // Helper to auto-generate a strong password satisfying all criteria
   const generateStrongPassword = () => {
@@ -1192,6 +1224,27 @@ export default function UserApprovals() {
       console.error('Failed to copy password:', err);
     }
   };
+
+  useEffect(() => {
+    let unsub: any;
+    try {
+      unsub = onSnapshot(collection(db, 'custom_subjects'), (snap) => {
+        const activeNames: string[] = [];
+        snap.forEach(d => {
+          const data = d.data();
+          if (data.status === 'ACTIVE' && data.name) {
+            activeNames.push(data.name.trim());
+          }
+        });
+        setCustomSubjectsList(activeNames);
+      });
+    } catch (e) {
+      console.warn('Failed to listen to custom_subjects:', e);
+    }
+    return () => {
+      if (unsub) unsub();
+    };
+  }, []);
 
   useEffect(() => {
     if (location.state && location.state.prefillAdmission) {
@@ -1446,9 +1499,16 @@ export default function UserApprovals() {
         userProfilePayload.permanentTeacherId = generatedTeacherId;
         userProfilePayload.teacherId = generatedTeacherId;
         userProfilePayload.staffId = generatedTeacherId;
-        userProfilePayload.class = newUser.class;
-        userProfilePayload.assignedClasses = newUser.assignedClasses || [];
-        userProfilePayload.assignedSubjects = newUser.assignedSubjects || [];
+        userProfilePayload.primaryClassTeacher = newUser.primaryClassTeacher || newUser.class || '';
+        userProfilePayload.class = newUser.primaryClassTeacher || newUser.class || '';
+        userProfilePayload.mainSubject = newUser.mainSubject || '';
+        userProfilePayload.specialization = newUser.mainSubject || '';
+        userProfilePayload.qualification = newUser.qualification || '';
+        userProfilePayload.designation = newUser.designation || 'Teacher / Faculty';
+        userProfilePayload.department = newUser.department || 'Academics';
+        userProfilePayload.teachingAssignments = newUser.teachingAssignments || [];
+        userProfilePayload.assignedClasses = deriveLegacyAssignedClasses(newUser.teachingAssignments || [], newUser.primaryClassTeacher || newUser.class);
+        userProfilePayload.assignedSubjects = deriveLegacyAssignedSubjects(newUser.teachingAssignments || [], newUser.mainSubject);
       }
 
       // Use getFirestore with secondaryApp so the write is executed under the newly created user's own session
@@ -1486,7 +1546,9 @@ export default function UserApprovals() {
         email: '', password: '', fullName: '', dob: '', dobBs: '', role: 'teacher', 
         phone: '', class: '', studentId: '', rollNumber: '', guardianName: '', address: '', 
         section: '', scholarshipStatus: 'Not Provided', scholarshipAmount: 0, 
-        assignedClasses: [], assignedSubjects: [], emisNumber: '', fatherName: '', 
+        assignedClasses: [], assignedSubjects: [], teachingAssignments: [], mainSubject: '',
+        primaryClassTeacher: '', qualification: '', designation: 'Teacher / Faculty', department: 'Academics',
+        emisNumber: '', fatherName: '', 
         motherName: '', caste: '', disability: '', gender: '', hasTransportation: 'No', 
         transportRoute: '', transportFee: 0, hasComputer: 'No', computerFee: 0 
       });
@@ -2219,47 +2281,120 @@ export default function UserApprovals() {
                 </div>
               )}
 
-              {/* Teacher-Specific Section */}
+              {/* Teacher-Specific Comprehensive Sections */}
               {viewingUser.role === 'teacher' && (
-                <div className="pt-4 border-t border-gray-100 space-y-4">
-                  <p className="text-xs font-black text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
-                    👨‍🏫 Faculty & Teaching Assignments
-                  </p>
-                  <div className="space-y-3 bg-blue-50/40 p-4 rounded-2xl border border-blue-100/60">
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Primary Class Teacher Of</p>
-                      <p className="font-bold text-gray-800 text-xs">{viewingUser.class ? `Class ${viewingUser.class}` : 'None Assigned'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Assigned Classes</p>
-                      <div className="flex flex-wrap gap-1">
-                        {viewingUser.assignedClasses && viewingUser.assignedClasses.length > 0 ? (
-                          viewingUser.assignedClasses.map((c, i) => (
-                            <span key={i} className="bg-white border border-blue-200 text-blue-900 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                              {c.startsWith('Class') ? c : `Class ${c}`}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-gray-500 font-medium">None assigned</span>
-                        )}
+                <>
+                  {/* Professional & Faculty Credentials */}
+                  <div className="pt-4 border-t border-gray-100 space-y-4">
+                    <p className="text-xs font-black text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                      💼 Professional & Employment Details
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 bg-blue-50/40 p-4 rounded-2xl border border-blue-100/60">
+                      <div>
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Designation</p>
+                        <p className="font-bold text-gray-800 text-xs">{viewingUser.designation || 'Teacher / Faculty'}</p>
                       </div>
+                      <div>
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Department</p>
+                        <p className="font-bold text-gray-800 text-xs">{viewingUser.department || 'Academics'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">Educational Qualification</p>
+                        <p className="font-bold text-gray-800 text-xs">{viewingUser.qualification || 'Not Specified'}</p>
+                      </div>
+                      {viewingUser.createdAt && (
+                        <div className="md:col-span-3 pt-2 border-t border-blue-100/60 flex items-center justify-between text-xs text-gray-600">
+                          <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Account Created / Joining</span>
+                          <span className="font-bold text-gray-700">{formatBSDate(viewingUser.createdAt)}</span>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Assigned Subjects</p>
-                      <div className="flex flex-wrap gap-1">
-                        {viewingUser.assignedSubjects && viewingUser.assignedSubjects.length > 0 ? (
-                          viewingUser.assignedSubjects.map((s, i) => (
-                            <span key={i} className="bg-white border border-blue-200 text-blue-900 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                              {s}
+                  </div>
+
+                  {/* Teaching & Academic Responsibilities */}
+                  <div className="pt-4 border-t border-gray-100 space-y-4">
+                    <p className="text-xs font-black text-indigo-800 uppercase tracking-wider flex items-center gap-1.5">
+                      👨‍🏫 Teaching & Academic Responsibilities
+                    </p>
+                    <div className="space-y-4 bg-indigo-50/40 p-4 rounded-2xl border border-indigo-100/60">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-3 rounded-xl border border-indigo-100">
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Main / Specialization Subject</p>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-indigo-900 text-sm">
+                              {viewingUser.mainSubject || viewingUser.specialization || 'Not Specified'}
                             </span>
-                          ))
+                            <span className="text-[10px] text-gray-400 font-medium">(Informational)</span>
+                          </div>
+                        </div>
+
+                        <div className="bg-white p-3 rounded-xl border border-indigo-100">
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Primary Class Teacher Of</p>
+                          <p className="font-bold text-gray-900 text-sm">
+                            {viewingUser.primaryClassTeacher || viewingUser.class 
+                              ? (normalizeClass(viewingUser.primaryClassTeacher || viewingUser.class || '').startsWith('Class')
+                                  ? viewingUser.primaryClassTeacher || viewingUser.class 
+                                  : `Class ${normalizeClass(viewingUser.primaryClassTeacher || viewingUser.class || '')}`)
+                              : 'No Primary Class Assigned'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Authoritative Teaching Assignments */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Exact Teaching Assignments</p>
+                          <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-black">
+                            {viewingUser.teachingAssignments?.length || 0} active pairing(s)
+                          </span>
+                        </div>
+
+                        {viewingUser.teachingAssignments && viewingUser.teachingAssignments.length > 0 ? (
+                          <div className="space-y-2.5">
+                            {Object.entries(groupAssignmentsByClass(viewingUser.teachingAssignments)).map(([cls, items]) => (
+                              <div key={cls} className="bg-white p-3 rounded-xl border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-indigo-900 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200">
+                                    {cls.startsWith('Class') || cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {items.map((assign, idx) => (
+                                    <span key={idx} className="bg-indigo-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-2xs flex items-center gap-1">
+                                      {assign.subject}
+                                      {assign.section && assign.section !== 'All' && (
+                                        <span className="bg-indigo-700/60 text-[9px] px-1 rounded">Sec {assign.section}</span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         ) : (
-                          <span className="text-xs text-gray-500 font-medium">None assigned</span>
+                          /* Legacy Fallback if exact pairing not yet configured */
+                          <div className="bg-white/80 p-3 rounded-xl border border-gray-200 space-y-2">
+                            <p className="text-[11px] text-amber-700 font-medium">
+                              Legacy profile — edit this teacher to configure exact Class → Subject teaching assignments.
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {(viewingUser.assignedClasses || []).map((c, i) => (
+                                <span key={i} className="bg-gray-100 text-gray-700 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  {c.startsWith('Class') ? c : `Class ${c}`}
+                                </span>
+                              ))}
+                              {(viewingUser.assignedSubjects || []).map((s, i) => (
+                                <span key={i} className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
                   </div>
-                </div>
+                </>
               )}
 
               {/* Admin-Specific Section */}
@@ -2457,26 +2592,80 @@ export default function UserApprovals() {
                   </div>
                 )}
                 {editingUser.role === 'teacher' && (
-                  <div className="space-y-4 bg-blue-50/40 border border-blue-100/50 p-4 rounded-xl col-span-2">
-                    <p className="text-xs font-black text-blue-800 uppercase tracking-wider flex items-center gap-1">
-                      👨‍🏫 Teacher Assignment Settings
-                    </p>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Class Teacher of Single Class */}
-                      <div className="space-y-1 md:col-span-2">
+                  <div className="space-y-5 bg-blue-50/40 border border-blue-100/60 p-5 rounded-2xl col-span-2">
+                    <div className="flex items-center justify-between border-b border-blue-100 pb-3">
+                      <p className="text-xs font-black text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                        👨‍🏫 Teacher Credentials & Exact Teaching Assignments
+                      </p>
+                      <span className="text-[10px] bg-blue-100 text-blue-800 font-black px-2 py-0.5 rounded-full">
+                        {editingUser.teachingAssignments?.length || 0} Assignment(s)
+                      </span>
+                    </div>
+
+                    {/* Professional Credentials */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Designation</label>
+                        <input
+                          type="text"
+                          value={editingUser.designation || ''}
+                          onChange={e => setEditingUser({ ...editingUser, designation: e.target.value })}
+                          placeholder="e.g. Teacher / Faculty"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Department</label>
+                        <input
+                          type="text"
+                          value={editingUser.department || ''}
+                          onChange={e => setEditingUser({ ...editingUser, department: e.target.value })}
+                          placeholder="e.g. Academics / Science"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Qualification</label>
+                        <input
+                          type="text"
+                          value={editingUser.qualification || ''}
+                          onChange={e => setEditingUser({ ...editingUser, qualification: e.target.value })}
+                          placeholder="e.g. M.Sc, B.Ed"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Main Subject & Primary Class Teacher */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-blue-100/60">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1 flex items-center justify-between">
+                          <span>Main / Specialization Subject</span>
+                          <span className="text-[9px] text-gray-400 font-normal">Informational</span>
+                        </label>
+                        <select
+                          value={editingUser.mainSubject || editingUser.specialization || ''}
+                          onChange={e => setEditingUser({ ...editingUser, mainSubject: e.target.value, specialization: e.target.value })}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-800 bg-white shadow-xs"
+                        >
+                          <option value="">-- Select Main Subject --</option>
+                          {Array.from(new Set([...STANDARD_SUBJECTS, ...customSubjectsList, ...(editingUser.assignedSubjects || [])])).map(subj => (
+                            <option key={subj} value={subj}>{subj}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Primary Class Teacher Of</label>
                         <select
-                          value={editingUser.class || ''}
+                          value={editingUser.primaryClassTeacher || editingUser.class || ''}
                           onChange={e => {
                             const val = e.target.value;
-                            let updatedAssigned = [...(editingUser.assignedClasses || [])];
-                            if (val && !updatedAssigned.includes(val)) {
-                              updatedAssigned.push(val);
-                            }
-                            setEditingUser({ ...editingUser, class: val, assignedClasses: updatedAssigned });
+                            setEditingUser({ ...editingUser, class: val, primaryClassTeacher: val });
                           }}
-                          className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 font-bold text-gray-700 bg-white shadow-sm"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-800 bg-white shadow-xs"
                         >
                           <option value="">-- No Primary Class --</option>
                           {TEACHER_CLASSES.map(cls => (
@@ -2484,104 +2673,224 @@ export default function UserApprovals() {
                           ))}
                         </select>
                       </div>
+                    </div>
 
-                      {/* Assigned Classes Checkboxes */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Assigned Classes</label>
-                        <div className="grid grid-cols-2 gap-2 bg-white border border-gray-100 p-3 rounded-xl max-h-[160px] overflow-y-auto">
-                          {TEACHER_CLASSES.map(cls => {
-                            const isChecked = (editingUser.assignedClasses || []).includes(cls);
-                            return (
-                              <label key={cls} className="flex items-center gap-2 text-[11px] font-bold text-gray-700 cursor-pointer hover:text-blue-600">
-                                <input 
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {
-                                    let current = [...(editingUser.assignedClasses || [])];
-                                    if (isChecked) {
-                                      current = current.filter(c => c !== cls);
-                                    } else {
-                                      current.push(cls);
-                                    }
-                                    setEditingUser({ ...editingUser, assignedClasses: current });
-                                  }}
-                                  className="w-3.5 h-3.5 rounded text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <span>{cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
+                    {/* Exact Teaching Assignments Builder */}
+                    <div className="space-y-3 pt-3 border-t border-blue-100/60">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                          <Plus className="w-3.5 h-3.5 text-indigo-600" /> Add Teaching Assignment (Class + Subject)
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setEditShowBulk(!editShowBulk)}
+                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Layers className="w-3 h-3" />
+                          {editShowBulk ? 'Close Bulk Assign' : 'Bulk Assign Subject'}
+                        </button>
                       </div>
 
-                      {/* Assigned Subjects Checkboxes */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Assigned Subjects</label>
-                        <div className="grid grid-cols-2 gap-2 bg-white border border-gray-100 p-3 rounded-xl max-h-[160px] overflow-y-auto">
-                          {Array.from(new Set([...STANDARD_SUBJECTS, ...(editingUser.assignedSubjects || [])])).map(subj => {
-                            const isChecked = (editingUser.assignedSubjects || []).includes(subj);
-                            return (
-                              <label key={subj} className="flex items-center gap-2 text-[11px] font-bold text-gray-700 cursor-pointer hover:text-blue-600">
-                                <input 
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {
-                                    let current = [...(editingUser.assignedSubjects || [])];
-                                    if (isChecked) {
-                                      current = current.filter(s => s !== subj);
-                                    } else {
-                                      current.push(subj);
-                                    }
-                                    setEditingUser({ ...editingUser, assignedSubjects: current });
-                                  }}
-                                  className="w-3.5 h-3.5 rounded text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <span>{subj}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                        {/* Custom Subject Input */}
-                        <div className="flex gap-2 mt-2">
-                          <input 
-                            type="text"
-                            placeholder="Add Custom Subject"
-                            id="edit-custom-subject-input"
-                            className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 font-bold"
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const val = (e.target as HTMLInputElement).value.trim();
-                                if (val) {
-                                  let current = [...(editingUser.assignedSubjects || [])];
-                                  if (!current.includes(val)) {
-                                    current.push(val);
-                                  }
-                                  setEditingUser({ ...editingUser, assignedSubjects: current });
-                                  (e.target as HTMLInputElement).value = '';
-                                }
-                              }
-                            }}
-                          />
+                      {/* Bulk Assign Panel */}
+                      {editShowBulk ? (
+                        <div className="bg-indigo-50/70 p-4 rounded-xl border border-indigo-200 space-y-3">
+                          <p className="text-xs font-bold text-indigo-950">Assign One Subject to Multiple Classes:</p>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Select Subject</label>
+                            <select
+                              value={editBulkSubject}
+                              onChange={e => setEditBulkSubject(e.target.value)}
+                              className="w-full border border-indigo-200 rounded-lg px-3 py-2 text-xs font-bold bg-white"
+                            >
+                              {Array.from(new Set([...STANDARD_SUBJECTS, ...customSubjectsList, ...(editingUser.assignedSubjects || [])])).map(subj => (
+                                <option key={subj} value={subj}>{subj}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Select Target Classes</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2.5 rounded-lg border border-indigo-100 max-h-[120px] overflow-y-auto">
+                              {TEACHER_CLASSES.map(cls => {
+                                const checked = editBulkClasses.includes(cls);
+                                return (
+                                  <label key={cls} className="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        setEditBulkClasses(prev => checked ? prev.filter(c => c !== cls) : [...prev, cls]);
+                                      }}
+                                      className="rounded text-indigo-600"
+                                    />
+                                    <span>{cls.startsWith('Class') || cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+
                           <button
                             type="button"
                             onClick={() => {
-                              const inputEl = document.getElementById('edit-custom-subject-input') as HTMLInputElement;
-                              const val = inputEl?.value.trim();
-                              if (val) {
-                                let current = [...(editingUser.assignedSubjects || [])];
-                                if (!current.includes(val)) {
-                                  current.push(val);
-                                }
-                                setEditingUser({ ...editingUser, assignedSubjects: current });
-                                inputEl.value = '';
+                              if (!editBulkSubject || editBulkClasses.length === 0) {
+                                setStatus({ type: 'error', message: 'Select a subject and at least one class.' });
+                                setTimeout(() => setStatus({ type: null, message: '' }), 3000);
+                                return;
                               }
+                              const res = bulkAssignSubjectToClasses(editingUser.teachingAssignments || [], editBulkSubject, editBulkClasses);
+                              setEditingUser({ ...editingUser, teachingAssignments: res.assignments });
+                              setEditBulkClasses([]);
+                              setEditShowBulk(false);
+                              setStatus({ type: 'success', message: `Added ${res.addedCount} new assignment(s) for ${editBulkSubject}.` });
+                              setTimeout(() => setStatus({ type: null, message: '' }), 3000);
                             }}
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-lg uppercase"
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-2 rounded-lg shadow-xs cursor-pointer"
                           >
-                            Add
+                            Apply Bulk Assignments
                           </button>
                         </div>
+                      ) : (
+                        /* Individual Assignment Inputs */
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-white p-3 rounded-xl border border-gray-200 items-end">
+                          <div className="sm:col-span-4 space-y-1">
+                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Class</label>
+                            <select
+                              value={editAssignClass}
+                              onChange={e => {
+                                const newCls = e.target.value;
+                                setEditAssignClass(newCls);
+                                const available = getClassConfiguredSubjects(newCls, customSubjectsList);
+                                if (!available.includes(editAssignSubject)) {
+                                  setEditAssignSubject(available[0] || 'Mathematics');
+                                }
+                              }}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-gray-800 bg-white"
+                            >
+                              {TEACHER_CLASSES.map(cls => (
+                                <option key={cls} value={cls}>{cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="sm:col-span-5 space-y-1">
+                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Configured Subject</label>
+                            <select
+                              value={editAssignSubject}
+                              onChange={e => setEditAssignSubject(e.target.value)}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-gray-800 bg-white"
+                            >
+                              {getClassConfiguredSubjects(editAssignClass, customSubjectsList).map(subj => (
+                                <option key={subj} value={subj}>{subj}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="sm:col-span-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!editAssignClass || !editAssignSubject) return;
+                                const res = addTeachingAssignment(editingUser.teachingAssignments || [], {
+                                  class: editAssignClass,
+                                  subject: editAssignSubject,
+                                  section: editAssignSection || 'All'
+                                });
+                                if (!res.success) {
+                                  setStatus({ type: 'error', message: res.error || 'Duplicate assignment rejected.' });
+                                  setTimeout(() => setStatus({ type: null, message: '' }), 3500);
+                                  return;
+                                }
+                                setEditingUser({ ...editingUser, teachingAssignments: res.assignments });
+                              }}
+                              className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-black py-2 rounded-lg transition-colors cursor-pointer shadow-xs"
+                            >
+                              + Add
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Custom Subject Addition */}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Add Custom Subject to Curriculum"
+                          value={editCustomSubject}
+                          onChange={e => setEditCustomSubject(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const val = editCustomSubject.trim();
+                              if (val) {
+                                createCustomSubject({ name: val, targetClass: editAssignClass }).catch(() => {});
+                                if (!customSubjectsList.includes(val)) {
+                                  setCustomSubjectsList(prev => [...prev, val]);
+                                }
+                                setEditAssignSubject(val);
+                                setEditCustomSubject('');
+                              }
+                            }
+                          }}
+                          className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-1.5 font-bold bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = editCustomSubject.trim();
+                            if (val) {
+                              createCustomSubject({ name: val, targetClass: editAssignClass }).catch(() => {});
+                              if (!customSubjectsList.includes(val)) {
+                                setCustomSubjectsList(prev => [...prev, val]);
+                              }
+                              setEditAssignSubject(val);
+                              setEditCustomSubject('');
+                            }
+                          }}
+                          className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-[11px] font-extrabold px-3 py-1.5 rounded-lg uppercase cursor-pointer"
+                        >
+                          + Custom
+                        </button>
+                      </div>
+
+                      {/* Authoritative Current Assignments List */}
+                      <div className="space-y-2 pt-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1 block">
+                          Current Teaching Assignments ({editingUser.teachingAssignments?.length || 0})
+                        </label>
+                        {editingUser.teachingAssignments && editingUser.teachingAssignments.length > 0 ? (
+                          <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
+                            {Object.entries(groupAssignmentsByClass(editingUser.teachingAssignments)).map(([cls, items]) => (
+                              <div key={cls} className="bg-white p-2.5 rounded-xl border border-blue-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                                <span className="text-xs font-black text-blue-900 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
+                                  {cls.startsWith('Class') || cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}
+                                </span>
+                                <div className="flex flex-wrap gap-1.5 items-center">
+                                  {items.map((assign, idx) => (
+                                    <span key={idx} className="bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                                      {assign.subject}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = removeTeachingAssignment(editingUser.teachingAssignments || [], assign);
+                                          setEditingUser({ ...editingUser, teachingAssignments: updated });
+                                        }}
+                                        title="Remove this assignment"
+                                        className="text-red-500 hover:text-red-700 font-black hover:bg-red-50 p-0.5 rounded cursor-pointer"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-white rounded-xl border border-dashed border-gray-300 text-center text-xs text-gray-500 font-medium">
+                            No exact teaching assignments assigned yet. Use the selector above to assign subjects per class.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -3228,29 +3537,80 @@ export default function UserApprovals() {
               </div>
 
               {newUser.role === 'teacher' && (
-                <div className="space-y-6 bg-blue-50/40 border border-blue-100/50 p-5 rounded-2xl md:col-span-2">
-                  <p className="text-xs font-black text-blue-800 uppercase tracking-wider flex items-center gap-1">
-                    👨‍🏫 Teacher Assignment Settings
-                  </p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Class Teacher of Single Class */}
-                    <div className="space-y-1 md:col-span-2">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Primary Class Teacher Of</label>
-                      <p className="text-[11px] text-gray-400 mb-2 pl-1">
-                        Primary class teacher for report card formulation.
-                      </p>
+                <div className="space-y-6 bg-blue-50/40 border border-blue-100/60 p-6 rounded-2xl md:col-span-2">
+                  <div className="flex items-center justify-between border-b border-blue-100 pb-3">
+                    <p className="text-xs font-black text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                      👨‍🏫 Teacher Faculty Details & Exact Teaching Assignments
+                    </p>
+                    <span className="text-[10px] bg-blue-100 text-blue-800 font-black px-2.5 py-0.5 rounded-full">
+                      {newUser.teachingAssignments?.length || 0} Assignment(s)
+                    </span>
+                  </div>
+
+                  {/* Professional Faculty Details */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Designation</label>
+                      <input
+                        type="text"
+                        value={newUser.designation}
+                        onChange={e => setNewUser({ ...newUser, designation: e.target.value })}
+                        placeholder="e.g. Teacher / Faculty"
+                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-4 py-3 text-sm font-bold text-gray-800 bg-white border outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Department</label>
+                      <input
+                        type="text"
+                        value={newUser.department}
+                        onChange={e => setNewUser({ ...newUser, department: e.target.value })}
+                        placeholder="e.g. Academics"
+                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-4 py-3 text-sm font-bold text-gray-800 bg-white border outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Educational Qualification</label>
+                      <input
+                        type="text"
+                        value={newUser.qualification}
+                        onChange={e => setNewUser({ ...newUser, qualification: e.target.value })}
+                        placeholder="e.g. B.Ed, M.Sc"
+                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-4 py-3 text-sm font-bold text-gray-800 bg-white border outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Main Subject & Primary Class Teacher */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-blue-100/60">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1 flex items-center justify-between">
+                        <span>Main / Specialization Subject</span>
+                        <span className="text-[9px] text-gray-400 font-normal">Informational</span>
+                      </label>
                       <select
-                        value={newUser.class || ''}
+                        value={newUser.mainSubject}
+                        onChange={e => setNewUser({ ...newUser, mainSubject: e.target.value, specialization: e.target.value })}
+                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-4 py-3.5 text-sm font-bold text-gray-800 bg-white border outline-none"
+                      >
+                        <option value="">-- Select Main Subject --</option>
+                        {Array.from(new Set([...STANDARD_SUBJECTS, ...customSubjectsList])).map(subj => (
+                          <option key={subj} value={subj}>{subj}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Primary Class Teacher Of</label>
+                      <select
+                        value={newUser.primaryClassTeacher || newUser.class || ''}
                         onChange={e => {
                           const val = e.target.value;
-                          let updatedAssigned = [...(newUser.assignedClasses || [])];
-                          if (val && !updatedAssigned.includes(val)) {
-                            updatedAssigned.push(val);
-                          }
-                          setNewUser({ ...newUser, class: val, assignedClasses: updatedAssigned });
+                          setNewUser({ ...newUser, class: val, primaryClassTeacher: val });
                         }}
-                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-5 py-4 text-sm font-bold text-gray-800 focus:ring-2 focus:ring-blue-500 transition-all border outline-none appearance-none bg-white"
+                        className="w-full border-primary text-primary border-gray-100 rounded-2xl px-4 py-3.5 text-sm font-bold text-gray-800 bg-white border outline-none"
                       >
                         <option value="">-- No Primary Class --</option>
                         {TEACHER_CLASSES.map(cls => (
@@ -3258,110 +3618,224 @@ export default function UserApprovals() {
                         ))}
                       </select>
                     </div>
+                  </div>
 
-                    {/* Assigned Classes Multi-Select Checkboxes */}
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1 block">Assigned Classes</label>
-                      <p className="text-[11px] text-gray-400 mb-2 pl-1">
-                        Classes this teacher is authorized to grade/manage.
+                  {/* Exact Teaching Assignments Builder */}
+                  <div className="space-y-4 pt-3 border-t border-blue-100/60">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Plus className="w-4 h-4 text-indigo-600" /> Exact Teaching Assignments (Teacher + Class + Subject)
                       </p>
-                      <div className="grid grid-cols-2 gap-2 bg-white border border-gray-100 p-4 rounded-2xl max-h-[200px] overflow-y-auto">
-                        {TEACHER_CLASSES.map(cls => {
-                          const isChecked = (newUser.assignedClasses || []).includes(cls);
-                          return (
-                            <label key={cls} className="flex items-center gap-2 text-xs font-bold text-gray-700 cursor-pointer hover:text-blue-600">
-                              <input 
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => {
-                                  let current = [...(newUser.assignedClasses || [])];
-                                  if (isChecked) {
-                                    current = current.filter(c => c !== cls);
-                                  } else {
-                                    current.push(cls);
-                                  }
-                                  setNewUser({ ...newUser, assignedClasses: current });
-                                }}
-                                className="w-4 h-4 rounded text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span>{cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setNewShowBulk(!newShowBulk)}
+                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-200 flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        {newShowBulk ? 'Close Bulk Assign' : 'Bulk Assign Subject'}
+                      </button>
                     </div>
 
-                    {/* Assigned Subjects Multi-Select Checkboxes */}
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1 block">Assigned Subjects</label>
-                      <p className="text-[11px] text-gray-400 mb-2 pl-1">
-                        Subjects this teacher is authorized to grade.
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 bg-white border border-gray-100 p-4 rounded-2xl max-h-[200px] overflow-y-auto">
-                        {Array.from(new Set([...STANDARD_SUBJECTS, ...(newUser.assignedSubjects || [])])).map(subj => {
-                          const isChecked = (newUser.assignedSubjects || []).includes(subj);
-                          return (
-                            <label key={subj} className="flex items-center gap-2 text-xs font-bold text-gray-700 cursor-pointer hover:text-blue-600">
-                              <input 
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => {
-                                  let current = [...(newUser.assignedSubjects || [])];
-                                  if (isChecked) {
-                                    current = current.filter(s => s !== subj);
-                                  } else {
-                                    current.push(subj);
-                                  }
-                                  setNewUser({ ...newUser, assignedSubjects: current });
-                                }}
-                                className="w-4 h-4 rounded text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span>{subj}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {/* Custom Subject Input */}
-                      <div className="flex gap-2 mt-2">
-                        <input 
-                          type="text"
-                          placeholder="Add Custom Subject"
-                          id="create-custom-subject-input"
-                          className="flex-1 text-xs border border-gray-100 rounded-2xl px-4 py-3 font-bold border-primary text-primary outline-none"
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              const val = (e.target as HTMLInputElement).value.trim();
-                              if (val) {
-                                let current = [...(newUser.assignedSubjects || [])];
-                                if (!current.includes(val)) {
-                                  current.push(val);
-                                }
-                                setNewUser({ ...newUser, assignedSubjects: current });
-                                (e.target as HTMLInputElement).value = '';
-                              }
-                            }
-                          }}
-                        />
+                    {/* Bulk Assign Tool */}
+                    {newShowBulk ? (
+                      <div className="bg-indigo-50/70 p-5 rounded-2xl border border-indigo-200 space-y-4">
+                        <p className="text-xs font-bold text-indigo-950">Assign One Subject Across Multiple Classes in One Click:</p>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Select Subject</label>
+                          <select
+                            value={newBulkSubject}
+                            onChange={e => setNewBulkSubject(e.target.value)}
+                            className="w-full border border-indigo-200 rounded-xl px-4 py-2.5 text-xs font-bold bg-white"
+                          >
+                            {Array.from(new Set([...STANDARD_SUBJECTS, ...customSubjectsList])).map(subj => (
+                              <option key={subj} value={subj}>{subj}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Select Target Classes</label>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-3 rounded-xl border border-indigo-100 max-h-[140px] overflow-y-auto">
+                            {TEACHER_CLASSES.map(cls => {
+                              const checked = newBulkClasses.includes(cls);
+                              return (
+                                <label key={cls} className="flex items-center gap-2 text-xs font-bold text-gray-700 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setNewBulkClasses(prev => checked ? prev.filter(c => c !== cls) : [...prev, cls]);
+                                    }}
+                                    className="rounded text-indigo-600 w-3.5 h-3.5"
+                                  />
+                                  <span>{cls.startsWith('Class') || cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+
                         <button
                           type="button"
                           onClick={() => {
-                            const inputEl = document.getElementById('create-custom-subject-input') as HTMLInputElement;
-                            const val = inputEl?.value.trim();
-                            if (val) {
-                              let current = [...(newUser.assignedSubjects || [])];
-                              if (!current.includes(val)) {
-                                current.push(val);
-                              }
-                              setNewUser({ ...newUser, assignedSubjects: current });
-                              inputEl.value = '';
+                            if (!newBulkSubject || newBulkClasses.length === 0) {
+                              setStatus({ type: 'error', message: 'Select a subject and at least one class.' });
+                              setTimeout(() => setStatus({ type: null, message: '' }), 3000);
+                              return;
                             }
+                            const res = bulkAssignSubjectToClasses(newUser.teachingAssignments || [], newBulkSubject, newBulkClasses);
+                            setNewUser({ ...newUser, teachingAssignments: res.assignments });
+                            setNewBulkClasses([]);
+                            setNewShowBulk(false);
+                            setStatus({ type: 'success', message: `Added ${res.addedCount} new assignment(s) for ${newBulkSubject}.` });
+                            setTimeout(() => setStatus({ type: null, message: '' }), 3000);
                           }}
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold px-4 py-3 rounded-2xl uppercase"
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-2.5 rounded-xl shadow-xs cursor-pointer"
                         >
-                          Add
+                          Apply Bulk Assignments
                         </button>
                       </div>
+                    ) : (
+                      /* Individual Add Row */
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-white p-4 rounded-2xl border border-gray-100 items-end">
+                        <div className="sm:col-span-4 space-y-1">
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Class</label>
+                          <select
+                            value={newAssignClass}
+                            onChange={e => {
+                              const newCls = e.target.value;
+                              setNewAssignClass(newCls);
+                              const available = getClassConfiguredSubjects(newCls, customSubjectsList);
+                              if (!available.includes(newAssignSubject)) {
+                                setNewAssignSubject(available[0] || 'Mathematics');
+                              }
+                            }}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white"
+                          >
+                            {TEACHER_CLASSES.map(cls => (
+                              <option key={cls} value={cls}>{cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="sm:col-span-5 space-y-1">
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1">Configured Subject</label>
+                          <select
+                            value={newAssignSubject}
+                            onChange={e => setNewAssignSubject(e.target.value)}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 bg-white"
+                          >
+                            {getClassConfiguredSubjects(newAssignClass, customSubjectsList).map(subj => (
+                              <option key={subj} value={subj}>{subj}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!newAssignClass || !newAssignSubject) return;
+                              const res = addTeachingAssignment(newUser.teachingAssignments || [], {
+                                class: newAssignClass,
+                                subject: newAssignSubject,
+                                section: newAssignSection || 'All'
+                              });
+                              if (!res.success) {
+                                setStatus({ type: 'error', message: res.error || 'Duplicate assignment rejected.' });
+                                setTimeout(() => setStatus({ type: null, message: '' }), 3500);
+                                return;
+                              }
+                              setNewUser({ ...newUser, teachingAssignments: res.assignments });
+                            }}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-black py-2.5 rounded-xl transition-colors cursor-pointer shadow-xs"
+                          >
+                            + Add
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Custom Subject Addition */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Add Custom Subject to School Curriculum"
+                        value={newCustomSubject}
+                        onChange={e => setNewCustomSubject(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const val = newCustomSubject.trim();
+                            if (val) {
+                              createCustomSubject({ name: val, targetClass: newAssignClass }).catch(() => {});
+                              if (!customSubjectsList.includes(val)) {
+                                setCustomSubjectsList(prev => [...prev, val]);
+                              }
+                              setNewAssignSubject(val);
+                              setNewCustomSubject('');
+                            }
+                          }
+                        }}
+                        className="flex-1 text-xs border border-gray-200 rounded-xl px-4 py-2 font-bold bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = newCustomSubject.trim();
+                          if (val) {
+                            createCustomSubject({ name: val, targetClass: newAssignClass }).catch(() => {});
+                            if (!customSubjectsList.includes(val)) {
+                              setCustomSubjectsList(prev => [...prev, val]);
+                            }
+                            setNewAssignSubject(val);
+                            setNewCustomSubject('');
+                          }
+                        }}
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-[11px] font-extrabold px-4 py-2 rounded-xl uppercase cursor-pointer"
+                      >
+                        + Custom
+                      </button>
+                    </div>
+
+                    {/* Current Authoritative Teaching Assignments */}
+                    <div className="space-y-2 pt-2">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-1 block">
+                        Assigned Teaching Roles ({newUser.teachingAssignments?.length || 0})
+                      </label>
+                      {newUser.teachingAssignments && newUser.teachingAssignments.length > 0 ? (
+                        <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                          {Object.entries(groupAssignmentsByClass(newUser.teachingAssignments)).map(([cls, items]) => (
+                            <div key={cls} className="bg-white p-3 rounded-2xl border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                              <span className="text-xs font-black text-blue-900 bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">
+                                {cls.startsWith('Class') || cls === 'Play Group' || cls === 'Nursery' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}
+                              </span>
+                              <div className="flex flex-wrap gap-1.5 items-center">
+                                {items.map((assign, idx) => (
+                                  <span key={idx} className="bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                                    {assign.subject}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = removeTeachingAssignment(newUser.teachingAssignments || [], assign);
+                                        setNewUser({ ...newUser, teachingAssignments: updated });
+                                      }}
+                                      title="Remove assignment"
+                                      className="text-red-500 hover:text-red-700 font-black hover:bg-red-50 p-0.5 rounded cursor-pointer"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-4 bg-white rounded-2xl border border-dashed border-gray-300 text-center text-xs text-gray-500 font-medium">
+                          No teaching assignments configured yet. Add individual or bulk assignments above.
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

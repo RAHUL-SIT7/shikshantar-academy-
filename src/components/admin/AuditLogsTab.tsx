@@ -23,6 +23,7 @@ import {
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { AuditLogEntry } from '../../lib/auditLogger';
+import { formatBSDate, formatBSDateTime } from '../../lib/nepaliDate';
 
 export function AuditLogsTab() {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
@@ -586,11 +587,11 @@ export function AuditLogsTab() {
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="font-bold text-gray-900 text-xs flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-gray-400" />
-                          {log.timestampStr || log.date || 'Recent'}
+                          {log.dateBS || formatBSDateTime(log.timestamp?.seconds ? new Date(log.timestamp.seconds * 1000) : (log.timestamp || log.date || new Date()))}
                         </div>
-                        {log.dateBS && (
+                        {log.date && (
                           <div className="text-[11px] text-gray-400 mt-0.5 font-normal">
-                            BS: {log.dateBS}
+                            BS Date: {formatBSDate(log.date)}
                           </div>
                         )}
                       </td>
