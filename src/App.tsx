@@ -395,15 +395,10 @@ export default function App() {
                   localStorage.removeItem("userRole");
                   return;
                 }
-                if (data.role && data.role.toLowerCase() !== userRole) {
-                  setUserRole(data.role.toLowerCase());
-                  localStorage.setItem("userRole", data.role.toLowerCase());
-                }
-                if (data.activeSessions && Array.isArray(data.activeSessions)) {
-                  if (!data.activeSessions.includes(localSessionId)) {
-                    // Session was revoked
-                    signOut(auth);
-                  }
+                if (data.role) {
+                  const newRole = data.role.toLowerCase();
+                  setUserRole(newRole);
+                  localStorage.setItem("userRole", newRole);
                 }
               } else {
                 if (docExisted) {
@@ -436,6 +431,9 @@ export default function App() {
         localStorage.removeItem("lastUserUid");
         localStorage.removeItem("localSessionId");
         localStorage.removeItem("shikshantar_last_activity");
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('shikshantar_active_tab_session');
+        }
         if (unSubDoc) {
           unSubDoc();
           unSubDoc = null;
@@ -509,9 +507,9 @@ export default function App() {
           path="/login"
           element={
             !isAuthenticated ? (
-              <Login setIsAuthenticated={setIsAuthenticated} />
+              <Login setIsAuthenticated={setIsAuthenticated} setUserRole={setUserRole} />
             ) : (
-              <Navigate to="/" />
+              <Navigate to="/" replace />
             )
           }
         />

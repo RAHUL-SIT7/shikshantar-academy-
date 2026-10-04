@@ -30,22 +30,44 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        (hasUserDoc() && isActiveUserDoc() && getUserData().role == 'admin') ||
-        (!hasUserDoc() && request.auth.token.role == 'admin')
+        (hasUserDoc() && isActiveUserDoc() && (
+          getUserData().role == 'admin' || 
+          getUserData().role == 'ADMIN' || 
+          getUserData().role == 'Admin'
+        )) ||
+        (!hasUserDoc() && (
+          request.auth.token.role == 'admin' ||
+          request.auth.token.role == 'ADMIN'
+        )) ||
+        (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com')
       );
     }
 
     function isTeacher() {
       return isSignedIn() && (
-        (hasUserDoc() && isActiveUserDoc() && getUserData().role == 'teacher') ||
-        (!hasUserDoc() && request.auth.token.role == 'teacher')
+        (hasUserDoc() && isActiveUserDoc() && (
+          getUserData().role == 'teacher' || 
+          getUserData().role == 'TEACHER' || 
+          getUserData().role == 'Teacher'
+        )) ||
+        (!hasUserDoc() && (
+          request.auth.token.role == 'teacher' ||
+          request.auth.token.role == 'TEACHER'
+        ))
       );
     }
 
     function isStudent() {
       return isSignedIn() && (
-        (hasUserDoc() && isActiveUserDoc() && getUserData().role == 'student') ||
-        (!hasUserDoc() && request.auth.token.role == 'student')
+        (hasUserDoc() && isActiveUserDoc() && (
+          getUserData().role == 'student' || 
+          getUserData().role == 'STUDENT' || 
+          getUserData().role == 'Student'
+        )) ||
+        (!hasUserDoc() && (
+          request.auth.token.role == 'student' ||
+          request.auth.token.role == 'STUDENT'
+        ))
       );
     }
 

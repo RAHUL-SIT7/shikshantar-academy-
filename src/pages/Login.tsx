@@ -34,7 +34,13 @@ const ensureSafePassword = (pwd: string) => {
 
 type View = 'login' | 'forgot' | 'reset';
 
-export default function Login({ setIsAuthenticated }: { setIsAuthenticated: (val: boolean) => void }) {
+export default function Login({ 
+  setIsAuthenticated,
+  setUserRole
+}: { 
+  setIsAuthenticated: (val: boolean) => void;
+  setUserRole?: (role: string) => void;
+}) {
   const [searchParams] = useSearchParams();
   const [view, setView] = useState<View>('login');
   
@@ -209,8 +215,12 @@ export default function Login({ setIsAuthenticated }: { setIsAuthenticated: (val
           localStorage.setItem('studentId', userData.studentId);
         }
 
-        const role = userData.role || 'student';
-        localStorage.setItem('userRole', role);
+        const authoritativeRole = (userData.role || 'student').toLowerCase();
+        localStorage.setItem('userRole', authoritativeRole);
+        sessionStorage.setItem('shikshantar_active_tab_session', 'true');
+        if (setUserRole) {
+          setUserRole(authoritativeRole);
+        }
       } else {
         await signOut(auth);
         setError('Invalid username or password.');
@@ -225,6 +235,7 @@ export default function Login({ setIsAuthenticated }: { setIsAuthenticated: (val
         localStorage.setItem('localSessionId', currentLocalSessionId);
 
         const loginEventId = `login_${userCredential.user.uid}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kathmandu';
 
         await fetch('/api/auth/record-login', {
           method: 'POST',
@@ -234,7 +245,8 @@ export default function Login({ setIsAuthenticated }: { setIsAuthenticated: (val
           },
           body: JSON.stringify({
             sessionId: currentLocalSessionId,
-            loginEventId
+            loginEventId,
+            clientTimeZone: tz
           })
         });
       } catch (loginSecErr) {

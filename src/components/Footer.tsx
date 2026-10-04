@@ -30,6 +30,8 @@ export default function Footer() {
           googleMapsUrl: d.googleMapsUrl || prev.googleMapsUrl
         }));
       }
+    }, (err) => {
+      console.warn('Footer: contact_us subscription warning:', err?.message);
     });
     return () => unsub();
   }, []);

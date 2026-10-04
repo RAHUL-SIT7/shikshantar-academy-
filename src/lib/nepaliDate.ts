@@ -53,26 +53,72 @@ export const isBSDateString = (dateStr?: string): boolean => {
 };
 
 /**
- * Robust, timezone-safe parsing from various date representations into NepaliDate instance.
- * Avoids UTC midnight day-shift bugs by parsing Gregorian date-only strings at noon local time.
+ * Returns a JavaScript Date corresponding to the exact Gregorian calendar instant in Nepal Standard Time (Asia/Kathmandu).
  */
-export const parseToNepaliDate = (date: any): NepaliDate => {
-  if (!date) return new NepaliDate(new Date());
+export const getNepalDate = (date: any = new Date()): Date => {
+  let d: Date;
+  if (typeof date === 'object' && date !== null && 'seconds' in date && typeof date.seconds === 'number') {
+    d = new Date(date.seconds * 1000);
+  } else if (typeof date === 'object' && date !== null && typeof date.toDate === 'function') {
+    d = date.toDate();
+  } else if (date instanceof Date) {
+    d = date;
+  } else if (typeof date === 'number') {
+    d = new Date(date);
+  } else if (typeof date === 'string') {
+    d = new Date(date);
+  } else {
+    d = new Date();
+  }
+  if (isNaN(d.getTime())) d = new Date();
+
+  try {
+    const nf = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kathmandu',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false
+    });
+    const parts = nf.formatToParts(d);
+    const map: Record<string, number> = {};
+    for (const p of parts) {
+      if (p.type !== 'literal') {
+        map[p.type] = parseInt(p.value, 10);
+      }
+    }
+    return new Date(map.year, map.month - 1, map.day, map.hour === 24 ? 0 : map.hour, map.minute, map.second);
+  } catch {
+    // Fallback if Intl timeZone is unsupported (+5:45 offset)
+    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+    return new Date(utc + (345 * 60000));
+  }
+};
+
+/**
+ * Robust, timezone-safe parsing from various date representations into NepaliDate instance.
+ * Avoids UTC midnight day-shift bugs by converting timestamps to Nepal Standard Time.
+ */
+export const parseToNepaliDate = (date: any): any => {
+  if (!date) return new NepaliDate(getNepalDate(new Date()));
 
   if (typeof date === 'object' && date !== null) {
     if ('seconds' in date && typeof date.seconds === 'number') {
-      return new NepaliDate(new Date(date.seconds * 1000));
+      return new NepaliDate(getNepalDate(new Date(date.seconds * 1000)));
     }
     if ('toDate' in date && typeof date.toDate === 'function') {
-      return new NepaliDate(date.toDate());
+      return new NepaliDate(getNepalDate(date.toDate()));
     }
     if (date instanceof Date) {
-      return new NepaliDate(date);
+      return new NepaliDate(getNepalDate(date));
     }
   }
 
   if (typeof date === 'number') {
-    return new NepaliDate(new Date(date));
+    return new NepaliDate(getNepalDate(new Date(date)));
   }
 
   if (typeof date === 'string') {
@@ -89,20 +135,20 @@ export const parseToNepaliDate = (date: any): NepaliDate => {
         return new NepaliDate(year, Math.max(0, month - 1), Math.max(1, day));
       }
 
-      // If Gregorian date-only string (e.g. "2026-03-15"), parse at local noon (12:00) to prevent timezone drift
+      // If Gregorian date-only string (e.g. "2026-03-15"), parse at local noon (12:00) in Nepal time to prevent drift
       if (year <= 2040 && !isNaN(month) && !isNaN(day)) {
         const localNoon = new Date(year, month - 1, day, 12, 0, 0);
         return new NepaliDate(localNoon);
       }
     }
     try {
-      return new NepaliDate(new Date(date));
+      return new NepaliDate(getNepalDate(new Date(date)));
     } catch {
-      return new NepaliDate(new Date());
+      return new NepaliDate(getNepalDate(new Date()));
     }
   }
 
-  return new NepaliDate(new Date());
+  return new NepaliDate(getNepalDate(new Date()));
 };
 
 /**
@@ -156,7 +202,12 @@ export const formatBSDateTime = (date: Date | string | number | any): string => 
 
     const timeStr = isNaN(timeDate.getTime())
       ? ''
-      : timeDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      : timeDate.toLocaleTimeString('en-US', {
+          timeZone: 'Asia/Kathmandu',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
 
     const formatted = nd.format('DD MMMM YYYY');
     return timeStr ? `${formatted}, ${timeStr}` : formatted;

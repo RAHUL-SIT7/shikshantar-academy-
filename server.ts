@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import nodemailer, { Transporter } from 'nodemailer';
 import admin from 'firebase-admin';
 import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
+import { formatBSDateTime } from './src/lib/nepaliDate';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -875,12 +876,21 @@ Contact: academyshikshantar@gmail.com | +977 9709867048`;
         <div style="max-width: 560px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           
           <div style="background-color: #0f172a; padding: 20px 24px; border-bottom: 3px solid #2563eb;">
-            <div style="font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase;">
-              SHIKSHANTAR ACADEMY
-            </div>
-            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-              School Information & Account Security System
-            </div>
+            <table style="width: 100%; border-collapse: collapse; border: 0;">
+              <tr>
+                <td style="width: 48px; vertical-align: middle; padding-right: 14px;">
+                  <img src="https://www.shikshantaracademy.edu.np/logo.png" alt="Shikshantar Academy Logo" width="44" height="44" style="display: block; width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); object-fit: contain; background: #ffffff;" />
+                </td>
+                <td style="vertical-align: middle;">
+                  <div style="font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1.2;">
+                    SHIKSHANTAR ACADEMY
+                  </div>
+                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                    School Information & Account Security System
+                  </div>
+                </td>
+              </tr>
+            </table>
           </div>
 
           <div style="padding: 24px;">
@@ -1098,17 +1108,20 @@ Contact: academyshikshantar@gmail.com | +977 9709867048`;
         ? forwarded.split(',')[0].trim() 
         : (req.socket.remoteAddress || req.ip || '127.0.0.1');
 
-      const location = await resolveApproximateLocation(ip);
+      let location = 'Location unavailable';
+      try {
+        location = await resolveApproximateLocation(ip);
+      } catch {
+        location = 'Location unavailable';
+      }
 
-      const dateTimeFormatted = now.toLocaleDateString('en-US', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }) + ', ' + now.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      });
+      // Authentic Nepali Bikram Sambat (B.S.) date and time format (e.g., 18 Aswin 2083, 08:39 PM)
+      let dateTimeFormatted = '';
+      try {
+        dateTimeFormatted = formatBSDateTime(now);
+      } catch {
+        dateTimeFormatted = now.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
 
       // Idempotency: Duplicate check
       if (existingSession && existingSession.emailSent === true && existingSession.loginEventId === cleanLoginEventId) {

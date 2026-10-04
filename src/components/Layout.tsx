@@ -216,6 +216,8 @@ export default function Layout({
           websiteUrl: d.websiteUrl || ''
         });
       }
+    }, (err) => {
+      console.warn('Layout: contact_us subscription warning:', err?.message);
     });
     return () => unsub();
   }, []);
