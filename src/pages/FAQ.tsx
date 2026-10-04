@@ -5,6 +5,25 @@ import { HelpCircle, Search, Edit2, Trash2, Plus, ArrowUp, ArrowDown, ChevronDow
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 
 const initialFAQs = [
+  // GENERAL & LOCATION
+  {
+    id: 1001, category: "General",
+    question: "Where is Shikshantar Academy located?",
+    answer: "Shikshantar Academy is located in Karjanha Municipality, Ward No. 05, Bastipur, Siraha District, Madhesh Province, Nepal (Postal Code: 56500). It provides quality schooling for students in Bastipur, Karjanha, and neighboring areas of Siraha.",
+    published: true, order: 0
+  },
+  {
+    id: 1002, category: "General",
+    question: "Who is the Principal and Director of Shikshantar Academy?",
+    answer: "Shikshantar Academy in Bastipur, Siraha is founded and directed by Principal Mr. Pappu Kumar Jha, supported by a faculty of over 20 experienced and dedicated educators.",
+    published: true, order: 1
+  },
+  {
+    id: 1003, category: "General",
+    question: "How can I contact Shikshantar Academy in Bastipur, Karjanha, Siraha?",
+    answer: "You can contact Shikshantar Academy by phone at +977 9709867048 / +977 9807790805, email at academyshikshantar@gmail.com, or visit the school office located at Bastipur, Karjanha-05, Siraha.",
+    published: true, order: 2
+  },
   // ADMISSIONS
   {
     id: 1, category: "Admissions",

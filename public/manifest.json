@@ -1,0 +1,20 @@
+{
+  "short_name": "Shikshantar",
+  "name": "Shikshantar Academy",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0A3D62",
+  "theme_color": "#0A3D62",
+  "display": "standalone"
+}

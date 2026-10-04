@@ -1,0 +1,29 @@
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /facilities
+Allow: /gallery
+Allow: /calendar
+Allow: /events
+Allow: /admission
+Allow: /fee-structure
+Allow: /notices
+Allow: /contact
+Allow: /faq
+Allow: /alumni
+
+# Disallow private portals and authenticated areas
+Disallow: /admin
+Disallow: /admin-admissions
+Disallow: /account
+Disallow: /account-admin
+Disallow: /teacher-salary
+Disallow: /salary-admin
+Disallow: /user-approvals
+Disallow: /student-profile/
+Disallow: /profile
+Disallow: /iemis
+Disallow: /settings
+Disallow: /api/
+
+Sitemap: https://www.shikshantaracademy.edu.np/sitemap.xml

@@ -15,6 +15,7 @@ import NoticePopup from './NoticePopup';
 import Breadcrumbs from './Breadcrumbs';
 import PublicHeader from './PublicHeader';
 import Footer from './Footer';
+import SEOHead from './common/SEOHead';
 import { safeDispatchEvent } from '../lib/safeEvents';
 const logoImageSrc = "/logo.png";
 
@@ -1001,6 +1002,7 @@ export default function Layout({
 
   return (
     <div className={`min-h-screen lg:h-screen lg:h-[100dvh] lg:max-h-screen lg:max-h-[100dvh] w-full flex flex-col bg-[#f3f4f6] dark:bg-[#0b0f19] text-[#1f2937] dark:text-[#f8fafc] font-sans print:h-auto print:bg-white print:relative print:inset-auto lg:overflow-hidden ${(isMenuOpen || isBellOpen || isProfileOpen) ? 'h-screen max-h-screen overflow-hidden' : 'overflow-visible'}`}>
+      <SEOHead />
       {/* Backdrop overlay when Notification Bell or Avatar Profile is open: locks screen scroll and provides click-outside dismissal */}
       {(isBellOpen || isProfileOpen) && (
         <div
