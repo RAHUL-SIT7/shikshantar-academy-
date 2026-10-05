@@ -1599,36 +1599,40 @@ export default function Gallery() {
                 ? 'aspect-[16/10] sm:aspect-[16/9]'
                 : (idx % 3 === 1 ? 'aspect-[3/4]' : 'aspect-[1/1]');
               const borderTheme = isWideFeature
-                ? 'border-indigo-100 hover:border-indigo-300 ring-2 ring-indigo-50/40'
-                : 'border-slate-100 hover:border-blue-150';
+                ? 'border-indigo-200 hover:border-blue-500 hover:shadow-[0_10px_30px_rgba(37,99,235,0.18)] hover:ring-2 hover:ring-blue-400/30'
+                : 'border-slate-100 hover:border-blue-500 hover:shadow-[0_10px_30px_rgba(37,99,235,0.18)] hover:ring-2 hover:ring-blue-400/30';
 
               return (
                 <motion.div 
                   key={teacher.id || idx} 
                   variants={faderVariants}
-                  whileHover={{ 
-                    y: -8, 
-                    rotate: idx % 2 === 0 ? 1 : -1, 
-                    scale: 1.03, 
-                    transition: { type: "spring", stiffness: 350, damping: 15 } 
-                  }}
+                  whileHover={{ scale: 1.01, y: -2 }}
                   onClick={() => isDeleteMode ? toggleSelection(idx) : setExpandedImage(teacher.image)}
-                  className={`group relative bg-white p-3.5 rounded-[2rem] border transition-all ${
+                  className={`group relative p-3.5 rounded-[2rem] border transition-all duration-300 ${
                     isDeleteMode 
-                      ? 'cursor-pointer hover:bg-red-50/45 border-red-200' 
-                      : `cursor-pointer hover:shadow-2xl ${borderTheme}`
+                      ? 'cursor-pointer hover:bg-red-50/45 border-red-200 bg-white' 
+                      : `cursor-pointer ${borderTheme} bg-white`
                   } ${
                     isSelected(idx) 
                       ? 'border-red-500 ring-4 ring-red-500/15 bg-red-50/20' 
                       : 'shadow-[0_6px_26px_rgba(0,0,0,0.02)]'
                   } ${colSpanClass}`}
                 >
+                  {/* 🌟 Rotating Moving Border Light Beam */}
+                  {!isDeleteMode && (
+                    <div className="absolute -inset-[2px] rounded-[2.1rem] overflow-hidden pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-0">
+                      <div className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_240deg,#38bdf8_280deg,#2563eb_320deg,#818cf8_360deg)] animate-rainbow-spin" />
+                    </div>
+                  )}
+                  {/* White card surface layer */}
+                  <div className="absolute inset-0 bg-white rounded-[2rem] pointer-events-none z-0" />
+
                   {isAdmin && isDeleteMode && (
                     <div className="absolute top-4 right-4 z-20 bg-white rounded-full flex items-center justify-center w-7 h-7 shadow-lg pointer-events-none border border-slate-150">
                       {isSelected(idx) ? <CheckCircle className="w-5 h-5 text-red-550 fill-red-50" /> : <Circle className="w-5 h-5 text-slate-300" />}
                     </div>
                   )}
-                  <div className={`rounded-3xl overflow-hidden mb-3 border border-slate-50 relative bg-slate-50 transition-all ${isDeleteMode ? 'pointer-events-none' : ''} ${aspectClass}`}>
+                  <div className={`rounded-3xl overflow-hidden mb-3 border border-slate-50 relative z-10 bg-slate-50 transition-all ${isDeleteMode ? 'pointer-events-none' : ''} ${aspectClass}`}>
                     {teacher.type === 'video' || teacher.image?.match(/\.(mp4|webm|mov)(\?|$)/i) ? (
                       <>
                         <video src={teacher.image} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-106" muted />
@@ -1662,7 +1666,7 @@ export default function Gallery() {
                       </>
                     )}
                   </div>
-                  <div className="px-1 text-center py-1">
+                  <div className="px-1 text-center py-1 relative z-10">
                     <h3 className="text-sm font-black text-slate-800 group-hover:text-primary transition-colors truncate" title={teacher.name}>{teacher.name}</h3>
                     <div className="flex items-center justify-center gap-1 mt-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
@@ -1695,19 +1699,14 @@ export default function Gallery() {
                   : 'aspect-[1/1] sm:aspect-[4/5]');
               
               const borderAccent = isLarge 
-                ? 'shadow-[0_12px_45px_rgba(245,158,11,0.05)]' 
-                : '';
+                ? 'hover:shadow-[0_12px_40px_rgba(245,158,11,0.22)]' 
+                : 'hover:shadow-[0_8px_30px_rgba(245,158,11,0.18)]';
 
               return (
                 <motion.div 
                   key={batch.year || idx} 
                   variants={faderVariants}
-                  whileHover={isMobile ? { scale: 1.01, y: -2 } : { 
-                    y: -10, 
-                    rotate: idx % 2 === 0 ? -3.5 : 3.5, 
-                    scale: 1.05, 
-                    transition: { type: "spring", stiffness: 350, damping: 15 } 
-                  }}
+                  whileHover={{ scale: 1.01, y: -2 }}
                   onClick={() => isDeleteMode ? toggleSelection(idx) : setExpandedImage(batch.image)}
                   className={`group relative p-1.5 sm:p-2 transition-all ${
                     isDeleteMode 
@@ -1719,6 +1718,12 @@ export default function Gallery() {
                       : ''
                   } ${gridSpan}`}
                 >
+                  {/* 🌟 Rotating Moving Golden Amber Border Light Beam */}
+                  {!isDeleteMode && (
+                    <div className="absolute -inset-[3px] rounded-2xl overflow-hidden pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-400 z-0">
+                      <div className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_240deg,#fbbf24_280deg,#ea580c_320deg,#f59e0b_360deg)] animate-rainbow-spin" />
+                    </div>
+                  )}
                   {isAdmin && isDeleteMode && (
                     <div className="absolute top-5 right-5 z-40 bg-white rounded-full flex items-center justify-center w-7 h-7 shadow-lg pointer-events-none border border-slate-100 animate-pulse">
                       {isSelected(idx) ? <CheckCircle className="w-5 h-5 text-red-555 fill-red-50" /> : <Circle className="w-5 h-5 text-slate-400" />}
@@ -1731,9 +1736,9 @@ export default function Gallery() {
                     style={{ clipPath: getTornClipPath(idx, isMobile) }}
                   />
 
-                  {/* White fibrous backing paper layer */}
+                  {/* White fibrous backing paper layer with Soft Glow */}
                   <div 
-                    className="absolute inset-[0px] bg-white pointer-events-none transition-all duration-300 group-hover:bg-amber-50/10 z-0 border border-slate-100/50"
+                    className="absolute inset-[0px] bg-white pointer-events-none transition-all duration-300 group-hover:bg-amber-50 group-hover:shadow-[0_0_22px_rgba(245,158,11,0.25)] z-0 border border-slate-100/50"
                     style={{ clipPath: getTornClipPath(idx, isMobile) }}
                   />
 
@@ -1829,19 +1834,14 @@ export default function Gallery() {
                   : 'aspect-[1/1] sm:aspect-[4/5]');
               
               const borderAccentStyle = isEventLarge
-                ? 'shadow-[0_12px_40px_rgba(79,70,229,0.04)]'
-                : '';
+                ? 'hover:shadow-[0_12px_40px_rgba(79,70,229,0.22)]'
+                : 'hover:shadow-[0_8px_30px_rgba(79,70,229,0.18)]';
 
               return (
                 <motion.div 
                   key={event.title || idx} 
                   variants={faderVariants}
-                  whileHover={isMobile ? { scale: 1.01, y: -2 } : { 
-                    y: -10, 
-                    rotate: idx % 2 === 0 ? 3.5 : -3.5, 
-                    scale: 1.05, 
-                    transition: { type: "spring", stiffness: 350, damping: 15 } 
-                  }}
+                  whileHover={{ scale: 1.01, y: -2 }}
                   onClick={() => isDeleteMode ? toggleSelection(idx) : setExpandedImage(event.image)}
                   className={`group relative p-1.5 sm:p-2 transition-all ${
                     isDeleteMode 
@@ -1853,6 +1853,12 @@ export default function Gallery() {
                       : ''
                   } ${gridSpanClass}`}
                 >
+                  {/* 🌟 Rotating Moving Indigo/Cyan Border Light Beam */}
+                  {!isDeleteMode && (
+                    <div className="absolute -inset-[3px] rounded-2xl overflow-hidden pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-400 z-0">
+                      <div className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_240deg,#38bdf8_280deg,#4f46e5_320deg,#a855f7_360deg)] animate-rainbow-spin" />
+                    </div>
+                  )}
                   {isAdmin && isDeleteMode && (
                     <div className="absolute top-5 right-5 z-40 bg-white rounded-full flex items-center justify-center w-7 h-7 shadow-lg pointer-events-none border border-slate-100 animate-pulse">
                       {isSelected(idx) ? <CheckCircle className="w-5 h-5 text-red-550 fill-red-50" /> : <Circle className="w-5 h-5 text-slate-300" />}
@@ -1865,9 +1871,9 @@ export default function Gallery() {
                     style={{ clipPath: getTornClipPath(idx, isMobile) }}
                   />
 
-                  {/* White fibrous backing paper layer */}
+                  {/* White fibrous backing paper layer with Soft Glow */}
                   <div 
-                    className="absolute inset-[0px] bg-white pointer-events-none transition-all duration-300 group-hover:bg-indigo-50/10 z-0 border border-slate-100/50"
+                    className="absolute inset-[0px] bg-white pointer-events-none transition-all duration-300 group-hover:bg-indigo-50 group-hover:shadow-[0_0_22px_rgba(79,70,229,0.25)] z-0 border border-slate-100/50"
                     style={{ clipPath: getTornClipPath(idx, isMobile) }}
                   />
 

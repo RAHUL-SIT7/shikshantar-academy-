@@ -91,57 +91,6 @@ const initialAlumni = [
     photo: null,
     category: "Finance",
     featured: false
-  },
-  {
-    id: 6,
-    name: "Anita Kumari Shah",
-    graduationYear: "2080 B.S. (2023 A.D.)",
-    batch: "SEE Batch 2080",
-    class: "Class 10",
-    seeBand: "3.90 GPA",
-    currentStatus: "+2 Science Student",
-    organization: "Janakpur Multiple Campus, Janakpur",
-    degree: "+2 Science (NEB) — Currently Studying",
-    location: "Janakpur, Dhanusha, Nepal",
-    quote: "Getting A+ in Science and Mathematics in SEE was possible because of the extra classes and support our teachers gave us at Shikshantar.",
-    achievement: "School Topper SEE 2080 — 3.90 GPA",
-    photo: null,
-    category: "Science",
-    featured: true
-  },
-  {
-    id: 7,
-    name: "Suresh Paswan",
-    graduationYear: "2074 B.S. (2017 A.D.)",
-    batch: "SEE Batch 2074",
-    class: "Class 10",
-    seeBand: "3.20 GPA",
-    currentStatus: "Entrepreneur",
-    organization: "Siraha Digital Printing & Services",
-    degree: "BIM — Tribhuvan University",
-    location: "Siraha, Nepal",
-    quote: "Shikshantar taught me to work hard and never give up. I started my own business in Siraha and now employ 5 people from our community.",
-    achievement: "Founded local business employing 5+ people",
-    photo: null,
-    category: "Business",
-    featured: false
-  },
-  {
-    id: 8,
-    name: "Kavita Chaudhary",
-    graduationYear: "2081 B.S. (2024 A.D.)",
-    batch: "SEE Batch 2081",
-    class: "Class 10",
-    seeBand: "3.75 GPA",
-    currentStatus: "+2 Management Student",
-    organization: "Birgunj Campus, Birgunj",
-    degree: "+2 Management (NEB) — Currently Studying",
-    location: "Birgunj, Parsa, Nepal",
-    quote: "The teachers here genuinely care about each student. They pushed me to work harder and believe in myself. I am proud to be a Shikshantar alumnus.",
-    achievement: "District Level Essay Competition Winner 2081",
-    photo: null,
-    category: "Management",
-    featured: false
   }
 ];
 
@@ -151,6 +100,55 @@ const getInitials = (name: string) => {
   if (parts.length === 1) return parts[0][0].toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
+
+interface AlumniAvatarProps {
+  photo?: string | null;
+  name: string;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+  initialsBg?: string;
+}
+
+function AlumniAvatar({ photo, name, size = 'md', className = '', initialsBg }: AlumniAvatarProps) {
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [photo]);
+
+  const sizeStyles: Record<string, string> = {
+    sm: 'w-10 h-10 text-xs',
+    md: 'w-14 h-14 text-base', // ~56px compact profile photo
+    lg: 'w-16 h-16 text-lg'   // ~64px
+  };
+
+  const currentSizeClass = sizeStyles[size] || sizeStyles.md;
+
+  if (photo && typeof photo === 'string' && photo.trim() !== '' && !imgError) {
+    return (
+      <div className={`relative shrink-0 rounded-full overflow-hidden border border-gray-200/90 shadow-xs bg-gray-100 ${currentSizeClass} ${className}`}>
+        <img
+          src={photo}
+          alt={name}
+          onError={() => setImgError(true)}
+          className="w-full h-full object-cover rounded-full"
+          loading="lazy"
+        />
+      </div>
+    );
+  }
+
+  const bgStyle = initialsBg || 'bg-gray-100 text-gray-700';
+
+  return (
+    <div
+      className={`shrink-0 rounded-full ${bgStyle} border border-gray-200/80 flex items-center justify-center font-bold tracking-tight shadow-xs select-none ${currentSizeClass} ${className}`}
+      aria-label={name}
+    >
+      {getInitials(name)}
+    </div>
+  );
+}
 
 const getCategoryBadgeStyles = (category: string) => {
   const colors: Record<string, string> = {
@@ -411,7 +409,7 @@ export default function Alumni() {
               Inspiring Generations
             </span>
             <h1 className="text-3xl md:text-5xl font-black mb-4 tracking-tight flex items-center justify-center md:justify-start gap-3">
-              <GraduationCap className="w-10 h-10 md:w-12 md:h-12 text-white animate-bounce" /> 
+              <GraduationCap className="w-10 h-10 md:w-12 md:h-12 text-white" /> 
               Alumni & Student Success
             </h1>
             <p className="text-blue-100 text-base md:text-lg max-w-3xl leading-relaxed">
@@ -548,13 +546,7 @@ export default function Alumni() {
 
                    <div className="p-6 flex-1 flex flex-col">
                       <div className="flex items-center gap-4 mb-4">
-                        {a.photo ? (
-                          <img src={a.photo} alt={a.name} className="w-14 h-14 rounded-full object-cover border border-gray-200" />
-                        ) : (
-                          <div className="w-14 h-14 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center font-bold text-xl shrink-0">
-                            {getInitials(a.name)}
-                          </div>
-                        )}
+                        <AlumniAvatar photo={a.photo} name={a.name} size="md" />
                         <div>
                           <h3 className="font-bold text-lg text-gray-900 leading-tight">{a.name}</h3>
                           <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold mt-1 ${getCategoryBadgeStyles(a.category)}`}>
@@ -647,13 +639,7 @@ export default function Alumni() {
                    <div className="p-5 flex-1 flex flex-col border-b border-gray-100">
                       <div className="flex justify-between items-start mb-4">
                         <div className="flex items-center gap-3">
-                          {a.photo ? (
-                            <img src={a.photo} alt={a.name} className="w-12 h-12 rounded-full object-cover border border-gray-200" />
-                          ) : (
-                            <div className="w-12 h-12 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center font-bold text-lg">
-                              {getInitials(a.name)}
-                            </div>
-                          )}
+                          <AlumniAvatar photo={a.photo} name={a.name} size="md" />
                           <div>
                             <h3 className="font-bold text-gray-900 leading-tight pr-6">{a.name}</h3>
                             <p className="text-xs text-gray-500 font-medium">{a.batch}</p>
@@ -1041,9 +1027,7 @@ export default function Alumni() {
                     </div>
                     <div>
                       <div className="flex items-center gap-3 mb-4">
-                        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-lg">
-                          {getInitials(a.name)}
-                        </div>
+                        <AlumniAvatar photo={a.photo} name={a.name} size="md" initialsBg="bg-amber-100 text-amber-800" />
                         <div>
                           <h3 className="font-bold text-gray-900 leading-tight pr-14">{a.name}</h3>
                           <p className="text-xs text-gray-500 font-medium">{a.batch}</p>
@@ -1216,8 +1200,9 @@ export default function Alumni() {
                      <input type="text" placeholder="https://example.com/photo.jpg" value={formData.photo || ''} onChange={e => setFormData({...formData, photo: e.target.value})} className="w-full px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none" />
                    )}
                    {formData.photo && (
-                     <div className="mt-2 h-20 w-20 rounded-full overflow-hidden border border-gray-200">
-                       <img src={formData.photo} alt="Preview" className="w-full h-full object-cover" />
+                     <div className="mt-2 flex items-center gap-3">
+                       <AlumniAvatar photo={formData.photo} name={formData.name || 'Preview'} size="lg" />
+                       <span className="text-xs text-gray-500 font-medium">Avatar Preview</span>
                      </div>
                    )}
                 </div>
