@@ -237,6 +237,37 @@ export default function Login({
         const loginEventId = `login_${userCredential.user.uid}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kathmandu';
 
+        // Detect client browser with reliable client-side Brave & Chromium signals
+        let clientBrowser = 'Unknown Browser';
+        try {
+          const nav = navigator as any;
+          if (nav.brave && typeof nav.brave.isBrave === 'function') {
+            const isBrave = await nav.brave.isBrave().catch(() => false);
+            if (isBrave) clientBrowser = 'Brave';
+          } else if (Boolean(nav.brave)) {
+            clientBrowser = 'Brave';
+          }
+
+          if (clientBrowser === 'Unknown Browser') {
+            const ua = navigator.userAgent || '';
+            if ((window as any).opr !== undefined || (window as any).opera !== undefined || ua.includes('OPR/') || ua.includes('Opera/')) {
+              clientBrowser = 'Opera';
+            } else if (ua.includes('Edg/')) {
+              clientBrowser = 'Microsoft Edge';
+            } else if (ua.includes('SamsungBrowser/')) {
+              clientBrowser = 'Samsung Internet';
+            } else if (ua.includes('Vivaldi/')) {
+              clientBrowser = 'Vivaldi';
+            } else if (ua.includes('Chrome/') && !ua.includes('Edg/')) {
+              clientBrowser = 'Chrome';
+            } else if (ua.includes('Firefox/')) {
+              clientBrowser = 'Firefox';
+            } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
+              clientBrowser = 'Safari';
+            }
+          }
+        } catch {}
+
         await fetch('/api/auth/record-login', {
           method: 'POST',
           headers: {
@@ -246,7 +277,8 @@ export default function Login({
           body: JSON.stringify({
             sessionId: currentLocalSessionId,
             loginEventId,
-            clientTimeZone: tz
+            clientTimeZone: tz,
+            clientBrowser
           })
         });
       } catch (loginSecErr) {

@@ -119,12 +119,21 @@ interface DeviceDetails {
   deviceName: string;
 }
 
-function parseDeviceDetails(ua: string): DeviceDetails {
+function parseDeviceDetails(ua: string, clientBrowser?: string): DeviceDetails {
   let browser = 'Unknown Browser';
-  if (ua.includes('Edg/')) browser = 'Microsoft Edge';
-  else if (ua.includes('Chrome/') && !ua.includes('Edg/')) browser = 'Chrome';
-  else if (ua.includes('Safari/') && !ua.includes('Chrome/')) browser = 'Safari';
-  else if (ua.includes('Firefox/')) browser = 'Firefox';
+
+  const validClientBrowsers = ['Brave', 'Chrome', 'Safari', 'Firefox', 'Microsoft Edge', 'Opera', 'Samsung Internet', 'Vivaldi'];
+  if (clientBrowser && typeof clientBrowser === 'string' && validClientBrowsers.includes(clientBrowser.trim())) {
+    browser = clientBrowser.trim();
+  } else {
+    if (ua.includes('Edg/')) browser = 'Microsoft Edge';
+    else if (ua.includes('OPR/') || ua.includes('Opera/')) browser = 'Opera';
+    else if (ua.includes('Vivaldi/')) browser = 'Vivaldi';
+    else if (ua.includes('SamsungBrowser/')) browser = 'Samsung Internet';
+    else if (ua.includes('Chrome/') && !ua.includes('Edg/')) browser = 'Chrome';
+    else if (ua.includes('Safari/') && !ua.includes('Chrome/')) browser = 'Safari';
+    else if (ua.includes('Firefox/')) browser = 'Firefox';
+  }
 
   let os = 'Unknown OS';
   let deviceType = 'Desktop';
@@ -246,7 +255,7 @@ export default async function handler(req: any, res: any) {
     const uid = user.localId;
     const email = user.email || '';
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    const { sessionId, loginEventId } = body;
+    const { sessionId, loginEventId, clientBrowser } = body;
 
     const cleanSessionId = sessionId?.trim() || `sess_${Date.now()}`;
     const cleanLoginEventId = loginEventId?.trim() || `login_${uid}_${Date.now()}`;
@@ -276,7 +285,7 @@ export default async function handler(req: any, res: any) {
     console.log('[AUTH_VERIFICATION_SUCCESS]', { uid, role: userRole });
 
     const ua = req.headers['user-agent'] || '';
-    const device = parseDeviceDetails(ua);
+    const device = parseDeviceDetails(ua, clientBrowser);
     const forwarded = req.headers['x-forwarded-for'];
     const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : (req.socket?.remoteAddress || '127.0.0.1');
 
