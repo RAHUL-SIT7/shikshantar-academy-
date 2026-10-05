@@ -1,5 +1,4 @@
 import nodemailer from 'nodemailer';
-import { formatBSDateTimeServer } from '../_lib/nepaliDateServer';
 
 console.log('[LOGIN_HANDLER_LOADED]');
 
@@ -8,6 +7,110 @@ const firebaseConfig = {
   apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || "AIzaSyAGMCbz3zfJMrpgTruOH314BsNuSpyNPB4",
   firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || "ai-studio-2507c181-4e37-4730-b71a-25b639c27e22"
 };
+
+// Pure TypeScript Bikram Sambat day mapping (2060 B.S. to 2090 B.S.)
+const BS_CALENDAR_DATA: Record<number, number[]> = {
+  2060: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2061: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2062: [30, 32, 31, 32, 31, 31, 29, 30, 29, 30, 29, 31],
+  2063: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2064: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2065: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2066: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 29, 31],
+  2067: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2068: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2069: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2070: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 30, 30],
+  2071: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2072: [31, 32, 31, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2073: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2074: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2075: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2076: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+  2077: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2078: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2079: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2080: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+  2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2082: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2083: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2084: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2085: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2086: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2087: [31, 31, 32, 31, 31, 31, 30, 30, 29, 30, 30, 30],
+  2088: [30, 31, 32, 32, 30, 31, 30, 30, 29, 30, 30, 30],
+  2089: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
+  2090: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30]
+};
+
+const NEPALI_MONTH_NAMES = [
+  'Baisakh',
+  'Jestha',
+  'Ashadh',
+  'Shrawan',
+  'Bhadra',
+  'Ashwin',
+  'Kartik',
+  'Mangsir',
+  'Poush',
+  'Magh',
+  'Falgun',
+  'Chaitra'
+];
+
+const REF_AD_TIME = Date.UTC(2003, 3, 14); // 2003-04-14 UTC (2060-01-01 B.S.)
+const REF_BS_YEAR = 2060;
+
+function formatBSDateTimeServer(dateInput: Date | string | number = new Date()): string {
+  try {
+    const rawDate = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    const validDate = isNaN(rawDate.getTime()) ? new Date() : rawDate;
+
+    const timeStr = validDate.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Kathmandu',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    const nptString = validDate.toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' });
+    const nptDate = new Date(nptString);
+    const y = isNaN(nptDate.getTime()) ? validDate.getUTCFullYear() : nptDate.getFullYear();
+    const m = isNaN(nptDate.getTime()) ? validDate.getUTCMonth() : nptDate.getMonth();
+    const d = isNaN(nptDate.getTime()) ? validDate.getUTCDate() : nptDate.getDate();
+
+    let diffDays = Math.floor((Date.UTC(y, m, d) - REF_AD_TIME) / 86400000);
+    if (diffDays < 0) {
+      return `${y + 57} B.S., ${timeStr}`;
+    }
+
+    let curYear = REF_BS_YEAR;
+    let curMonth = 0;
+    let curDay = 1;
+
+    while (diffDays > 0) {
+      const yearData = BS_CALENDAR_DATA[curYear];
+      const daysInMonth = yearData ? yearData[curMonth] : 30;
+      if (diffDays >= daysInMonth) {
+        diffDays -= daysInMonth;
+        curMonth++;
+        if (curMonth > 11) {
+          curMonth = 0;
+          curYear++;
+        }
+      } else {
+        curDay += diffDays;
+        diffDays = 0;
+      }
+    }
+
+    const monthName = NEPALI_MONTH_NAMES[curMonth] || 'Ashwin';
+    const dayPadded = String(curDay).padStart(2, '0');
+    return `${dayPadded} ${monthName} ${curYear}, ${timeStr}`;
+  } catch {
+    return new Date().toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' });
+  }
+}
 
 interface DeviceDetails {
   browser: string;
@@ -143,7 +246,7 @@ export default async function handler(req: any, res: any) {
     const uid = user.localId;
     const email = user.email || '';
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    const { sessionId, loginEventId, clientLocation } = body;
+    const { sessionId, loginEventId } = body;
 
     const cleanSessionId = sessionId?.trim() || `sess_${Date.now()}`;
     const cleanLoginEventId = loginEventId?.trim() || `login_${uid}_${Date.now()}`;
