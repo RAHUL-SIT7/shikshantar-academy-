@@ -59,7 +59,6 @@ export function formatBSDateTimeServer(dateInput: Date | string | number = new D
     }
 
     // Mathematical fallback if library cannot be loaded dynamically
-    // Approximate B.S. offset is +56 years, 8 months, 17 days
     const npt = getNepalDate(validDate);
     const bsYear = npt.getFullYear() + 57;
     return `${bsYear} B.S., ${timeStr}`;
