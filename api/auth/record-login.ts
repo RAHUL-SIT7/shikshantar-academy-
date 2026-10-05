@@ -1,6 +1,7 @@
-import type { IncomingMessage, ServerResponse } from 'http';
 import nodemailer from 'nodemailer';
-import { formatBSDateTime } from '../../src/lib/nepaliDate';
+import { formatBSDateTimeServer } from '../lib/nepaliDateServer';
+
+console.log('[LOGIN_HANDLER_LOADED]');
 
 const firebaseConfig = {
   projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || "project-4b410c97-a152-49e7-940",
@@ -147,6 +148,8 @@ export default async function handler(req: any, res: any) {
     const cleanSessionId = sessionId?.trim() || `sess_${Date.now()}`;
     const cleanLoginEventId = loginEventId?.trim() || `login_${uid}_${Date.now()}`;
 
+    console.log('[LOGIN_HANDLER_STARTED]', { loginEventId: cleanLoginEventId, sessionId: cleanSessionId });
+
     // Read user document
     const projectId = firebaseConfig.projectId;
     const databaseId = firebaseConfig.firestoreDatabaseId;
@@ -167,6 +170,8 @@ export default async function handler(req: any, res: any) {
       }
     } catch {}
 
+    console.log('[AUTH_VERIFICATION_SUCCESS]', { uid, role: userRole });
+
     const ua = req.headers['user-agent'] || '';
     const device = parseDeviceDetails(ua);
     const forwarded = req.headers['x-forwarded-for'];
@@ -184,10 +189,12 @@ export default async function handler(req: any, res: any) {
     const nowIso = now.toISOString();
     let dateTimeFormatted = '';
     try {
-      dateTimeFormatted = formatBSDateTime(now);
+      dateTimeFormatted = formatBSDateTimeServer(now);
     } catch {
-      dateTimeFormatted = now.toLocaleString();
+      dateTimeFormatted = now.toLocaleString('en-US', { timeZone: 'Asia/Kathmandu' });
     }
+
+    console.log('[LOGIN_EVENT_CREATED]', { loginEventId: cleanLoginEventId, location, bsDate: dateTimeFormatted });
 
     // SMTP configuration
     const smtpUser = process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.VITE_SMTP_EMAIL || 'security.shikshantar.edu.np@gmail.com';
@@ -198,6 +205,7 @@ export default async function handler(req: any, res: any) {
 
     if (smtpPass && email) {
       try {
+        console.log('[SMTP_SEND_ATTEMPTED]', { recipient: email });
         const transporter = nodemailer.createTransport({
           service: 'gmail',
           auth: {
@@ -318,8 +326,9 @@ export default async function handler(req: any, res: any) {
         });
 
         emailSent = true;
+        console.log('[SMTP_SEND_SUCCESS]', { messageId, emailSent: true });
       } catch (mailErr: any) {
-        console.warn('[VERCEL API] Email dispatch error:', mailErr.message);
+        console.warn('[SMTP_SEND_FAILED]', mailErr.message);
       }
     }
 
