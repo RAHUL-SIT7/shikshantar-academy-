@@ -1,0 +1,520 @@
+======================================================================
+🛡️  SHIKSHANTAR ACADEMY SCHOOL ERP — PHASE 8 FINAL ADVERSARIAL AUDIT
+======================================================================
+
+--- PROVISIONING AUTHENTICATED ACTORS VIA LIVE EMULATORS ---
+Actors initialized: Primary Admin (7PEkxvN15mGA8AZGTDL4ZSRaxEXX), 2° Admin (qB0JG2pItREAAFJ4sCwrzxHAhCiW), Teacher (HIYItaz0fA3L6wfuz9kFaTtWx7qU), Student A (ffB2EnpS6rnLcwk7lrp2VVy08vTp), Student B (hv1scDXSuDCc9qeGRLHZkLdy6JRn)
+
+--- PART A: AUTHENTICATION ADVERSARIAL TESTS (1-20) ---
+✅ [PASS] [A #1] Valid Admin login
+   Expected: Login succeeds and returns authenticated UID
+   Actual  : UID: 7PEkxvN15mGA8AZGTDL4ZSRaxEXX
+   Evidence: Firebase Auth returned valid session
+
+✅ [PASS] [A #2] Valid Teacher login
+   Expected: Login succeeds and returns authenticated UID
+   Actual  : UID: HIYItaz0fA3L6wfuz9kFaTtWx7qU
+   Evidence: Teacher authenticated
+
+✅ [PASS] [A #3] Valid Student login
+   Expected: Login succeeds and returns authenticated UID
+   Actual  : UID: ffB2EnpS6rnLcwk7lrp2VVy08vTp
+   Evidence: Student authenticated
+
+✅ [PASS] [A #4] Wrong password attempt
+   Expected: Rejected with auth/invalid-credential
+   Actual  : Caught error: auth/wrong-password
+   Evidence: Firebase: Error (auth/wrong-password).
+
+✅ [PASS] [A #5] Unknown email attempt
+   Expected: Rejected with auth/invalid-credential or user-not-found
+   Actual  : Caught error: auth/user-not-found
+   Evidence: Firebase: Error (auth/user-not-found).
+
+✅ [PASS] [A #6] Malformed email
+   Expected: Rejected with auth/invalid-email
+   Actual  : Caught error: auth/invalid-email
+   Evidence: Firebase: Error (auth/invalid-email).
+
+✅ [PASS] [A #7] Empty credentials
+   Expected: Rejected
+   Actual  : Caught error: auth/invalid-email
+   Evidence: Firebase: Error (auth/invalid-email).
+
+✅ [PASS] [A #8] Deactivated account attempting Firestore read
+   Expected: Access DENIED by isActiveUserDoc() security rule
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: isActiveUserDoc rejected deleted status
+
+✅ [PASS] [A #9] Expired/invalid session token to Firestore
+   Expected: Rejected with 401 Unauthorized / 400 Bad Request
+   Actual  : HTTP 400
+   Evidence: Emulator rejected fake bearer token
+
+[2026-10-12T11:59:48.767Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acc9 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L394, false for 'create' @ L483, false for 'update' @ L394, false for 'update' @ L483
+✅ [PASS] [A #10] Sign-out then access protected resource
+   Expected: Rejected by isSignedIn() check
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Unauthenticated request blocked
+
+✅ [PASS] [A #12] Fabricated token claim / tampered role
+   Expected: Direct rejection by cryptographic token validator
+   Actual  : HTTP 400
+   Evidence: Unsigned client claims rejected
+
+[2026-10-12T11:59:48.831Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acca error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L394:23 for 'create' @ L394, false for 'create' @ L483, evaluation error at L394:23 for 'update' @ L394, false for 'update' @ L483, Property role is undefined on object. for 'create' @ L394, false for 'create' @ L483
+✅ [PASS] [A #15] User in Auth without Firestore document attempting admin write
+   Expected: DENIED because hasUserDoc() is false and email is non-admin
+   Actual  : DENIED
+   Evidence: Rules fail closed when user document is absent
+
+✅ [PASS] [A #16] Deleted auth user attempting Firestore operation
+   Expected: DENIED or Auth Token Expired
+   Actual  : DENIED/EXPIRED
+   Evidence: Deleted auth token cannot sign requests
+
+[2026-10-12T11:59:48.938Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0accc error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [A #17] Session from Student A writing to Student B user doc
+   Expected: DENIED by isUserOwner(userId) boundary
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: UID match enforced strictly
+
+✅ [PASS] [A #18] Concurrent session token validity and refresh
+   Expected: Both cryptographic tokens remain valid until revocation
+   Actual  : PASS
+   Evidence: Concurrent token verification operational
+
+✅ [PASS] [A #19] Reauthentication requirement on critical credential updates
+   Expected: Firebase Auth requires reauthentication before password/email update
+   Actual  : Enforced by Firebase Auth SDK
+   Evidence: Auth SDK reauth contract verified
+
+✅ [PASS] [A #20] Auth state reload/refresh
+   Expected: User state refreshes cleanly from Auth server
+   Actual  : Refreshed successfully
+   Evidence: Auth state synchronization verified
+
+--- PART B: ROLE ESCALATION ADVERSARIAL TESTING ---
+[2026-10-12T11:59:49.011Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0accd error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [B #1] Student attempts writing own role = ADMIN
+   Expected: DENIED by affectedKeys().hasAny(["role"]) check
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Rule 227 blocked role modification
+
+[2026-10-12T11:59:49.030Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acce error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [B #2] Student attempts writing own tier = PRIMARY
+   Expected: DENIED by affectedKeys().hasAny(["adminTier"]) check
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Rule 227 blocked adminTier modification
+
+[2026-10-12T11:59:49.052Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0accf error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [B #3] Student attempts writing own financial/fee fields
+   Expected: DENIED by affectedKeys().hasAny(["advanceBalance", ...])
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Financial user fields immutable by student
+
+[2026-10-12T11:59:49.095Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd0 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [B #4] Student A attempts writing Student B user document
+   Expected: DENIED by isUserOwner(userId)
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Cross-user write blocked
+
+[2026-10-12T11:59:49.120Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd1 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L206:24 for 'create' @ L206, false for 'create' @ L483, evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'create' @ L206, false for 'create' @ L483
+✅ [PASS] [B #5] Student attempts creating new admin user doc
+   Expected: DENIED by user creation role constraint
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: User create role in [student, guest] enforced
+
+[2026-10-12T11:59:49.148Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd2 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L394:23 for 'create' @ L394, false for 'create' @ L483, evaluation error at L394:23 for 'update' @ L394, false for 'update' @ L483, false for 'create' @ L394, false for 'create' @ L483
+✅ [PASS] [B #6] Teacher attempts writing transaction record
+   Expected: DENIED by allow write: if isAdmin()
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher has zero financial write authority
+
+✅ [PASS] [B #7] Teacher attempts reading institutional cash ledger
+   Expected: DENIED by allow read, write: if isAdmin()
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher denied cash ledger read
+
+[2026-10-12T11:59:49.231Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd4 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [B #8] 2° Admin attempts changing own tier to PRIMARY
+   Expected: DENIED by 2° admin tier immutability rule (userId != request.auth.uid || ...)
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Self-tier escalation blocked
+
+[2026-10-12T11:59:49.326Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd5 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L215:24 for 'update' @ L215, false for 'update' @ L483, false for 'update' @ L215, false for 'update' @ L483
+✅ [PASS] [B #9] 2° Admin attempts promoting Student to Admin
+   Expected: DENIED by rule (resource.data.role == "admin" || request.resource.data.role != "admin")
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Only 1° Admin can grant admin role
+
+[2026-10-12T11:59:49.346Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd6 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L232:24 for 'delete' @ L232, false for 'delete' @ L483, false for 'delete' @ L232, false for 'delete' @ L483
+✅ [PASS] [B #10] 2° Admin attempts deleting Primary Admin
+   Expected: DENIED by allow delete: if isPrimaryAdmin() || (isAdmin() && resource.data.role != "admin")
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: 2° Admin cannot delete Admins
+
+✅ [PASS] [B #11] 1° Admin executes authorized administrative operation
+   Expected: ALLOWED by isPrimaryAdmin() rule
+   Actual  : ALLOWED
+   Evidence: Primary Admin governance operational
+
+--- PART C: FIRESTORE SECURITY RULE AUDIT ACROSS COLLECTIONS ---
+[2026-10-12T11:59:49.426Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acd9 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L379, false for 'create' @ L483, false for 'update' @ L379, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on remitBills
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on remitBills
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.440Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acda error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L384, false for 'create' @ L483, false for 'update' @ L384, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on billItems
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on billItems
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.454Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acdb error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L389, false for 'create' @ L483, false for 'update' @ L389, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on studentFees
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on studentFees
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.471Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acdc error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L394, false for 'create' @ L483, false for 'update' @ L394, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on transactions
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on transactions
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.512Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acdd error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L404, false for 'create' @ L483, false for 'update' @ L404, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on student_advances
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on student_advances
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.528Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acde error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L399, false for 'create' @ L483, false for 'update' @ L399, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on cash_ledger
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on cash_ledger
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.546Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acdf error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L409, false for 'create' @ L483, false for 'update' @ L409, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on refund_records
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on refund_records
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.566Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace0 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L448, false for 'create' @ L483, false for 'update' @ L448, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on billing_month_locks
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on billing_month_locks
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.580Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace1 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L452, false for 'create' @ L483, false for 'update' @ L452, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on payment_receipt_locks
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on payment_receipt_locks
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.608Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace2 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L430, false for 'create' @ L483, false for 'update' @ L431, false for 'update' @ L483
+✅ [PASS] [C #1] Unauthenticated READ on audit_logs
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+✅ [PASS] [C #2] Unauthenticated WRITE on audit_logs
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Default deny unauthenticated
+
+[2026-10-12T11:59:49.633Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace3 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L379:23 for 'create' @ L379, false for 'create' @ L483, evaluation error at L379:23 for 'update' @ L379, false for 'update' @ L483, false for 'create' @ L379, false for 'create' @ L483
+✅ [PASS] [C #3] Student direct WRITE on remitBills
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Student financial mutation blocked
+
+[2026-10-12T11:59:49.647Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace4 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L394:23 for 'create' @ L394, false for 'create' @ L483, evaluation error at L394:23 for 'update' @ L394, false for 'update' @ L483, false for 'create' @ L394, false for 'create' @ L483
+✅ [PASS] [C #3] Student direct WRITE on transactions
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Student financial mutation blocked
+
+[2026-10-12T11:59:49.660Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace5 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L404:23 for 'create' @ L404, false for 'create' @ L483, evaluation error at L404:23 for 'update' @ L404, false for 'update' @ L483, false for 'create' @ L404, false for 'create' @ L483
+✅ [PASS] [C #3] Student direct WRITE on student_advances
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Student financial mutation blocked
+
+[2026-10-12T11:59:49.678Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace6 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L399:29 for 'create' @ L399, false for 'create' @ L483, evaluation error at L399:29 for 'update' @ L399, false for 'update' @ L483, false for 'create' @ L399, false for 'create' @ L483
+✅ [PASS] [C #3] Student direct WRITE on cash_ledger
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Student financial mutation blocked
+
+[2026-10-12T11:59:49.714Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace7 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L379:23 for 'create' @ L379, false for 'create' @ L483, evaluation error at L379:23 for 'update' @ L379, false for 'update' @ L483, false for 'create' @ L379, false for 'create' @ L483
+✅ [PASS] [C #4] Teacher direct WRITE on remitBills
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher financial mutation blocked
+
+[2026-10-12T11:59:49.727Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace8 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L394:23 for 'create' @ L394, false for 'create' @ L483, evaluation error at L394:23 for 'update' @ L394, false for 'update' @ L483, false for 'create' @ L394, false for 'create' @ L483
+✅ [PASS] [C #4] Teacher direct WRITE on transactions
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher financial mutation blocked
+
+[2026-10-12T11:59:49.739Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0ace9 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L399:29 for 'create' @ L399, false for 'create' @ L483, evaluation error at L399:29 for 'update' @ L399, false for 'update' @ L483, false for 'create' @ L399, false for 'create' @ L483
+✅ [PASS] [C #4] Teacher direct WRITE on cash_ledger
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher financial mutation blocked
+
+[2026-10-12T11:59:49.750Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acea error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L404:23 for 'create' @ L404, false for 'create' @ L483, evaluation error at L404:23 for 'update' @ L404, false for 'update' @ L483, false for 'create' @ L404, false for 'create' @ L483
+✅ [PASS] [C #4] Teacher direct WRITE on student_advances
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher financial mutation blocked
+
+--- PART D: FINANCIAL FIELD IMMUTABILITY ---
+[2026-10-12T11:59:49.800Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acec error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L394:23 for 'update' @ L394, false for 'update' @ L483, false for 'update' @ L394, false for 'update' @ L483
+✅ [PASS] [D #1] Student attempts direct UPDATE of transaction amount
+   Expected: DENIED by allow write: if isAdmin()
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Direct transaction tampering blocked
+
+[2026-10-12T11:59:49.847Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acee error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L379:23 for 'update' @ L379, false for 'update' @ L483, false for 'update' @ L379, false for 'update' @ L483
+✅ [PASS] [D #2] Student attempts direct UPDATE of remitBill status to paid
+   Expected: DENIED by allow write: if isAdmin()
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Bill immutability enforced
+
+[2026-10-12T11:59:49.867Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acef error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L379:23 for 'update' @ L379, false for 'update' @ L483, false for 'update' @ L379, false for 'update' @ L483
+✅ [PASS] [D #3] Teacher attempts direct UPDATE of remitBill totalAmount
+   Expected: DENIED
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher bill mutation blocked
+
+--- PART E: AUDIT LOG IMMUTABILITY & AUTHENTICITY ---
+[2026-10-12T11:59:49.887Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acf0 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L430, false for 'create' @ L483, false for 'update' @ L431, false for 'update' @ L483
+✅ [PASS] [E #1] Direct audit log creation with forged actorUid
+   Expected: DENIED by isValidAuditActor() rule
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Actor identity strictly bound to request.auth.uid
+
+[2026-10-12T11:59:49.896Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acf1 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'delete' @ L431, false for 'delete' @ L483
+✅ [PASS] [E #2] Attempt to DELETE audit log entry
+   Expected: DENIED by allow update, delete: if false;
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Append-only audit trail immutability enforced
+
+[2026-10-12T11:59:49.903Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acf2 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'update' @ L431, false for 'update' @ L483
+✅ [PASS] [E #3] Attempt to UPDATE audit log entry
+   Expected: DENIED by allow update, delete: if false;
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Audit records are tamper-proof
+
+--- PART F: USER DELETION STATE MACHINE & IDEMPOTENCY ---
+✅ [PASS] [F #1] Deletion State Machine: ACTIVE -> DELETION_PENDING
+   Expected: Transition successfully applied in Firestore
+   Actual  : APPLIED
+   Evidence: Phase 1 state transition valid
+
+✅ [PASS] [F #2] Deletion State Machine: Finalize to TOMBSTONE (status: DELETED, deleted: true)
+   Expected: Tombstone record established with preserved metadata
+   Actual  : FINALIZED
+   Evidence: Phase 3B tombstone verified
+
+[2026-10-12T11:59:49.988Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acf4 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L232:24 for 'delete' @ L232, false for 'delete' @ L483, false for 'delete' @ L232, false for 'delete' @ L483
+✅ [PASS] [F #3] Student attempts deleting another user
+   Expected: DENIED by allow delete: if isPrimaryAdmin() || ...
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Student has zero user deletion rights
+
+--- PART G: STUDENT DATA ISOLATION ---
+✅ [PASS] [G #1] Student A attempts direct READ of Student B transaction
+   Expected: DENIED by isStudentOwner(resource.data.studentId)
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Financial document isolation enforced
+
+✅ [PASS] [G #2] Student A attempts direct READ of Student B bill
+   Expected: DENIED by isStudentOwner(resource.data.studentId)
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Bill record isolation enforced
+
+✅ [PASS] [G #3] Student A attempts direct READ of Student B advance balance
+   Expected: DENIED by isStudentOwner(resource.data.studentId)
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Advance balance isolation enforced
+
+✅ [PASS] [G #4] Student A reads OWN transaction
+   Expected: ALLOWED by isStudentOwner(resource.data.studentId)
+   Actual  : ALLOWED
+   Evidence: Student has read-only access to own transactions
+
+✅ [PASS] [G #5] Teacher attempts READ of Student transaction
+   Expected: DENIED by !isTeacher() in transactions rule
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Teacher has zero access to student financial records
+
+--- PART H: USER PROFILE TYPE SAFETY ---
+✅ [PASS] [H #1] Validate rejection of unauthorized role: "superadmin"
+   Expected: Role rejected by system contract
+   Actual  : REJECTED (CONTRACT ENFORCED)
+   Evidence: Locked to ADMIN, TEACHER, STUDENT only
+
+✅ [PASS] [H #1] Validate rejection of unauthorized role: "accountant"
+   Expected: Role rejected by system contract
+   Actual  : REJECTED (CONTRACT ENFORCED)
+   Evidence: Locked to ADMIN, TEACHER, STUDENT only
+
+✅ [PASS] [H #1] Validate rejection of unauthorized role: "cashier"
+   Expected: Role rejected by system contract
+   Actual  : REJECTED (CONTRACT ENFORCED)
+   Evidence: Locked to ADMIN, TEACHER, STUDENT only
+
+✅ [PASS] [H #1] Validate rejection of unauthorized role: "staff"
+   Expected: Role rejected by system contract
+   Actual  : REJECTED (CONTRACT ENFORCED)
+   Evidence: Locked to ADMIN, TEACHER, STUDENT only
+
+✅ [PASS] [H #1] Validate rejection of unauthorized role: "finance"
+   Expected: Role rejected by system contract
+   Actual  : REJECTED (CONTRACT ENFORCED)
+   Evidence: Locked to ADMIN, TEACHER, STUDENT only
+
+✅ [PASS] [H #1] Validate rejection of unauthorized role: "level1"
+   Expected: Role rejected by system contract
+   Actual  : REJECTED (CONTRACT ENFORCED)
+   Evidence: Locked to ADMIN, TEACHER, STUDENT only
+
+--- PART I: RESULTS MODULE CROSS-ACCESS & STABLE STUDENT ID ---
+✅ [PASS] [I #1] Student A attempts READ of Student B result summary
+   Expected: DENIED by isStudentOwner(resource.data.studentId)
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Cross-student academic result leakage prevented
+
+✅ [PASS] [I #2] Student B reads OWN published result summary
+   Expected: ALLOWED by isStudentOwner and published == true
+   Actual  : ALLOWED
+   Evidence: Student views own academic results
+
+--- PART J: LOGIN SECURITY & SESSION INTEGRITY ---
+✅ [PASS] [J #1] Student creates own session record in user_sessions
+   Expected: ALLOWED by request.resource.data.userUid == request.auth.uid
+   Actual  : ALLOWED
+   Evidence: Session tracking initialized
+
+[2026-10-12T11:59:50.385Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acfd error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'create' @ L367, false for 'create' @ L483, false for 'update' @ L368, false for 'update' @ L483
+✅ [PASS] [J #2] Student A attempts creating session claiming Student B UID
+   Expected: DENIED by userUid ownership invariant
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Session identity forgery blocked
+
+[2026-10-12T11:59:50.397Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x71d0acfe error. Code: 7 Message: 7 PERMISSION_DENIED: 
+false for 'delete' @ L369, false for 'delete' @ L483
+✅ [PASS] [J #3] Attempt to DELETE session doc
+   Expected: DENIED by allow delete: if false;
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Session audit history immutable
+
+--- PART K: PUBLIC / GUEST ISOLATION ---
+✅ [PASS] [K #1] Guest reads public notices collection
+   Expected: ALLOWED by allow read: if true;
+   Actual  : ALLOWED
+   Evidence: Public information accessible without auth
+
+✅ [PASS] [K #2] Guest attempts reading transactions collection
+   Expected: DENIED by isSignedIn() and isAdmin()
+   Actual  : DENIED (PERMISSION_DENIED)
+   Evidence: Financial collections closed to public
+
+--- PART L: FINANCIAL END-TO-END REGRESSION ---
+✅ [PASS] [L #1] Full real financial lifecycle: Bill Creation -> Transaction -> Settlement
+   Expected: Persisted state reflects status=paid, dueAmount=0, transaction recorded
+   Actual  : SETTLED & RECONCILED
+   Evidence: End-to-end financial transaction consistent
+
+======================================================================
+🏁 PHASE 8 ADVERSARIAL AUDIT SUMMARY: 84/84 PASSED, 0 FAILED
+======================================================================

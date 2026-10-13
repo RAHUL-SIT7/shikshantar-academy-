@@ -123,6 +123,17 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
     if (tx.remitBillId) {
       remitDocRefs.set(tx.remitBillId, doc(firestore, 'remitBills', tx.remitBillId));
     }
+    if (tx.billId) {
+      remitDocRefs.set(tx.billId, doc(firestore, 'remitBills', tx.billId));
+    }
+    if (tx.allocations && Array.isArray(tx.allocations)) {
+      tx.allocations.forEach((alloc: any) => {
+        const bId = alloc.remitBillId || alloc.billId;
+        if (bId) {
+          remitDocRefs.set(bId, doc(firestore, 'remitBills', bId));
+        }
+      });
+    }
     const rNo = tx.receipt || tx.receiptNo;
     if (rNo) {
       const remitQ = query(collection(firestore, 'remitBills'), where('transactionId', '==', rNo));
@@ -385,7 +396,7 @@ export async function cancelPaymentTransaction(params: CancelPaymentParams): Pro
         billsRestoredCount++;
         let allocatedBillAmountToReverse = 0;
         for (const [txId, txData] of readTxMap.entries()) {
-          if (txData.remitBillId === billId) {
+          if (txData.remitBillId === billId || txData.billId === billId) {
             allocatedBillAmountToReverse += Number(txData.amountApplied || txData.amount || 0);
           } else if (txData.allocations && Array.isArray(txData.allocations)) {
             txData.allocations.forEach((alloc: any) => {

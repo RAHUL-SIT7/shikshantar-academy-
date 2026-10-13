@@ -1,0 +1,2653 @@
+{
+  "timestamp": "2026-10-11T18:33:12.899Z",
+  "durationSeconds": 12.95,
+  "totalScenarios": 141,
+  "passCount": 119,
+  "failCount": 22,
+  "notExecCount": 0,
+  "forensicAnomalies": 0,
+  "finalVerdict": "PHASE 8 NOT CLOSED",
+  "forensicCategories": [
+    {
+      "categoryNumber": 1,
+      "categoryName": "Cross-student financial access",
+      "anomaliesDetected": 0,
+      "evidence": "Strict isStudentOwner enforced on all fee collections",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 2,
+      "categoryName": "Wrong owner transaction",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 10 transactions",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 3,
+      "categoryName": "Wrong owner allocation",
+      "anomaliesDetected": 0,
+      "evidence": "Checked allocations across 10 transactions",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 4,
+      "categoryName": "Wrong owner advance",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 4 advance documents",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 5,
+      "categoryName": "Duplicate receipt",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 10 unique receipts",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 6,
+      "categoryName": "Duplicate transaction",
+      "anomaliesDetected": 0,
+      "evidence": "Total 10 distinct transaction documents",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 7,
+      "categoryName": "Duplicate payment group",
+      "anomaliesDetected": 0,
+      "evidence": "Payment group uniqueness verified",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 8,
+      "categoryName": "Duplicate reversal",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 2 cancelled transactions",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 9,
+      "categoryName": "Duplicate refund",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 1 refund records",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 10,
+      "categoryName": "Over-allocation",
+      "anomaliesDetected": 0,
+      "evidence": "No transaction allocates more money than collected",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 11,
+      "categoryName": "Negative amount",
+      "anomaliesDetected": 0,
+      "evidence": "Checked all transactions and bills for negative amounts",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 12,
+      "categoryName": "Negative due",
+      "anomaliesDetected": 0,
+      "evidence": "Checked dueAmount across 9 bills",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 13,
+      "categoryName": "Negative advance",
+      "anomaliesDetected": 0,
+      "evidence": "Checked advances and user balances",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 14,
+      "categoryName": "Orphan bill",
+      "anomaliesDetected": 0,
+      "evidence": "All bills mapped to valid enrolled students",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 15,
+      "categoryName": "Orphan transaction",
+      "anomaliesDetected": 0,
+      "evidence": "All transactions belong to registered students",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 16,
+      "categoryName": "Orphan allocation",
+      "anomaliesDetected": 0,
+      "evidence": "All allocations point to valid remitBills",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 17,
+      "categoryName": "Orphan advance",
+      "anomaliesDetected": 0,
+      "evidence": "All advances linked to valid students",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 18,
+      "categoryName": "Orphan refund",
+      "anomaliesDetected": 0,
+      "evidence": "All refunds reference valid source transactions",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 19,
+      "categoryName": "Orphan audit",
+      "anomaliesDetected": 0,
+      "evidence": "Audit records reference verified actors and actions",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 20,
+      "categoryName": "Stale uniqueness lock",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 2 billing month locks",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 21,
+      "categoryName": "Stale receipt lock",
+      "anomaliesDetected": 0,
+      "evidence": "Checked 5 receipt locks",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 22,
+      "categoryName": "VOID bill active",
+      "anomaliesDetected": 0,
+      "evidence": "All void bills have zero active debt",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 23,
+      "categoryName": "Reversed payment active",
+      "anomaliesDetected": 0,
+      "evidence": "Reversed payments properly flagged CANCELLED",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 24,
+      "categoryName": "Refunded payment incorrectly active",
+      "anomaliesDetected": 0,
+      "evidence": "Refunded payments marked REFUNDED",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 25,
+      "categoryName": "Reissue double debt",
+      "anomaliesDetected": 0,
+      "evidence": "Reissue cancels prior bill before generating new",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 26,
+      "categoryName": "Previous-year arrears duplicated",
+      "anomaliesDetected": 0,
+      "evidence": "Arrears transferred strictly once per academic session",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 27,
+      "categoryName": "Cross-year contamination",
+      "anomaliesDetected": 0,
+      "evidence": "Academic year partitioning strictly observed",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 28,
+      "categoryName": "Ledger != source",
+      "anomaliesDetected": 0,
+      "evidence": "Physical cash ledger entries match source transactions",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 29,
+      "categoryName": "Report != source",
+      "anomaliesDetected": 0,
+      "evidence": "Financial reporting queries derive directly from source bills",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 30,
+      "categoryName": "Family != child sums",
+      "anomaliesDetected": 0,
+      "evidence": "Family balances strictly equal sum of child balances",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 31,
+      "categoryName": "Class != student sums",
+      "anomaliesDetected": 0,
+      "evidence": "Class grade aggregations equal sum of student dues",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 32,
+      "categoryName": "PDF != source",
+      "anomaliesDetected": 0,
+      "evidence": "Receipt PDF renderer receives verified transaction payload",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 33,
+      "categoryName": "Excel != source",
+      "anomaliesDetected": 0,
+      "evidence": "Excel export streams verified database records",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 34,
+      "categoryName": "Unauthorized role mutation",
+      "anomaliesDetected": 0,
+      "evidence": "Firestore rules block self-escalation on users collection",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 35,
+      "categoryName": "Unauthorized tier mutation",
+      "anomaliesDetected": 0,
+      "evidence": "2° admin blocked from modifying adminTier",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 36,
+      "categoryName": "Audit actor spoofing",
+      "anomaliesDetected": 0,
+      "evidence": "isValidAuditActor verifies caller auth against record",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 37,
+      "categoryName": "Negative report balance",
+      "anomaliesDetected": 0,
+      "evidence": "Reports clip negative values and separate advances",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 38,
+      "categoryName": "Cash conservation violation",
+      "anomaliesDetected": 0,
+      "evidence": "Physical cash inflows minus outflows equals net cash balance",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 39,
+      "categoryName": "Impossible status combination",
+      "anomaliesDetected": 0,
+      "evidence": "No bill marked paid with remaining due > 0",
+      "status": "PASS"
+    },
+    {
+      "categoryNumber": 40,
+      "categoryName": "Financial history deletion",
+      "anomaliesDetected": 0,
+      "evidence": "User deletion retains all bills, transactions, advances",
+      "status": "PASS"
+    }
+  ],
+  "scenarioResults": [
+    {
+      "id": "AUTH-01",
+      "category": "AUTHENTICATION",
+      "scenario": "Valid Admin login establishes token & claims",
+      "command": "signInWithEmailAndPassword(adminAuth, email, pass)",
+      "input": {
+        "email": "admin_primary@shikshantar.edu.np",
+        "role": "admin",
+        "tier": "primary"
+      },
+      "operation": "Firebase Auth Emulator sign-in as Admin",
+      "expected": "Successful sign-in with role=admin and adminTier=primary",
+      "actual": "Signed in UID qDdsOmcbVK2frXtmLhIcuqMF4lVE, role=admin, adminTier=primary",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"name\":\"Test ADMIN 1791743584757\",\"role\":\"admin\",\"adminTier\":\"primary\",\"email\":\"admin_primary@shikshantar.edu.np\",\"email_verified\":false,\"auth_time\":1791743580,\"user_id\":\"qDdsOmcbVK2frXtmLhIcuqMF4lVE\",\"firebase\":{\"identities\":{\"email\":[\"admin_primary@shikshantar.edu.np\"]},\"sign_in_provider\":\"password\"},\"iat\":1791743580,\"exp\":1791747180,\"aud\":\"demo-shikshantar-test\",\"iss\":\"https://securetoken.google.com/demo-shikshantar-test\",\"sub\":\"qDdsOmcbVK2frXtmLhIcuqMF4lVE\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-02",
+      "category": "AUTHENTICATION",
+      "scenario": "Valid Teacher login establishes token & claims",
+      "command": "signInWithEmailAndPassword(teacherAuth, email, pass)",
+      "input": {
+        "email": "teacher_sub@shikshantar.edu.np",
+        "role": "teacher"
+      },
+      "operation": "Firebase Auth Emulator sign-in as Teacher",
+      "expected": "Successful sign-in with role=teacher claim",
+      "actual": "Signed in UID jhY6ZvbWFSBdzHdkwdw40RTvqI4L, role=teacher",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"name\":\"Test TEACHER 1791743585784\",\"role\":\"teacher\",\"email\":\"teacher_sub@shikshantar.edu.np\",\"email_verified\":false,\"auth_time\":1791743580,\"user_id\":\"jhY6ZvbWFSBdzHdkwdw40RTvqI4L\",\"firebase\":{\"identities\":{\"email\":[\"teacher_sub@shikshantar.edu.np\"]},\"sign_in_provider\":\"password\"},\"iat\":1791743580,\"exp\":1791747180,\"aud\":\"demo-shikshantar-test\",\"iss\":\"https://securetoken.google.com/demo-shikshantar-test\",\"sub\":\"jhY6ZvbWFSBdzHdkwdw40RTvqI4L\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-03",
+      "category": "AUTHENTICATION",
+      "scenario": "Valid Student login establishes token & claims",
+      "command": "signInWithEmailAndPassword(studentAuth, email, pass)",
+      "input": {
+        "email": "student_auth@shikshantar.edu.np",
+        "role": "student"
+      },
+      "operation": "Firebase Auth Emulator sign-in as Student",
+      "expected": "Successful sign-in with role=student claim",
+      "actual": "Signed in UID UFCmcyQ6jb6jSFvyiGZwXiuROOSX, role=student",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"name\":\"Test STUDENT 1791743585454\",\"role\":\"student\",\"email\":\"student_auth@shikshantar.edu.np\",\"email_verified\":false,\"auth_time\":1791743580,\"user_id\":\"UFCmcyQ6jb6jSFvyiGZwXiuROOSX\",\"firebase\":{\"identities\":{\"email\":[\"student_auth@shikshantar.edu.np\"]},\"sign_in_provider\":\"password\"},\"iat\":1791743580,\"exp\":1791747180,\"aud\":\"demo-shikshantar-test\",\"iss\":\"https://securetoken.google.com/demo-shikshantar-test\",\"sub\":\"UFCmcyQ6jb6jSFvyiGZwXiuROOSX\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-04",
+      "category": "AUTHENTICATION",
+      "scenario": "Wrong password rejected by Auth Emulator",
+      "command": "signInWithEmailAndPassword(auth, email, wrongPassword)",
+      "input": {
+        "email": "wrong_pwd_probe@shikshantar.edu.np",
+        "password": "TotallyWrongPassword999!"
+      },
+      "operation": "Sign-in with invalid password",
+      "expected": "Rejected with auth/invalid-credential or auth/wrong-password",
+      "actual": "Rejected with code: auth/wrong-password",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/wrong-password",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-05",
+      "category": "AUTHENTICATION",
+      "scenario": "Unknown email rejected by Auth Emulator",
+      "command": "signInWithEmailAndPassword(auth, unknownEmail, pass)",
+      "input": {
+        "email": "ghost_user_999999@shikshantar.edu.np"
+      },
+      "operation": "Sign-in with nonexistent account",
+      "expected": "Rejected with auth/invalid-credential or auth/user-not-found",
+      "actual": "Rejected with code: auth/user-not-found",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/user-not-found",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-06",
+      "category": "AUTHENTICATION",
+      "scenario": "Malformed email rejected by Auth Emulator",
+      "command": "signInWithEmailAndPassword(auth, \"not-an-email-at-all\", pass)",
+      "input": {
+        "email": "not-an-email-at-all"
+      },
+      "operation": "Sign-in with malformed email",
+      "expected": "Rejected with auth/invalid-email",
+      "actual": "Rejected with code: auth/invalid-email",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/invalid-email",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-07",
+      "category": "AUTHENTICATION",
+      "scenario": "Empty credentials rejected by Auth Emulator",
+      "command": "signInWithEmailAndPassword(auth, \"\", \"\")",
+      "input": {
+        "email": "",
+        "password": ""
+      },
+      "operation": "Sign-in with empty strings",
+      "expected": "Rejected with validation code",
+      "actual": "Rejected with code: auth/invalid-email",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/invalid-email",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-08",
+      "category": "AUTHENTICATION",
+      "scenario": "Disabled account sign-in rejected by Auth Emulator",
+      "command": "adminAuth.updateUser(uid, { disabled: true }) -> signInWithEmailAndPassword",
+      "input": {
+        "uid": "9cQIjViwRFiFG4qrCp6m89HR77DS",
+        "disabled": true
+      },
+      "operation": "Sign-in to disabled user account",
+      "expected": "Rejected with auth/user-disabled",
+      "actual": "Rejected with code: auth/user-disabled",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/user-disabled",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-09",
+      "category": "AUTHENTICATION",
+      "scenario": "Malformed/invalid token rejected by backend verification",
+      "command": "adminAuth.verifyIdToken(invalidToken)",
+      "input": {
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalidpayload.invalidsignature"
+      },
+      "operation": "Token verification on crafted jwt string",
+      "expected": "Rejected with auth/argument-error or decoding failure",
+      "actual": "Rejected: Unexpected token '�', \"�{ږ'ik)hi\" is not valid JSON",
+      "difference": "Unexpected: Unexpected token '�', \"�{ږ'ik)hi\" is not valid JSON",
+      "status": "FAIL",
+      "rawOutput": "Unexpected token '�', \"�{ږ'ik)hi\" is not valid JSON",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-10",
+      "category": "AUTHENTICATION",
+      "scenario": "Unauthenticated call to protected endpoint rejected with 401/403",
+      "command": "fetch(/api/users/delete-auth, { no auth })",
+      "input": {
+        "endpoint": "/api/users/delete-auth"
+      },
+      "operation": "HTTP POST to protected route without valid Bearer token",
+      "expected": "HTTP 401 or 403 Forbidden",
+      "actual": "HTTP 401",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-11",
+      "category": "AUTHENTICATION",
+      "scenario": "Revoked refresh token causes id-token-revoked on checkRevoked: true",
+      "command": "adminAuth.revokeRefreshTokens(uid) -> verifyIdToken(tok, true)",
+      "input": {
+        "uid": "wduF464xHeBKp1iF0I3nbRL2O3ka",
+        "checkRevoked": true
+      },
+      "operation": "Authoritative token revocation check",
+      "expected": "Rejected with auth/id-token-revoked",
+      "actual": "Rejected with code: ",
+      "difference": "Unexpected code: ",
+      "status": "FAIL",
+      "rawOutput": "",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-12",
+      "category": "AUTHENTICATION",
+      "scenario": "Cryptographically tampered token payload rejected by backend",
+      "command": "adminAuth.verifyIdToken(forgedToken)",
+      "input": {
+        "originalRole": "student",
+        "forgedRole": "admin"
+      },
+      "operation": "Verification of token with modified signature segment",
+      "expected": "Signature verification failure",
+      "actual": "Rejected with error: auth/argument-error",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/argument-error",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-13",
+      "category": "AUTHENTICATION",
+      "scenario": "Fabricated role claim cannot be self-issued by client",
+      "command": "getIdTokenResult(currentUser)",
+      "input": {
+        "attemptedRole": "admin"
+      },
+      "operation": "Check custom claims authenticity",
+      "expected": "role remains strictly \"student\"",
+      "actual": "Authoritative claim role: \"student\"",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"name\":\"Test STUDENT 1791743581822\",\"role\":\"student\",\"email\":\"fab_role_probe@shikshantar.edu.np\",\"email_verified\":false,\"auth_time\":1791743581,\"user_id\":\"f4aO2pum23hut92bawoh1ogYxUNb\",\"firebase\":{\"identities\":{\"email\":[\"fab_role_probe@shikshantar.edu.np\"]},\"sign_in_provider\":\"password\"},\"iat\":1791743581,\"exp\":1791747181,\"aud\":\"demo-shikshantar-test\",\"iss\":\"https://securetoken.google.com/demo-shikshantar-test\",\"sub\":\"f4aO2pum23hut92bawoh1ogYxUNb\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-14",
+      "category": "AUTHENTICATION",
+      "scenario": "Secondary admin cannot fabricate primary admin tier in token claims",
+      "command": "getIdTokenResult(secAdmin.currentUser)",
+      "input": {
+        "assignedTier": "secondary",
+        "targetTier": "primary"
+      },
+      "operation": "Verify admin governance tier claim integrity",
+      "expected": "adminTier remains strictly \"secondary\"",
+      "actual": "Authoritative claim tier: \"secondary\"",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"name\":\"Test ADMIN 1791743581168\",\"role\":\"admin\",\"adminTier\":\"secondary\",\"email\":\"sec_tier_probe@shikshantar.edu.np\",\"email_verified\":false,\"auth_time\":1791743581,\"user_id\":\"hzRwwPd7wsZW2G9C6Rki1MVnfXDg\",\"firebase\":{\"identities\":{\"email\":[\"sec_tier_probe@shikshantar.edu.np\"]},\"sign_in_provider\":\"password\"},\"iat\":1791743581,\"exp\":1791747181,\"aud\":\"demo-shikshantar-test\",\"iss\":\"https://securetoken.google.com/demo-shikshantar-test\",\"sub\":\"hzRwwPd7wsZW2G9C6Rki1MVnfXDg\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-15",
+      "category": "AUTHENTICATION",
+      "scenario": "Missing user document state handled gracefully without elevation",
+      "command": "adminDb.collection(\"users\").doc(ghostUid).get()",
+      "input": {
+        "ghostUid": "t3LXZAZ7jbZHXKRiQEzibekaERWR"
+      },
+      "operation": "Inspect missing user doc state",
+      "expected": "Document does not exist; default closed fallback applies in rules",
+      "actual": "Document exists: false",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Doc exists: false",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-16",
+      "category": "AUTHENTICATION",
+      "scenario": "Deleted user record purged from Auth Emulator",
+      "command": "adminAuth.deleteUser(uid) -> adminAuth.getUser(uid)",
+      "input": {
+        "uid": "fLwmyrqqv34hRJyidLHqmvLfpSC2"
+      },
+      "operation": "Purge user in Auth and verify non-existence",
+      "expected": "Rejected with auth/user-not-found",
+      "actual": "Result code: auth/user-not-found",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "auth/user-not-found",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-17",
+      "category": "AUTHENTICATION",
+      "scenario": "Server binds session to authentic token UID, ignoring client spoofing",
+      "command": "fetch(/api/auth/record-login, { spoofed userUid: studentB.uid })",
+      "input": {
+        "callerUid": "LIAKahXOnSFB5e9BD6UEemrBor93",
+        "spoofedUid": "Imy8jtALWn8OCnlyckhvpvApfobd"
+      },
+      "operation": "Adversarial userUid spoofing in session registration",
+      "expected": "Session created bound to token caller (studentA), not spoofed target (studentB)",
+      "actual": "Authoritative session userUid: LIAKahXOnSFB5e9BD6UEemrBor93",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{}",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-18",
+      "category": "AUTHENTICATION",
+      "scenario": "Concurrent sessions generate distinct tracked session records without collision",
+      "command": "fetch(/api/auth/record-login) x 2 distinct devices",
+      "input": {
+        "session1": "Windows PC",
+        "session2": "iPhone"
+      },
+      "operation": "Concurrent multi-device login registration",
+      "expected": "Two distinct session IDs generated and persisted",
+      "actual": "Session 1: undefined, Session 2: undefined",
+      "difference": "Session ID collision or missing",
+      "status": "FAIL",
+      "rawOutput": "S1=undefined, S2=undefined",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-19",
+      "category": "AUTHENTICATION",
+      "scenario": "Reauthentication successfully confirms identity before sensitive operation",
+      "command": "signInWithEmailAndPassword(adminAuth, email, pass) as re-challenge",
+      "input": {
+        "uid": "JDGNAnezZ2QcC3Xk5R2h6F1ndcwI"
+      },
+      "operation": "Credential re-challenge verification",
+      "expected": "Authentic credentials re-confirmed matching active admin UID",
+      "actual": "Reauthenticated UID matches active UID: JDGNAnezZ2QcC3Xk5R2h6F1ndcwI",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "reauthUid=JDGNAnezZ2QcC3Xk5R2h6F1ndcwI",
+      "exitCode": 0
+    },
+    {
+      "id": "AUTH-20",
+      "category": "AUTHENTICATION",
+      "scenario": "Force refresh of ID token retrieves updated authoritative token",
+      "command": "currentUser.getIdToken(true)",
+      "input": {
+        "forceRefresh": true
+      },
+      "operation": "Token cache invalidation and fresh fetch from Auth Emulator",
+      "expected": "Fresh token string returned (>100 characters)",
+      "actual": "Token retrieved (length: 641)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Token length: 641",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-01",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student attempts to write own role = ADMIN",
+      "command": "updateDoc(users/studentUid, { role: \"admin\" })",
+      "input": {
+        "caller": "student",
+        "targetField": "role",
+        "value": "admin"
+      },
+      "operation": "Direct Firestore client write to role field",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-02",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student attempts to write own tier = PRIMARY",
+      "command": "updateDoc(users/studentUid, { adminTier: \"primary\" })",
+      "input": {
+        "caller": "student",
+        "targetField": "adminTier",
+        "value": "primary"
+      },
+      "operation": "Direct Firestore client write to adminTier field",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-03",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student attempts to write own advanceBalance & previousYearDue",
+      "command": "updateDoc(users/studentUid, { advanceBalance: 10000, previousYearDue: 0 })",
+      "input": {
+        "advanceBalance": 10000,
+        "previousYearDue": 0
+      },
+      "operation": "Direct Firestore client tampering with student financial balances",
+      "expected": "DENIED with permission-denied",
+      "actual": "advanceDenied=true, dueDenied=true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "advanceDenied=true, dueDenied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-04",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student A attempts to write Student B user document (IDOR)",
+      "command": "updateDoc(users/studentB.uid, { name: \"Hacked\" })",
+      "input": {
+        "caller": "zwVJ7Bn4l7vVRmY3PKVSQryjWC8d",
+        "targetDoc": "AR6u8SChZmB52BbuG62yHl0u3hYr"
+      },
+      "operation": "Cross-user profile document update",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-05",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student attempts to grant Admin role to another user",
+      "command": "updateDoc(users/studentB.uid, { role: \"admin\" })",
+      "input": {
+        "caller": "zwVJ7Bn4l7vVRmY3PKVSQryjWC8d",
+        "target": "AR6u8SChZmB52BbuG62yHl0u3hYr",
+        "role": "admin"
+      },
+      "operation": "Unauthorized role delegation",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-06",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student attempts to read institutional ledger audit logs",
+      "command": "getDocs(collection(\"ledger_audit_logs\"))",
+      "input": {
+        "caller": "student"
+      },
+      "operation": "Direct Firestore query of ledger_audit_logs",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-07",
+      "category": "ROLE ESCALATION",
+      "scenario": "Student attempts to delete user document",
+      "command": "deleteDoc(users/studentB.uid)",
+      "input": {
+        "caller": "zwVJ7Bn4l7vVRmY3PKVSQryjWC8d",
+        "target": "AR6u8SChZmB52BbuG62yHl0u3hYr"
+      },
+      "operation": "Direct Firestore document deletion",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-08",
+      "category": "ROLE ESCALATION",
+      "scenario": "Teacher attempts to write own role = ADMIN",
+      "command": "updateDoc(users/teacherUid, { role: \"admin\" })",
+      "input": {
+        "caller": "teacher",
+        "targetField": "role",
+        "value": "admin"
+      },
+      "operation": "Direct Firestore self-elevation by Teacher",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-09",
+      "category": "ROLE ESCALATION",
+      "scenario": "Teacher attempts direct creation of financial transaction",
+      "command": "setDoc(transactions/id, { amount: 2500 })",
+      "input": {
+        "caller": "teacher",
+        "collection": "transactions"
+      },
+      "operation": "Teacher writing financial transaction",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-10",
+      "category": "ROLE ESCALATION",
+      "scenario": "Teacher attempts to read physical cash ledger",
+      "command": "getDocs(collection(\"cash_ledger\"))",
+      "input": {
+        "caller": "teacher",
+        "collection": "cash_ledger"
+      },
+      "operation": "Direct query of cash_ledger collection",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-11",
+      "category": "ROLE ESCALATION",
+      "scenario": "2° Admin attempts self-promotion to Primary Admin",
+      "command": "updateDoc(users/secAdminUid, { adminTier: \"primary\" })",
+      "input": {
+        "caller": "secondary_admin",
+        "targetField": "adminTier",
+        "value": "primary"
+      },
+      "operation": "Self-elevation of governance tier",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-12",
+      "category": "ROLE ESCALATION",
+      "scenario": "2° Admin attempts to grant Admin role to user",
+      "command": "updateDoc(users/studentA.uid, { role: \"admin\" })",
+      "input": {
+        "caller": "secondary_admin",
+        "target": "zwVJ7Bn4l7vVRmY3PKVSQryjWC8d",
+        "role": "admin"
+      },
+      "operation": "Delegating Admin role by Secondary Admin",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-13",
+      "category": "ROLE ESCALATION",
+      "scenario": "2° Admin attempts to delete an Admin user document",
+      "command": "deleteDoc(users/primAdminUid)",
+      "input": {
+        "caller": "secondary_admin",
+        "target": "a5oPjhtG15aTTxcvTH5yn3KWoJCA"
+      },
+      "operation": "Deleting Admin by Secondary Admin",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "permission-denied",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-14",
+      "category": "ROLE ESCALATION",
+      "scenario": "1° Admin successfully grants Admin role to user",
+      "command": "updateDoc(users/studentUid, { role: \"admin\", adminTier: \"secondary\" })",
+      "input": {
+        "caller": "primary_admin",
+        "target": "ri5u2bRJrDL8mEzG5HWAQuV2ZfjM",
+        "newRole": "admin"
+      },
+      "operation": "Authorized role assignment by Primary Admin",
+      "expected": "SUCCESS: role updated to admin",
+      "actual": "SUCCESS (Role updated to admin)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Success: true",
+      "exitCode": 0
+    },
+    {
+      "id": "ROLES-15",
+      "category": "ROLE ESCALATION",
+      "scenario": "1° Admin successfully promotes Secondary Admin to Primary Admin",
+      "command": "updateDoc(users/secAdminUid, { adminTier: \"primary\" })",
+      "input": {
+        "caller": "primary_admin",
+        "target": "Zmu6ZO4OhGzfJykaCVaRiEgofJ3A",
+        "newTier": "primary"
+      },
+      "operation": "Authorized tier governance mutation by Primary Admin",
+      "expected": "SUCCESS: adminTier updated to primary",
+      "actual": "SUCCESS (Tier promoted to primary)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Success: true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-01",
+      "category": "FIRESTORE RULES",
+      "scenario": "Unauthenticated read on remitBills",
+      "command": "getDoc(guestDb, remitBills/testBillA)",
+      "input": {
+        "caller": "GUEST",
+        "target": "remitBills"
+      },
+      "operation": "Direct document read without auth",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-02",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student A reads own remitBill",
+      "command": "getDoc(studentADb, remitBills/testBillA)",
+      "input": {
+        "caller": "rO4vIWsuQPyaJUyzaud0VlxbyAYY",
+        "studentId": "rO4vIWsuQPyaJUyzaud0VlxbyAYY"
+      },
+      "operation": "Owner read on financial bill",
+      "expected": "ALLOWED (Doc exists)",
+      "actual": "ALLOWED (Doc retrieved)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-03",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student A attempts to read Student B remitBill",
+      "command": "getDoc(studentADb, remitBills/testBillB)",
+      "input": {
+        "caller": "rO4vIWsuQPyaJUyzaud0VlxbyAYY",
+        "targetOwner": "9yOFTaoUjQmTTi7tj7cxAeOhLEIW"
+      },
+      "operation": "Cross-student bill read",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-04",
+      "category": "FIRESTORE RULES",
+      "scenario": "Teacher attempts to read remitBill (strict teacher isolation)",
+      "command": "getDoc(teacherDb, remitBills/testBillA)",
+      "input": {
+        "caller": "teacher",
+        "target": "remitBills"
+      },
+      "operation": "Teacher read of student fee bill",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-05",
+      "category": "FIRESTORE RULES",
+      "scenario": "Admin reads remitBill",
+      "command": "getDoc(adminDb, remitBills/testBillA)",
+      "input": {
+        "caller": "admin",
+        "target": "remitBills"
+      },
+      "operation": "Admin read of fee bill",
+      "expected": "ALLOWED (Doc exists)",
+      "actual": "ALLOWED (Doc retrieved)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-06",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student A attempts to read Student B transaction",
+      "command": "getDoc(studentADb, transactions/testTxB)",
+      "input": {
+        "caller": "rO4vIWsuQPyaJUyzaud0VlxbyAYY",
+        "targetOwner": "9yOFTaoUjQmTTi7tj7cxAeOhLEIW"
+      },
+      "operation": "Cross-student transaction read",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-07",
+      "category": "FIRESTORE RULES",
+      "scenario": "Teacher attempts to read transaction",
+      "command": "getDoc(teacherDb, transactions/testTxA)",
+      "input": {
+        "caller": "teacher",
+        "target": "transactions"
+      },
+      "operation": "Teacher read on financial transaction",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-08",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student A reads own student_advances document",
+      "command": "getDoc(studentADb, student_advances/testAdvA)",
+      "input": {
+        "caller": "rO4vIWsuQPyaJUyzaud0VlxbyAYY",
+        "owner": "rO4vIWsuQPyaJUyzaud0VlxbyAYY"
+      },
+      "operation": "Owner read on student advance",
+      "expected": "ALLOWED (Doc exists)",
+      "actual": "ALLOWED (Doc retrieved)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-09",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student B attempts to read Student A student_advances",
+      "command": "getDoc(studentBDb, student_advances/testAdvA)",
+      "input": {
+        "caller": "9yOFTaoUjQmTTi7tj7cxAeOhLEIW",
+        "targetOwner": "rO4vIWsuQPyaJUyzaud0VlxbyAYY"
+      },
+      "operation": "Cross-student advance read",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-10",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student attempts to read institutional cash_ledger",
+      "command": "getDoc(studentADb, cash_ledger/testLedger)",
+      "input": {
+        "caller": "student",
+        "target": "cash_ledger"
+      },
+      "operation": "Student read on physical cash ledger",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-11",
+      "category": "FIRESTORE RULES",
+      "scenario": "Admin reads institutional cash_ledger",
+      "command": "getDoc(adminDb, cash_ledger/testLedger)",
+      "input": {
+        "caller": "admin",
+        "target": "cash_ledger"
+      },
+      "operation": "Admin read of cash ledger",
+      "expected": "ALLOWED (Doc exists)",
+      "actual": "ALLOWED (Doc retrieved)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-12",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student attempts write to billing_month_locks",
+      "command": "setDoc(studentADb, billing_month_locks/lock_fake)",
+      "input": {
+        "caller": "student",
+        "collection": "billing_month_locks"
+      },
+      "operation": "Tampering with billing uniqueness locks",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-13",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student attempts write to payment_receipt_locks",
+      "command": "setDoc(studentADb, payment_receipt_locks/lock_fake)",
+      "input": {
+        "caller": "student",
+        "collection": "payment_receipt_locks"
+      },
+      "operation": "Tampering with receipt locks",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-14",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student attempts write to document_sequences",
+      "command": "setDoc(studentADb, document_sequences/receipt_seq)",
+      "input": {
+        "caller": "student",
+        "collection": "document_sequences"
+      },
+      "operation": "Tampering with document numbering counter",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-15",
+      "category": "FIRESTORE RULES",
+      "scenario": "Student attempts direct write to refund_records",
+      "command": "setDoc(studentADb, refund_records/ref_fake)",
+      "input": {
+        "caller": "student",
+        "collection": "refund_records"
+      },
+      "operation": "Fabricated refund record creation",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-16",
+      "category": "FIRESTORE RULES",
+      "scenario": "Teacher attempts write to refund_records",
+      "command": "setDoc(teacherDb, refund_records/ref_fake_tch)",
+      "input": {
+        "caller": "teacher",
+        "collection": "refund_records"
+      },
+      "operation": "Teacher writing refund record",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-17",
+      "category": "FIRESTORE RULES",
+      "scenario": "Public admission enquiry creation allowed for guests",
+      "command": "setDoc(guestDb, admissions/admissionId)",
+      "input": {
+        "caller": "GUEST",
+        "collection": "admissions"
+      },
+      "operation": "Public admissions form submission",
+      "expected": "ALLOWED (Public form)",
+      "actual": "ALLOWED (Application recorded)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-18",
+      "category": "FIRESTORE RULES",
+      "scenario": "Guest attempts to read submitted admissions list",
+      "command": "getDocs(guestDb, admissions)",
+      "input": {
+        "caller": "GUEST",
+        "collection": "admissions"
+      },
+      "operation": "Unauthorized read of student application data",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-19",
+      "category": "FIRESTORE RULES",
+      "scenario": "Guest reads public notices board",
+      "command": "getDocs(guestDb, notices)",
+      "input": {
+        "caller": "GUEST",
+        "collection": "notices"
+      },
+      "operation": "Public notice board query",
+      "expected": "ALLOWED (Public portal info)",
+      "actual": "ALLOWED (Notices query succeeded)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SEC-20",
+      "category": "FIRESTORE RULES",
+      "scenario": "Guest attempts to create school notice",
+      "command": "setDoc(guestDb, notices/id)",
+      "input": {
+        "caller": "GUEST",
+        "collection": "notices"
+      },
+      "operation": "Unauthorized notice publication",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "IMMUT-01",
+      "category": "FINANCIAL IMMUTABILITY",
+      "scenario": "Student attempts direct alteration of transaction amount",
+      "command": "updateDoc(transactions/id, { amount: 100 })",
+      "input": {
+        "originalAmount": 5000,
+        "maliciousAmount": 100
+      },
+      "operation": "Tampering with settled transaction amount",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "IMMUT-02",
+      "category": "FINANCIAL IMMUTABILITY",
+      "scenario": "Student attempts direct alteration of remitBill dueAmount & status",
+      "command": "updateDoc(remitBills/id, { dueAmount: 0, status: \"paid\" })",
+      "input": {
+        "targetField": "dueAmount",
+        "value": 0
+      },
+      "operation": "Direct bill debt wipeout",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "IMMUT-03",
+      "category": "FINANCIAL IMMUTABILITY",
+      "scenario": "Student attempts direct alteration of advance balance",
+      "command": "updateDoc(student_advances/id, { balance: 999999 })",
+      "input": {
+        "originalBalance": 1000,
+        "maliciousBalance": 999999
+      },
+      "operation": "Direct advance ledger inflation",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "IMMUT-04",
+      "category": "FINANCIAL IMMUTABILITY",
+      "scenario": "Student attempts direct alteration of cash ledger entry",
+      "command": "updateDoc(cash_ledger/id, { amount: 0 })",
+      "input": {
+        "targetField": "amount",
+        "value": 0
+      },
+      "operation": "Direct physical cash ledger erasure",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "IMMUT-05",
+      "category": "FINANCIAL IMMUTABILITY",
+      "scenario": "Teacher attempts direct alteration of transaction amount",
+      "command": "updateDoc(transactions/id, { amount: 0 })",
+      "input": {
+        "caller": "teacher",
+        "targetField": "amount",
+        "value": 0
+      },
+      "operation": "Teacher altering settled transaction",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "IMMUT-06",
+      "category": "FINANCIAL IMMUTABILITY",
+      "scenario": "Teacher attempts direct deletion of settled transaction",
+      "command": "deleteDoc(transactions/id)",
+      "input": {
+        "caller": "teacher",
+        "target": "tx_immut_test_001"
+      },
+      "operation": "Teacher deleting financial transaction record",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "AUDIT-01",
+      "category": "AUDIT LOG IMMUTABILITY",
+      "scenario": "Student attempts direct creation of audit log",
+      "command": "setDoc(ledger_audit_logs/id, { ... })",
+      "input": {
+        "caller": "student"
+      },
+      "operation": "Direct audit log creation by student",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "AUDIT-02",
+      "category": "AUDIT LOG IMMUTABILITY",
+      "scenario": "Direct audit log update rejected even for Primary Admin",
+      "command": "updateDoc(ledger_audit_logs/existingId, { actionType: \"TAMPERED\" })",
+      "input": {
+        "caller": "primary_admin",
+        "target": "log_existing_audit_test"
+      },
+      "operation": "Audit log mutation attempt",
+      "expected": "DENIED with permission-denied (allow update: if false)",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "AUDIT-03",
+      "category": "AUDIT LOG IMMUTABILITY",
+      "scenario": "Direct audit log deletion rejected even for Primary Admin",
+      "command": "deleteDoc(ledger_audit_logs/existingId)",
+      "input": {
+        "caller": "primary_admin",
+        "target": "log_existing_audit_test_del"
+      },
+      "operation": "Audit log deletion attempt",
+      "expected": "DENIED with permission-denied (allow delete: if false)",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "AUDIT-04",
+      "category": "AUDIT LOG IMMUTABILITY",
+      "scenario": "Audit record with fake spoofed actorUid rejected by rules",
+      "command": "setDoc(ledger_audit_logs/id, { adminUid: \"spoofed_uid\" })",
+      "input": {
+        "caller": "TuYAAN0d5JDIzMVGZIbN4wiKFgpv",
+        "spoofedAdminUid": "spoofed_super_admin_uid"
+      },
+      "operation": "Actor identity spoofing in audit trail",
+      "expected": "DENIED with permission-denied (isValidAuditActor constraint)",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "AUDIT-05",
+      "category": "AUDIT LOG IMMUTABILITY",
+      "scenario": "Secondary Admin fabricating primary adminTier in audit log rejected",
+      "command": "setDoc(ledger_audit_logs/id, { adminTier: \"primary\" })",
+      "input": {
+        "caller": "TuYAAN0d5JDIzMVGZIbN4wiKFgpv",
+        "callerTier": "secondary",
+        "spoofedTier": "primary"
+      },
+      "operation": "Governance tier spoofing in audit log",
+      "expected": "DENIED with permission-denied (isValidAuditActor constraint)",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "AUDIT-06",
+      "category": "AUDIT LOG IMMUTABILITY",
+      "scenario": "Fabricated audit log without real target state transition rejected",
+      "command": "setDoc(ledger_audit_logs/id, { actionType: \"BILL_GENERATED\", targetId: \"nonexistent\" })",
+      "input": {
+        "actionType": "BILL_GENERATED",
+        "targetId": "nonexistent_bill"
+      },
+      "operation": "Ghost audit log creation without corresponding document transition",
+      "expected": "DENIED with permission-denied (isValidAuditTarget constraint)",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-01",
+      "category": "USER DELETION",
+      "scenario": "Student attempts calling /api/users/delete-auth endpoint",
+      "command": "fetch(/api/users/delete-auth, { caller: student })",
+      "input": {
+        "caller": "student",
+        "target": "DW382RodrBar1p8aM8h9zTjJHUi0"
+      },
+      "operation": "Unauthorized API call to delete user auth",
+      "expected": "HTTP 403 Forbidden",
+      "actual": "HTTP 401",
+      "difference": "Unexpected status: 401",
+      "status": "FAIL",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-02",
+      "category": "USER DELETION",
+      "scenario": "Teacher attempts calling /api/users/delete-auth endpoint",
+      "command": "fetch(/api/users/delete-auth, { caller: teacher })",
+      "input": {
+        "caller": "teacher",
+        "target": "DW382RodrBar1p8aM8h9zTjJHUi0"
+      },
+      "operation": "Unauthorized API call to delete user auth",
+      "expected": "HTTP 403 Forbidden",
+      "actual": "HTTP 401",
+      "difference": "Unexpected status: 401",
+      "status": "FAIL",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-03",
+      "category": "USER DELETION",
+      "scenario": "2° Admin attempts deleting another Admin user account",
+      "command": "fetch(/api/users/delete-auth, { caller: secAdmin, target: primAdmin })",
+      "input": {
+        "caller": "secondary_admin",
+        "target": "primary_admin"
+      },
+      "operation": "Governance violation: 2° admin deleting Admin",
+      "expected": "HTTP 403 Forbidden",
+      "actual": "HTTP 401",
+      "difference": "Unexpected status: 401",
+      "status": "FAIL",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-04",
+      "category": "USER DELETION",
+      "scenario": "Administrator self-deletion prohibited",
+      "command": "fetch(/api/users/delete-auth, { uid: primAdmin.uid })",
+      "input": {
+        "caller": "tUnKOHfvK4ZIeun7S1ph62VMqAlZ",
+        "target": "tUnKOHfvK4ZIeun7S1ph62VMqAlZ"
+      },
+      "operation": "Self-deletion of active administrator",
+      "expected": "HTTP 400 Bad Request (Self-deletion prohibited)",
+      "actual": "HTTP 401",
+      "difference": "Unexpected status: 401",
+      "status": "FAIL",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-05",
+      "category": "USER DELETION",
+      "scenario": "Full lifecycle: ACTIVE -> DELETION_PENDING -> Auth Deletion -> TOMBSTONE",
+      "command": "Execute complete 3-step deletion state machine",
+      "input": {
+        "targetUid": "DW382RodrBar1p8aM8h9zTjJHUi0"
+      },
+      "operation": "Authoritative user deletion workflow",
+      "expected": "Auth deleted, tombstone saved with status=DELETED and tombstone=true",
+      "actual": "authDeletedOk=false, authGone=false, tombstoneValid=true",
+      "difference": "Incomplete deletion transition",
+      "status": "FAIL",
+      "rawOutput": "{\"uid\":\"DW382RodrBar1p8aM8h9zTjJHUi0\",\"email\":\"victim_std@shikshantar.edu.np\",\"role\":\"student\",\"name\":\"Test STUDENT\",\"createdAt\":\"2026-10-11T18:33:05.607Z\",\"studentId\":\"STU-1791743586573\",\"permanentStudentId\":\"STU-1791743586573\",\"admissionNo\":\"ADM-1791743586573\",\"admissionNumber\":\"ADM-1791743586573\",\"class\":\"10\",\"deletionRequestedAt\":\"2026-10-11T18:33:05.688Z\",\"deleted\":true,\"tombstone\":true,\"active\":false,\"anonymizedAt\":\"2026-10-11T18:33:05.703Z\",\"status\":\"DELETED\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-06",
+      "category": "USER DELETION",
+      "scenario": "Financial history preserved untouched after user deletion",
+      "command": "Check remitBills and transactions for deleted student UID",
+      "input": {
+        "studentUid": "DW382RodrBar1p8aM8h9zTjJHUi0",
+        "billId": "bill_victim_1791743585625",
+        "txId": "tx_victim_1791743585625"
+      },
+      "operation": "Verification of immutable financial records preservation",
+      "expected": "Bill and Transaction documents exist intact with original amounts",
+      "actual": "billPreserved=true, txPreserved=true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Bill: true, Tx: true",
+      "exitCode": 0
+    },
+    {
+      "id": "DEL-07",
+      "category": "USER DELETION",
+      "scenario": "Idempotency: Re-deleting already deleted auth user returns success",
+      "command": "fetch(/api/users/delete-auth, { uid: alreadyDeletedUid })",
+      "input": {
+        "uid": "DW382RodrBar1p8aM8h9zTjJHUi0"
+      },
+      "operation": "Re-invocation of delete endpoint on deleted target",
+      "expected": "HTTP 200 with success: true (idempotent)",
+      "actual": "HTTP 401, success=undefined",
+      "difference": "Idempotency failure",
+      "status": "FAIL",
+      "rawOutput": "{\"error\":\"Unauthorized: Invalid, expired, or malformed authentication token.\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "ISO-01",
+      "category": "STUDENT DATA ISOLATION",
+      "scenario": "Student A attempts to read Student B exam result",
+      "command": "getDoc(studentADb, results/resBId)",
+      "input": {
+        "caller": "87vrbbDy1DgfISZQEtl4qYTsRkZD",
+        "targetOwner": "fpSGJUL34KDGZYhGhMU3uVdJ5x64"
+      },
+      "operation": "Direct document lookup of other student result",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "ISO-02",
+      "category": "STUDENT DATA ISOLATION",
+      "scenario": "Student A attempts to read Student B fee structure",
+      "command": "getDoc(studentADb, studentFees/feeBId)",
+      "input": {
+        "caller": "87vrbbDy1DgfISZQEtl4qYTsRkZD",
+        "targetOwner": "fpSGJUL34KDGZYhGhMU3uVdJ5x64"
+      },
+      "operation": "Direct document lookup of other student fee structure",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "ISO-03",
+      "category": "STUDENT DATA ISOLATION",
+      "scenario": "Student A attempts to read Student B advances",
+      "command": "getDoc(studentADb, student_advances/advBId)",
+      "input": {
+        "caller": "87vrbbDy1DgfISZQEtl4qYTsRkZD",
+        "targetOwner": "fpSGJUL34KDGZYhGhMU3uVdJ5x64"
+      },
+      "operation": "Direct document lookup of other student advance balance",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "ISO-04",
+      "category": "STUDENT DATA ISOLATION",
+      "scenario": "Student A query for Student B bills rejected or returns empty",
+      "command": "getDocs(query(remitBills, where studentId == studentB.uid))",
+      "input": {
+        "caller": "87vrbbDy1DgfISZQEtl4qYTsRkZD",
+        "targetQuery": "fpSGJUL34KDGZYhGhMU3uVdJ5x64"
+      },
+      "operation": "Cross-student collection query",
+      "expected": "DENIED or 0 documents returned",
+      "actual": "PROTECTED (Query blocked or 0 docs returned)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "emptyOrDenied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "ISO-05",
+      "category": "STUDENT DATA ISOLATION",
+      "scenario": "Teacher attempts to read studentFees document",
+      "command": "getDoc(teacherDb, studentFees/feeBId)",
+      "input": {
+        "caller": "teacher",
+        "target": "studentFees"
+      },
+      "operation": "Teacher read of student fee structure",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "PROF-01",
+      "category": "PROFILE TYPE SAFETY",
+      "scenario": "Student user profile does not contain teacher salary fields",
+      "command": "Inspect users/studentUid fields",
+      "input": {
+        "uid": "wf97h9Uqq6bneBno1b4aQPzRC47P",
+        "role": "student"
+      },
+      "operation": "Schema verification of student profile fields",
+      "expected": "No salary, salaryStructure, or staff-only attributes present",
+      "actual": "hasTeacherFields=false, role=student",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"uid\":\"wf97h9Uqq6bneBno1b4aQPzRC47P\",\"email\":\"prof_std@shikshantar.edu.np\",\"role\":\"student\",\"name\":\"Test STUDENT\",\"createdAt\":\"2026-10-11T18:33:06.082Z\",\"status\":\"ACTIVE\",\"active\":true,\"studentId\":\"STU-PROF-001\",\"permanentStudentId\":\"STU-PROF-001\",\"admissionNo\":\"ADM-PROF-001\",\"admissionNumber\":\"ADM-PROF-001\",\"class\":\"10\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "PROF-02",
+      "category": "PROFILE TYPE SAFETY",
+      "scenario": "Teacher user profile does not contain student financial fields",
+      "command": "Inspect users/teacherUid fields",
+      "input": {
+        "uid": "wT4TCi2EFwMIdVIRRZ94ikTJfQKE",
+        "role": "teacher"
+      },
+      "operation": "Schema verification of teacher profile fields",
+      "expected": "No advanceBalance, previousYearDue, scholarship, or admissionNo",
+      "actual": "hasStudentFields=false, role=teacher",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"uid\":\"wT4TCi2EFwMIdVIRRZ94ikTJfQKE\",\"email\":\"prof_tch@shikshantar.edu.np\",\"role\":\"teacher\",\"name\":\"Test TEACHER\",\"createdAt\":\"2026-10-11T18:33:06.105Z\",\"status\":\"ACTIVE\",\"active\":true,\"class\":\"9\",\"primaryClassTeacher\":\"9\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "PROF-03",
+      "category": "PROFILE TYPE SAFETY",
+      "scenario": "Admin profile displays authentic role and primary governance tier",
+      "command": "Inspect users/adminUid fields",
+      "input": {
+        "uid": "yO1iGTvvlkJiFw2WCj7LqRbk8ZFw"
+      },
+      "operation": "Governance tier validation on admin document",
+      "expected": "role=\"admin\" and adminTier=\"primary\"",
+      "actual": "role=admin, adminTier=primary",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"uid\":\"yO1iGTvvlkJiFw2WCj7LqRbk8ZFw\",\"email\":\"prof_adm@shikshantar.edu.np\",\"role\":\"admin\",\"name\":\"Test ADMIN\",\"createdAt\":\"2026-10-11T18:33:06.132Z\",\"status\":\"ACTIVE\",\"active\":true,\"adminTier\":\"primary\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "RES-01",
+      "category": "RESULTS ACCESS",
+      "scenario": "Student A accesses own academic result",
+      "command": "getDoc(studentADb, results/resAId)",
+      "input": {
+        "caller": "3vME9QVGDQ2uh4mDMyHI4FtmJEiL",
+        "resultStudentId": "3vME9QVGDQ2uh4mDMyHI4FtmJEiL"
+      },
+      "operation": "Owner read of published examination result",
+      "expected": "ALLOWED (Doc retrieved)",
+      "actual": "ALLOWED (Doc retrieved)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "RES-02",
+      "category": "RESULTS ACCESS",
+      "scenario": "Student A attempts to access Student B academic result",
+      "command": "getDoc(studentADb, results/resBId)",
+      "input": {
+        "caller": "3vME9QVGDQ2uh4mDMyHI4FtmJEiL",
+        "targetResultOwner": "Er5msRQbuE72T32srUJNqFTSjPVP"
+      },
+      "operation": "Cross-student academic result read attempt",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "RES-03",
+      "category": "RESULTS ACCESS",
+      "scenario": "Roll number reshuffle does not transfer result ownership",
+      "command": "Roll reshuffle (A=2, B=1) -> getDoc(studentADb, results/resBId)",
+      "input": {
+        "studentA_newRoll": 2,
+        "resultB_oldRoll": 2,
+        "resultB_studentId": "Er5msRQbuE72T32srUJNqFTSjPVP"
+      },
+      "operation": "Verification that ownership is anchored to stable studentId, not rollNumber",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SESS-01",
+      "category": "LOGIN SECURITY",
+      "scenario": "Admin login records persistent session document",
+      "command": "fetch(/api/auth/record-login, { adminToken })",
+      "input": {
+        "uid": "ptWrTNHsIWdvofLSmIrt6PSskGGD",
+        "device": "MacBook"
+      },
+      "operation": "Admin login tracking and session persistence",
+      "expected": "Session document created in user_sessions with matching userUid",
+      "actual": "sessionId=undefined, exists=false",
+      "difference": "Session document missing or invalid",
+      "status": "FAIL",
+      "rawOutput": "{}",
+      "exitCode": 0
+    },
+    {
+      "id": "SESS-02",
+      "category": "LOGIN SECURITY",
+      "scenario": "Teacher login records persistent session document",
+      "command": "fetch(/api/auth/record-login, { teacherToken })",
+      "input": {
+        "uid": "o7H6Q5ZK26f4IABsFwYS7q9M6Zee",
+        "device": "Windows PC"
+      },
+      "operation": "Teacher login tracking and session persistence",
+      "expected": "Session document created in user_sessions with matching userUid",
+      "actual": "sessionId=undefined, exists=false",
+      "difference": "Session document missing or invalid",
+      "status": "FAIL",
+      "rawOutput": "{}",
+      "exitCode": 0
+    },
+    {
+      "id": "SESS-03",
+      "category": "LOGIN SECURITY",
+      "scenario": "Student login records persistent session document",
+      "command": "fetch(/api/auth/record-login, { studentToken })",
+      "input": {
+        "uid": "RHgzchrIv64tFkrMn9ky3GSmemhT",
+        "device": "Android Phone"
+      },
+      "operation": "Student login tracking and session persistence",
+      "expected": "Session document created in user_sessions with matching userUid",
+      "actual": "sessionId=undefined, exists=false",
+      "difference": "Session document missing or invalid",
+      "status": "FAIL",
+      "rawOutput": "{}",
+      "exitCode": 0
+    },
+    {
+      "id": "SESS-04",
+      "category": "LOGIN SECURITY",
+      "scenario": "Guest without auth token cannot register authenticated login session",
+      "command": "fetch(/api/auth/record-login, { no auth })",
+      "input": {
+        "caller": "GUEST"
+      },
+      "operation": "Unauthenticated session registration attempt",
+      "expected": "HTTP 401/403 Forbidden",
+      "actual": "HTTP 401",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "SESS-05",
+      "category": "LOGIN SECURITY",
+      "scenario": "User cannot delete own login session records (append-only audit)",
+      "command": "deleteDoc(studentDb, user_sessions/sessionId)",
+      "input": {
+        "caller": "RHgzchrIv64tFkrMn9ky3GSmemhT"
+      },
+      "operation": "Client deletion of login session document",
+      "expected": "DENIED with permission-denied (allow delete: if false)",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "deleteDenied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "SESS-06",
+      "category": "LOGIN SECURITY",
+      "scenario": "Remote session revocation sets session to REVOKED successfully",
+      "command": "fetch(/api/auth/revoke-session, { sessionId })",
+      "input": {},
+      "operation": "Remote session termination flow",
+      "expected": "HTTP 200 with success: true and status: REVOKED",
+      "actual": "HTTP 401, success=undefined",
+      "difference": "Revocation failed",
+      "status": "FAIL",
+      "rawOutput": "{\"error\":\"Unauthorized: Invalid or expired authentication token.\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "GST-01",
+      "category": "GUEST ISOLATION",
+      "scenario": "Guest direct query of transactions collection rejected",
+      "command": "getDocs(guestDb, \"transactions\")",
+      "input": {
+        "caller": "GUEST",
+        "collection": "transactions"
+      },
+      "operation": "Direct Firestore collection query without auth",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "GST-02",
+      "category": "GUEST ISOLATION",
+      "scenario": "Guest direct query of remitBills collection rejected",
+      "command": "getDocs(guestDb, \"remitBills\")",
+      "input": {
+        "caller": "GUEST",
+        "collection": "remitBills"
+      },
+      "operation": "Direct Firestore collection query without auth",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "GST-03",
+      "category": "GUEST ISOLATION",
+      "scenario": "Guest direct query of cash_ledger collection rejected",
+      "command": "getDocs(guestDb, \"cash_ledger\")",
+      "input": {
+        "caller": "GUEST",
+        "collection": "cash_ledger"
+      },
+      "operation": "Direct Firestore collection query without auth",
+      "expected": "DENIED with permission-denied",
+      "actual": "DENIED (permission-denied)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "denied=true",
+      "exitCode": 0
+    },
+    {
+      "id": "GST-04",
+      "category": "GUEST ISOLATION",
+      "scenario": "Guest calling bulk user deletion API rejected",
+      "command": "fetch(/api/users/delete-auth-bulk, { no auth })",
+      "input": {
+        "caller": "GUEST"
+      },
+      "operation": "Unauthenticated bulk user deletion attempt",
+      "expected": "HTTP 401/403 Forbidden",
+      "actual": "HTTP 401",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Status: 401",
+      "exitCode": 0
+    },
+    {
+      "id": "GST-05",
+      "category": "GUEST ISOLATION",
+      "scenario": "Guest reads public site_content for institutional website",
+      "command": "getDocs(guestDb, \"site_content\")",
+      "input": {
+        "caller": "GUEST"
+      },
+      "operation": "Public content read for website visitors",
+      "expected": "ALLOWED (Public portal content)",
+      "actual": "ALLOWED (Public content accessible)",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "allowed=true",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-01",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "1. Student enrollment and fee structure setup",
+      "command": "Set student_enrollments and studentFees documents",
+      "input": {
+        "studentUid": "y5z2STKeoUf2PAQLbQut1VZ1CDYD",
+        "permanentStudentId": "STU-FIN-1791743586729",
+        "fee": 2500
+      },
+      "operation": "Initial enrollment and fee structure establishment",
+      "expected": "Enrollment document active, tuition fee structure persisted",
+      "actual": "Enrollment created and fee structure recorded",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "enrId=ENR-2082-1791743586755",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-02",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "2. Atomic bill generation with month locks and deterministic bill items",
+      "command": "generateSingleStudentBillTransactionally(...)",
+      "input": {
+        "studentId": "y5z2STKeoUf2PAQLbQut1VZ1CDYD",
+        "totalAmount": 2500,
+        "month": "Baisakh"
+      },
+      "operation": "Transactional remit bill creation",
+      "expected": "Bill created with status=unpaid, dueAmount=2500, totalAmount=2500",
+      "actual": "billId=olfF8So3fwrpPdjjAT2g, status=pending, totalAmount=2500",
+      "difference": "Bill generation anomaly",
+      "status": "FAIL",
+      "rawOutput": "{\"id\":\"olfF8So3fwrpPdjjAT2g\",\"billNo\":\"RMT-2082-000001\",\"studentId\":\"y5z2STKeoUf2PAQLbQut1VZ1CDYD\",\"studentName\":\"Financial Student\",\"class\":\"10\",\"billingPeriod\":\"Baisakh (1 Month)\",\"periodMonths\":1,\"coveredMonths\":[\"Baisakh\"],\"academicYear\":\"2082\",\"itemizedCharges\":[{\"name\":\"Tuition Fee\",\"rate\":2500,\"total\":2500,\"month\":\"Baisakh\",\"multiplier\":1,\"discount\":0}],\"totalAmount\":2500,\"paidAmount\":0,\"dueAmount\":2500,\"status\":\"pending\",\"createdAt\":\"26 Aswin 2083\",\"createdBy\":\"Admin Auditor\",\"studentRoll\":\"10\"}",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-03",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "3. Partial payment correctly updates bill (paid=1000, due=1500, status=partial)",
+      "command": "executeCashFeePayment({ cashTendered: 1000, netPayable: 2500 })",
+      "input": {
+        "paymentAmount": 1000,
+        "billDue": 2500
+      },
+      "operation": "Partial settlement transaction",
+      "expected": "paidAmount=1000, dueAmount=1500, status=partial",
+      "actual": "paidAmount=1000, dueAmount=1500, status=partial",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"id\":\"olfF8So3fwrpPdjjAT2g\",\"billNo\":\"RMT-2082-000001\",\"studentId\":\"y5z2STKeoUf2PAQLbQut1VZ1CDYD\",\"studentName\":\"Financial Student\",\"class\":\"10\",\"billingPeriod\":\"Baisakh (1 Month)\",\"periodMonths\":1,\"coveredMonths\":[\"Baisakh\"],\"academicYear\":\"2082\",\"itemizedCharges\":[{\"name\":\"Tuition Fee\",\"rate\":2500,\"total\":2500,\"month\":\"Baisakh\",\"multiplier\":1,\"discount\":0}],\"totalAmount\":2500,\"createdAt\":\"26 Aswin 2083\",\"createdBy\":\"Admin Auditor\",\"studentRoll\":\"10\",\"dueAmount\":1500,\"paidAt\":\"26 Aswin 2083\",\"paidAmount\":1000,\"transactionId\":\"TXN_REC-PART-1791743587011\",\"status\":\"partial\",\"updatedAt\":{\"_seconds\":1791743587,\"_nanoseconds\":109000000}}",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-04",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "4. Full settlement zeroes due amount and marks bill as paid",
+      "command": "executeCashFeePayment({ cashTendered: 1500, netPayable: 1500 })",
+      "input": {
+        "paymentAmount": 1500,
+        "billDue": 1500
+      },
+      "operation": "Remaining settlement transaction",
+      "expected": "paidAmount=2500, dueAmount=0, status=paid",
+      "actual": "paidAmount=2500, dueAmount=0, status=paid",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"id\":\"olfF8So3fwrpPdjjAT2g\",\"billNo\":\"RMT-2082-000001\",\"studentId\":\"y5z2STKeoUf2PAQLbQut1VZ1CDYD\",\"studentName\":\"Financial Student\",\"class\":\"10\",\"billingPeriod\":\"Baisakh (1 Month)\",\"periodMonths\":1,\"coveredMonths\":[\"Baisakh\"],\"academicYear\":\"2082\",\"itemizedCharges\":[{\"name\":\"Tuition Fee\",\"rate\":2500,\"total\":2500,\"month\":\"Baisakh\",\"multiplier\":1,\"discount\":0}],\"totalAmount\":2500,\"createdAt\":\"26 Aswin 2083\",\"createdBy\":\"Admin Auditor\",\"studentRoll\":\"10\",\"paidAt\":\"26 Aswin 2083\",\"dueAmount\":0,\"paidAmount\":2500,\"transactionId\":\"TXN_REC-SETTLE-1791743587211\",\"status\":\"paid\",\"updatedAt\":{\"_seconds\":1791743587,\"_nanoseconds\":319000000}}",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-05",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "5. Overpayment with excessDecision=\"ADVANCE\" creates NPR 500 advance credit",
+      "command": "executeCashFeePayment({ cashTendered: 500, netPayable: 0, excessDecision: \"ADVANCE\" })",
+      "input": {
+        "paymentAmount": 500,
+        "excessDecision": "ADVANCE"
+      },
+      "operation": "Advance credit creation",
+      "expected": "Student advanceBalance updated to 500",
+      "actual": "advanceBalance=500",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "advanceBalance=500",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-06",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "6. Payment cancellation reverses transaction and restores bill debt accurately",
+      "command": "cancelPaymentTransaction({ transactionId })",
+      "input": {
+        "transactionId": "TXN_REC-SETTLE-1791743587211",
+        "reversedAmount": 1500
+      },
+      "operation": "Transactional payment reversal",
+      "expected": "Bill debt restored: paidAmount=1000, dueAmount=1500",
+      "actual": "paidAmount=1000, dueAmount=1500, success=true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"id\":\"olfF8So3fwrpPdjjAT2g\",\"billNo\":\"RMT-2082-000001\",\"studentId\":\"y5z2STKeoUf2PAQLbQut1VZ1CDYD\",\"studentName\":\"Financial Student\",\"class\":\"10\",\"billingPeriod\":\"Baisakh (1 Month)\",\"periodMonths\":1,\"coveredMonths\":[\"Baisakh\"],\"academicYear\":\"2082\",\"itemizedCharges\":[{\"name\":\"Tuition Fee\",\"rate\":2500,\"total\":2500,\"month\":\"Baisakh\",\"multiplier\":1,\"discount\":0}],\"totalAmount\":2500,\"createdAt\":\"26 Aswin 2083\",\"createdBy\":\"Admin Auditor\",\"studentRoll\":\"10\",\"paidAt\":\"26 Aswin 2083\",\"transactionId\":\"TXN_REC-SETTLE-1791743587211\",\"dueAmount\":1500,\"paidAmount\":1000,\"status\":\"partial\",\"updatedAt\":{\"_seconds\":1791743587,\"_nanoseconds\":876000000}}",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-07",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "7. Payment refund creates official refund_record and reverses transaction",
+      "command": "processPaymentRefund({ transactionId })",
+      "input": {
+        "transactionId": "TXN_REC-PART-1791743587011",
+        "refundAmount": 1000
+      },
+      "operation": "Transactional payment refund and expense ledger record",
+      "expected": "refund_record created with amount=1000, status=REFUNDED",
+      "actual": "refundRecordId=IGk92gCMIGPGJrUBB86n, amount=1000",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "{\"id\":\"IGk92gCMIGPGJrUBB86n\",\"studentId\":\"y5z2STKeoUf2PAQLbQut1VZ1CDYD\",\"studentName\":\"Financial Student\",\"class\":\"10\",\"amount\":1000,\"sourceTransactionId\":\"TXN_REC-PART-1791743587011\",\"transactionIds\":[\"TXN_REC-PART-1791743587011\"],\"paymentGroupId\":\"PAY_REC-PART-1791743587011\",\"receiptNo\":\"REC-PART-1791743587011\",\"type\":\"PAYMENT_REFUND\",\"status\":\"REFUNDED_TO_GUARDIAN\",\"approvedBy\":\"Admin Auditor\",\"adminEmail\":\"fin_e2e_adm@shikshantar.edu.np\",\"reason\":\"Audited Refund Test\",\"dateBS\":\"26 Aswin 2083\",\"timestamp\":{\"_seconds\":1791743588,\"_nanoseconds\":173000000}}",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-08",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "8. Cash conservation holds: Net physical cash strictly equals net student advance",
+      "command": "Audit cash_ledger sums for student",
+      "input": {
+        "studentId": "y5z2STKeoUf2PAQLbQut1VZ1CDYD"
+      },
+      "operation": "Physical cash conservation audit",
+      "expected": "Net cash (Inflows - Outflows) == Net student advance (500)",
+      "actual": "Inflow=0, Outflow=0, Net=0",
+      "difference": "Cash conservation imbalance",
+      "status": "FAIL",
+      "rawOutput": "Net cash: 0",
+      "exitCode": 0
+    },
+    {
+      "id": "FIN-09",
+      "category": "FINANCIAL LIFECYCLE",
+      "scenario": "Family allocation",
+      "command": "calculate",
+      "input": {},
+      "operation": "Allocate",
+      "expected": "3000 and 500",
+      "actual": "children.reduce is not a function",
+      "difference": "children.reduce is not a function",
+      "status": "FAIL",
+      "rawOutput": "TypeError: children.reduce is not a function\n    at calculateFamilyPaymentAllocation (/app/applet/src/lib/familyBillingEngine.ts:238:39)\n    at runPartLTests (/app/applet/tests/phase8/partL_financialLifecycle.ts:371:24)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async main (/app/applet/tests/phase8/masterAuditRunner.ts:42:5)",
+      "exitCode": 1
+    },
+    {
+      "id": "CONC-01",
+      "category": "CONCURRENCY DEFENSE",
+      "scenario": "20 concurrent identical bill-generation requests produce exactly 1 bill",
+      "command": "Promise.all(20 x generateSingleStudentBillTransactionally)",
+      "input": {
+        "concurrencyCount": 20,
+        "month": "Jestha",
+        "studentId": "86hOF0oRPQe9XEgz2iJJruU6rlxS"
+      },
+      "operation": "High-concurrency race condition attack on billing locks",
+      "expected": "Exactly 1 bill created in Firestore; 19 rejected/skipped by month lock",
+      "actual": "Bills in Firestore: 0, Successful promises: 1, Skipped: 19",
+      "difference": "Duplicate bills created (RACE CONDITION DEFECT)",
+      "status": "FAIL",
+      "rawOutput": "BillsCount: 0",
+      "exitCode": 0
+    },
+    {
+      "id": "CONC-02",
+      "category": "CONCURRENCY DEFENSE",
+      "scenario": "20 concurrent identical payment requests produce exactly 1 transaction",
+      "command": "Promise.all(20 x executeCashFeePayment with shared receipt)",
+      "input": {
+        "concurrencyCount": 20,
+        "receipt": "REC-CONC-1791743589919"
+      },
+      "operation": "High-concurrency race condition attack on payment receipt lock",
+      "expected": "Exactly 1 transaction committed; 19 rejected by receipt uniqueness lock",
+      "actual": "Transactions in Firestore: 1, Successful payments: 1",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "TxCount: 1",
+      "exitCode": 0
+    },
+    {
+      "id": "CONC-03",
+      "category": "CONCURRENCY DEFENSE",
+      "scenario": "20 concurrent reversal requests execute reversal exactly once (no multi-reversal debt explosion)",
+      "command": "Promise.all(20 x cancelPaymentTransaction on same tx)",
+      "input": {
+        "concurrencyCount": 20,
+        "targetTx": "tx_race_rev_1791743591333"
+      },
+      "operation": "High-concurrency race condition attack on payment cancellation",
+      "expected": "Exactly 1 cancellation succeeds; restored dueAmount == 1000 (never multiplied)",
+      "actual": "Successful reversals: 1, Final dueAmount: 1000",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "DueAmount: 1000",
+      "exitCode": 0
+    },
+    {
+      "id": "IDEMP-01",
+      "category": "NETWORK RETRY IDEMPOTENCY",
+      "scenario": "Client network retry with identical receipt lock prevents duplicate deduction",
+      "command": "executeCashFeePayment -> retry identical payload",
+      "input": {
+        "receipt": "REC-IDEMP-1791743592411"
+      },
+      "operation": "Simulated client retry after timeout",
+      "expected": "Only 1 transaction persists in database; duplicate attempt safely blocked",
+      "actual": "Initial txId: TXN_REC-IDEMP-1791743592411, Retry blocked: true, Tx count: 1",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Tx count: 1",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-01",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: null value",
+      "command": "parseIntegerAmount(null)",
+      "input": {
+        "raw": null
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-02",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: undefined value",
+      "command": "parseIntegerAmount(undefined)",
+      "input": {},
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-03",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: empty string",
+      "command": "parseIntegerAmount(\"\")",
+      "input": {
+        "raw": ""
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-04",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: whitespace string",
+      "command": "parseIntegerAmount(\"   \")",
+      "input": {
+        "raw": "   "
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-05",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: negative number",
+      "command": "parseIntegerAmount(-500)",
+      "input": {
+        "raw": -500
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-06",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: negative string",
+      "command": "parseIntegerAmount(\"-2500\")",
+      "input": {
+        "raw": "-2500"
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-07",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: zero number",
+      "command": "parseIntegerAmount(0)",
+      "input": {
+        "raw": 0
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-08",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: decimal number",
+      "command": "parseIntegerAmount(1500.85)",
+      "input": {
+        "raw": 1500.85
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (1500)",
+      "actual": "Parsed: 0",
+      "difference": "Coercion error: got 0",
+      "status": "FAIL",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-09",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: scientific notation string",
+      "command": "parseIntegerAmount(\"1e5\")",
+      "input": {
+        "raw": "1e5"
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-10",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: letters mixed with numbers",
+      "command": "parseIntegerAmount(\"500abc\")",
+      "input": {
+        "raw": "500abc"
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-11",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: SQL injection string",
+      "command": "parseIntegerAmount(\"'; DROP TABLE remitBills;--\")",
+      "input": {
+        "raw": "'; DROP TABLE remitBills;--"
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-12",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: XSS script payload",
+      "command": "parseIntegerAmount(\"<script>alert(1)</script>\")",
+      "input": {
+        "raw": "<script>alert(1)</script>"
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-13",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: Unicode full-width numbers",
+      "command": "parseIntegerAmount(\"１２３\")",
+      "input": {
+        "raw": "１２３"
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-14",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: extremely large integer",
+      "command": "parseIntegerAmount(999999999999999)",
+      "input": {
+        "raw": 999999999999999
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (999999999999999)",
+      "actual": "Parsed: 999999999999999",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=999999999999999",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-15",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: NaN input",
+      "command": "parseIntegerAmount(null)",
+      "input": {
+        "raw": null
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-16",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: Infinity input",
+      "command": "parseIntegerAmount(null)",
+      "input": {
+        "raw": null
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-17",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: Object input",
+      "command": "parseIntegerAmount({\"amount\":500})",
+      "input": {
+        "raw": {
+          "amount": 500
+        }
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "FUZZ-18",
+      "category": "INPUT FUZZING",
+      "scenario": "Fuzz input: Array input",
+      "command": "parseIntegerAmount([500,1000])",
+      "input": {
+        "raw": [
+          500,
+          1000
+        ]
+      },
+      "operation": "Strict integer financial sanitization",
+      "expected": "Safe integer result (0)",
+      "actual": "Parsed: 0",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "actual=0",
+      "exitCode": 0
+    },
+    {
+      "id": "REG-01",
+      "category": "CROSS-MODULE NON-REGRESSION",
+      "scenario": "Login module preserves authentic sign-in and security tracking hooks",
+      "command": "Inspect src/pages/Login.tsx",
+      "input": {
+        "file": "src/pages/Login.tsx"
+      },
+      "operation": "Source code integrity verification",
+      "expected": "Authentic signInWithEmailAndPassword and session tracking present",
+      "actual": "loginOk=true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "loginOk=true",
+      "exitCode": 0
+    },
+    {
+      "id": "REG-02",
+      "category": "CROSS-MODULE NON-REGRESSION",
+      "scenario": "Student Profile module preserves student data viewing",
+      "command": "Inspect src/pages/StudentProfileView.tsx",
+      "input": {
+        "file": "src/pages/StudentProfileView.tsx"
+      },
+      "operation": "Source code integrity verification",
+      "expected": "Student profile view functional",
+      "actual": "stdProfileOk=true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "stdProfileOk=true",
+      "exitCode": 0
+    },
+    {
+      "id": "REG-03",
+      "category": "CROSS-MODULE NON-REGRESSION",
+      "scenario": "Teacher assignment & authorization engine intact",
+      "command": "Inspect src/lib/teacherAssignmentEngine.ts",
+      "input": {
+        "file": "src/lib/teacherAssignmentEngine.ts"
+      },
+      "operation": "Engine integrity verification",
+      "expected": "Teacher authorization functions exported cleanly",
+      "actual": "teacherOk=false",
+      "difference": "Teacher assignment regression",
+      "status": "FAIL",
+      "rawOutput": "teacherOk=false",
+      "exitCode": 0
+    },
+    {
+      "id": "REG-04",
+      "category": "CROSS-MODULE NON-REGRESSION",
+      "scenario": "Result preparation & publication engine intact",
+      "command": "Inspect src/lib/resultPreparationEngine.ts",
+      "input": {
+        "file": "src/lib/resultPreparationEngine.ts"
+      },
+      "operation": "Engine integrity verification",
+      "expected": "Result calculation and publication controls intact",
+      "actual": "resultOk=false",
+      "difference": "Result management regression",
+      "status": "FAIL",
+      "rawOutput": "resultOk=false",
+      "exitCode": 0
+    },
+    {
+      "id": "REG-05",
+      "category": "CROSS-MODULE NON-REGRESSION",
+      "scenario": "Notice Board context intact",
+      "command": "Inspect src/contexts/NoticeContext.tsx",
+      "input": {
+        "file": "src/contexts/NoticeContext.tsx"
+      },
+      "operation": "Context integrity verification",
+      "expected": "Notice context exports functional",
+      "actual": "noticeOk=false",
+      "difference": "Notice context regression",
+      "status": "FAIL",
+      "rawOutput": "noticeOk=false",
+      "exitCode": 0
+    },
+    {
+      "id": "REG-06",
+      "category": "CROSS-MODULE NON-REGRESSION",
+      "scenario": "Alumni module intact",
+      "command": "Inspect src/pages/Alumni.tsx",
+      "input": {
+        "file": "src/pages/Alumni.tsx"
+      },
+      "operation": "Page integrity verification",
+      "expected": "Alumni page functional",
+      "actual": "alumniOk=true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "alumniOk=true",
+      "exitCode": 0
+    },
+    {
+      "id": "CONF-01",
+      "category": "ENVIRONMENT SAFETY",
+      "scenario": "Firebase project identifier is valid institutional ID",
+      "command": "Inspect firebase-applet-config.json",
+      "input": {
+        "projectId": "project-4b410c97-a152-49e7-940"
+      },
+      "operation": "Configuration audit",
+      "expected": "Valid non-empty project ID",
+      "actual": "projectId=project-4b410c97-a152-49e7-940",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "projectId=project-4b410c97-a152-49e7-940",
+      "exitCode": 0
+    },
+    {
+      "id": "CONF-02",
+      "category": "ENVIRONMENT SAFETY",
+      "scenario": "No private keys or service-account secrets leaked in client bundle (dist/)",
+      "command": "Scan dist/*.js for private key patterns",
+      "input": {
+        "directory": "dist"
+      },
+      "operation": "Bundle security audit",
+      "expected": "Zero private keys in client bundle",
+      "actual": "hasPrivateKeyLeaked=false",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "keysProtected=true",
+      "exitCode": 0
+    },
+    {
+      "id": "ATOM-01",
+      "category": "TRANSACTION ATOMICITY",
+      "scenario": "Intermediate transaction failure triggers complete atomic rollback (zero partial writes)",
+      "command": "runTransaction(db, write DocA -> throw -> write DocB)",
+      "input": {
+        "forcedError": "INTENTIONAL_SIMULATED_TRANSACTION_FAILURE"
+      },
+      "operation": "Atomicity failure simulation and rollback inspection",
+      "expected": "Neither DocA nor DocB exists in Firestore (100% clean rollback)",
+      "actual": "DocA exists: false, DocB exists: false, Aborted: true",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "DocA: false, DocB: false",
+      "exitCode": 0
+    },
+    {
+      "id": "ATOM-02",
+      "category": "ERROR FAILURE SAFETY",
+      "scenario": "No orphan allocations created upon aborted payment attempts",
+      "command": "Inspect payment_allocations for phantom records",
+      "input": {
+        "id": "orphan_test_1791743592755"
+      },
+      "operation": "Integrity check on orphan payment artifacts",
+      "expected": "No orphan allocation records present",
+      "actual": "Orphan exists: false",
+      "difference": "None (Matched)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "noOrphan=true",
+      "exitCode": 0
+    },
+    {
+      "id": "LARGE-01",
+      "category": "LARGE DATASET AUDIT",
+      "scenario": "500 students individual billing math reconciles: Total Billed == Paid + Due",
+      "command": "Reconcile 500 students array sums",
+      "input": {
+        "totalStudents": 500,
+        "totalFamilies": 100
+      },
+      "operation": "Summation and reconciliation of 500 student records",
+      "expected": "Total Billed (2175000) == Paid (1368750) + Due (806250)",
+      "actual": "Billed: 2175000, Paid: 1368750, Due: 806250",
+      "difference": "0 (Difference = 0 NPR)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "Billed=2175000, Paid=1368750, Due=806250",
+      "exitCode": 0
+    },
+    {
+      "id": "LARGE-02",
+      "category": "LARGE DATASET AUDIT",
+      "scenario": "Class-level rollups across all 13 grades reconcile to Grand School Totals with 0 diff",
+      "command": "Rollup classTotals across 13 classes",
+      "input": {
+        "classesCount": 13
+      },
+      "operation": "Cross-grade hierarchical aggregation audit",
+      "expected": "Sum of 13 Classes == Grand Total (Billed: 2175000)",
+      "actual": "Class sum billed: 2175000, paid: 1368750, due: 806250",
+      "difference": "0 (Difference = 0 NPR)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "sumClassBilled=2175000",
+      "exitCode": 0
+    },
+    {
+      "id": "LARGE-03",
+      "category": "LARGE DATASET AUDIT",
+      "scenario": "100 Family clusters correctly aggregate child dues without duplication or omission",
+      "command": "groupStudentsByFamily(500 students)",
+      "input": {
+        "expectedFamilies": 100
+      },
+      "operation": "Family grouping and sibling consolidation algorithm",
+      "expected": "100 family groups generated, total family due == grand due (806250)",
+      "actual": "Families formed: 100, Sum of family dues: NaN",
+      "difference": "Family rollup discrepancy",
+      "status": "FAIL",
+      "rawOutput": "familiesCount=100",
+      "exitCode": 0
+    },
+    {
+      "id": "FORENSIC-40",
+      "category": "FORENSIC AUDIT",
+      "scenario": "40-Category Impossible-State Scan completes with 0 anomalies detected",
+      "command": "runPartWForensicScan() across all collections",
+      "input": {
+        "categoriesScanned": 40
+      },
+      "operation": "Exhaustive database integrity scan",
+      "expected": "Total anomalies == 0 across all 40 forensic categories",
+      "actual": "Total anomalies detected: 0",
+      "difference": "0 (Difference = 0)",
+      "status": "PASS-RUNTIME",
+      "rawOutput": "totalAnomalies=0",
+      "exitCode": 0
+    }
+  ]
+}

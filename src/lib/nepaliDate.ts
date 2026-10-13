@@ -218,18 +218,19 @@ export const formatBSDateTime = (date: Date | string | number | any): string => 
 };
 
 /**
- * Returns current Bikram Sambat year, month (0-indexed), and date
+ * Returns Bikram Sambat year, month (0-indexed), and date for any date representation
  */
-export const getBSYearMonthDate = (date: Date = new Date()) => {
+export const getBSYearMonthDate = (date: any = new Date()) => {
   try {
-    const nd = new NepaliDate(date);
+    const nd = parseToNepaliDate(date);
     return {
       year: nd.getYear(),
       month: nd.getMonth(),
       date: nd.getDate()
     };
   } catch {
-    return { year: date.getFullYear() + 57, month: 0, date: 1 };
+    const d = date instanceof Date ? date : new Date();
+    return { year: d.getFullYear() + 57, month: 0, date: 1 };
   }
 };
 

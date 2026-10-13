@@ -1,0 +1,3 @@
+i  emulators: Shutting down emulators.
+
+Error: Could not spawn `java -version`. Please make sure Java is installed and on your system PATH.

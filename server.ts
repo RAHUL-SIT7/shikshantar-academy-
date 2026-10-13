@@ -12,22 +12,44 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 try {
-  if (firebaseConfig.projectId) {
-    process.env.GOOGLE_CLOUD_QUOTA_PROJECT = firebaseConfig.projectId;
+  if (!process.env.FIREBASE_AUTH_EMULATOR_HOST && fs.existsSync('firebase.json')) {
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9098';
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8085';
+    process.env.GCLOUD_PROJECT = 'demo-shikshantar-test';
+  }
+  const isEmulator = Boolean(process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST);
+  const targetProjectId = isEmulator 
+    ? (process.env.GCLOUD_PROJECT || 'demo-shikshantar-test') 
+    : firebaseConfig.projectId;
+
+  if (targetProjectId) {
+    process.env.GOOGLE_CLOUD_QUOTA_PROJECT = targetProjectId;
   }
   if (!admin.apps.length) {
     admin.initializeApp({
-      projectId: firebaseConfig.projectId,
+      projectId: targetProjectId,
     });
   }
-  console.log('Firebase Admin initialized successfully.');
+  console.log(`Firebase Admin initialized successfully (Project: ${targetProjectId}, Emulator: ${isEmulator}).`);
 } catch (error) {
   console.error('Failed to initialize Firebase Admin:', error);
 }
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+
+  function getFirestoreEndpoint(path: string): string {
+    const isEmulator = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+    const projectId = isEmulator ? (process.env.GCLOUD_PROJECT || 'demo-shikshantar-test') : firebaseConfig.projectId;
+    const databaseId = isEmulator ? '(default)' : (firebaseConfig.firestoreDatabaseId || '(default)');
+    const base = isEmulator ? `http://${process.env.FIRESTORE_EMULATOR_HOST}/v1` : 'https://firestore.googleapis.com/v1';
+    return `${base}/projects/${projectId}/databases/${databaseId}/documents/${path}`;
+  }
+
+  const args = process.argv.slice(2);
+  const portIndex = args.indexOf('--port');
+  const portArg = portIndex !== -1 && args[portIndex + 1] ? parseInt(args[portIndex + 1], 10) : undefined;
+  const PORT = portArg || (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
 
   app.disable('x-powered-by');
 
@@ -453,9 +475,7 @@ Shikshantar Academy`;
       adminTier = (decodedToken.adminTier as string) || 'primary';
     } else {
       try {
-        const projectId = firebaseConfig.projectId;
-        const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${decodedToken.uid}`;
+        const firestoreUrl = getFirestoreEndpoint(`users/${decodedToken.uid}`);
 
         const docRes = await fetch(firestoreUrl, {
           headers: {
@@ -513,9 +533,7 @@ Shikshantar Academy`;
 
     if (entry.callerToken) {
       try {
-        const projectId = firebaseConfig.projectId;
-        const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-        const logUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/ledger_audit_logs`;
+        const logUrl = getFirestoreEndpoint('ledger_audit_logs');
         await fetch(logUrl, {
           method: 'POST',
           headers: {
@@ -1510,11 +1528,9 @@ Contact: academyshikshantar@gmail.com | +977 9709867048`;
       }
 
       const cleanSessionId = sessionId.trim();
-      const projectId = firebaseConfig.projectId;
-      const databaseId = firebaseConfig.firestoreDatabaseId;
       const nowIso = new Date().toISOString();
 
-      const getUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/user_sessions/${cleanSessionId}?key=${firebaseConfig.apiKey}`;
+      const getUrl = `${getFirestoreEndpoint(`user_sessions/${cleanSessionId}`)}?key=${firebaseConfig.apiKey}`;
       const sRes = await fetch(getUrl, {
         headers: { Authorization: `Bearer ${authUser.rawToken}` }
       });
@@ -1529,7 +1545,7 @@ Contact: academyshikshantar@gmail.com | +977 9709867048`;
         }
       }
 
-      const sessionUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/user_sessions/${cleanSessionId}?updateMask.fieldPaths=lastActiveAt&updateMask.fieldPaths=updatedAt&key=${firebaseConfig.apiKey}`;
+      const sessionUrl = `${getFirestoreEndpoint(`user_sessions/${cleanSessionId}`)}?updateMask.fieldPaths=lastActiveAt&updateMask.fieldPaths=updatedAt&key=${firebaseConfig.apiKey}`;
       await fetch(sessionUrl, {
         method: 'PATCH',
         headers: {

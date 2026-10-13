@@ -510,7 +510,14 @@ export default function AccountAdmin() {
                       </div>
                   )}
                  
-                 {activeTab === 'reports' && <ReportsAnalyticsTab students={studentsData} transactions={transactionsData} />}
+                 {activeTab === 'reports' && (
+                   <ReportsAnalyticsTab 
+                     students={studentsData} 
+                     transactions={transactionsData} 
+                     remitBills={remitBillsData}
+                     academicYear={academicYear}
+                   />
+                 )}
 
                  {activeTab === 'family_billing' && (
                      <div className="mt-4">

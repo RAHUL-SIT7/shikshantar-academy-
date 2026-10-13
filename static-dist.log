@@ -1,0 +1,7 @@
+ INFO  Accepting connections at http://localhost:5000
+ HTTP  10/12/2026 11:53:42 AM 127.0.0.1 GET /
+ HTTP  10/12/2026 11:53:42 AM 127.0.0.1 Returned 200 in 25 ms
+ HTTP  10/12/2026 11:53:46 AM 127.0.0.1 HEAD /assets/index-DibSN_lI.js
+ HTTP  10/12/2026 11:53:46 AM 127.0.0.1 Returned 200 in 52 ms
+ HTTP  10/12/2026 11:54:52 AM 127.0.0.1 GET /assets/index-BoJpTpZk.css
+ HTTP  10/12/2026 11:54:52 AM 127.0.0.1 Returned 200 in 11 ms

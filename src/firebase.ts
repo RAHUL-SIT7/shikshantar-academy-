@@ -5,21 +5,31 @@ import {
   browserSessionPersistence, 
   inMemoryPersistence, 
   browserPopupRedirectResolver, 
-  getAuth 
+  getAuth,
+  connectAuthEmulator
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfigImport from '../firebase-applet-config.json';
+
+const isNodeEnv = typeof process !== 'undefined' && Boolean(process.env);
+const emulatorFirestoreHost = isNodeEnv ? process.env.FIRESTORE_EMULATOR_HOST : undefined;
+const emulatorAuthHost = isNodeEnv ? process.env.FIREBASE_AUTH_EMULATOR_HOST : undefined;
+const emulatorProject = isNodeEnv ? process.env.GCLOUD_PROJECT : undefined;
+
+const isEmulator = Boolean(emulatorFirestoreHost || emulatorAuthHost);
+const effectiveProjectId = isEmulator ? (emulatorProject || 'demo-shikshantar-test') : firebaseConfigImport.projectId;
+const effectiveDatabaseId = isEmulator ? '(default)' : firebaseConfigImport.firestoreDatabaseId;
 
 export const firebaseConfig = {
   apiKey: firebaseConfigImport.apiKey,
   authDomain: firebaseConfigImport.authDomain,
-  projectId: firebaseConfigImport.projectId,
+  projectId: effectiveProjectId,
   storageBucket: firebaseConfigImport.storageBucket,
   messagingSenderId: firebaseConfigImport.messagingSenderId,
   appId: firebaseConfigImport.appId,
   measurementId: firebaseConfigImport.measurementId || '',
-  firestoreDatabaseId: firebaseConfigImport.firestoreDatabaseId
+  firestoreDatabaseId: effectiveDatabaseId
 };
 
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -33,6 +43,20 @@ export const auth = typeof window !== 'undefined'
 
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app);
+
+if (isEmulator) {
+  if (emulatorAuthHost) {
+    try {
+      connectAuthEmulator(auth, `http://${emulatorAuthHost}`, { disableWarnings: true });
+    } catch (_) {}
+  }
+  if (emulatorFirestoreHost) {
+    try {
+      const [host, portStr] = emulatorFirestoreHost.split(':');
+      connectFirestoreEmulator(db, host || '127.0.0.1', parseInt(portStr || '8085', 10));
+    } catch (_) {}
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',

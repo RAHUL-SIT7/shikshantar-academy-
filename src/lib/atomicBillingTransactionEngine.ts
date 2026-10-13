@@ -9,6 +9,7 @@ import { auth } from '../firebase';
 import { sanitizeForFirestore, validateRemitBillPayload } from './firestoreSanitize';
 import { formatBSDate } from './nepaliDate';
 import { getAuthoritativeActor } from './auditLogger';
+import { getNepaliMonthIndex } from './nepaliBillingCoverage';
 
 export interface AtomicBillingStudentRequest {
   student: {
@@ -259,6 +260,8 @@ export async function generateSingleStudentBillTransactionally(
       academicYear: cleanYear,
       itemizedCharges: effectiveCharges,
       totalAmount: effectiveTotalAmount,
+      paidAmount: 0,
+      dueAmount: effectiveTotalAmount,
       status: 'pending',
       createdAt: currentBS,
       createdBy: creatorName
@@ -531,13 +534,25 @@ export async function releaseBillUniquenessLocks(
   // Release Monthly Locks
   if (Array.isArray(bill.coveredMonths)) {
     for (const mName of bill.coveredMonths) {
-      const mLockRef = doc(db, 'billing_month_locks', `${cleanYear}_${studentId}_${mName}`);
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(mLockRef);
-        if (snap.exists() && snap.data()?.billId === bill.id) {
-          tx.set(mLockRef, { status: 'void', voidedAt: new Date().toISOString() }, { merge: true });
-        }
-      });
+      const idx = getNepaliMonthIndex(mName);
+      const padded = idx >= 0 ? (idx + 1).toString().padStart(2, '0') : null;
+      const formattedMonthId = padded ? `${padded}_${mName}` : null;
+
+      // Lock references to release (both canonical formattedMonthId and plain monthName)
+      const lockKeys = [mName];
+      if (formattedMonthId && formattedMonthId !== mName) {
+        lockKeys.push(formattedMonthId);
+      }
+
+      for (const key of lockKeys) {
+        const mLockRef = doc(db, 'billing_month_locks', `${cleanYear}_${studentId}_${key}`);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(mLockRef);
+          if (snap.exists() && (snap.data()?.billId === bill.id || snap.data()?.status === 'active')) {
+            tx.set(mLockRef, { status: 'void', voidedAt: new Date().toISOString() }, { merge: true });
+          }
+        });
+      }
     }
   }
 }

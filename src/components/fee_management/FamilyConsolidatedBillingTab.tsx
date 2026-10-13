@@ -71,6 +71,7 @@ export default function FamilyConsolidatedBillingTab({
     const term = searchTerm.toLowerCase();
     return allFamilyGroups.filter(
       (f) =>
+        (f.familyId && f.familyId.toLowerCase().includes(term)) ||
         f.guardianName.toLowerCase().includes(term) ||
         f.guardianPhone.includes(term) ||
         f.children.some(

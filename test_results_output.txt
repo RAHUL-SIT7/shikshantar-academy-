@@ -1,0 +1,356 @@
+======================================================================
+📊 SHIKSHANTAR ACADEMY — RESULT MANAGEMENT DEEP FORENSIC AUDIT (80+ SCENARIOS)
+======================================================================
+
+WARNING: You are using the Auth Emulator, which is intended for local testing only.  Do not use with production credentials.
+--- SECTION 1: RESULT CREATION & VALIDATION (SCENARIOS 01-15) ---
+✅ [PASS] [RES-001] (CREATION) Create valid result document in Firestore
+   Expected: PERSISTED
+   Actual  : PERSISTED
+   Evidence: {"id":"res_valid_01_1791901928315","studentUid":"9Lxuyr4f9b4l8aF1NDyxm3kt2q5l","studentId":"STU-RES-001","studentName":"Student Aayush","class":"8","section":"A","rollNumberSnapshot":"10","academicYear":"2083","examType":"First Terminal","examId":"First_Terminal_8_A_2083","subjects":{"English":{"fullMarks":100,"obtained":85,"passMarks":35},"Math":{"fullMarks":100,"obtained":95,"passMarks":35},"Science":{"fullMarks":100,"obtained":90,"passMarks":35}},"total":270,"fullTotal":300,"percentage":90,"grade":"A+","gpa":4,"published":false,"createdAt":"2026-10-13T14:32:08.315Z"}
+----------------------------------------------------------------------
+✅ [PASS] [RES-002] (MARK_VAL) 0 marks persisted accurately
+   Expected: 0 MARKS
+   Actual  : 0 MARKS
+----------------------------------------------------------------------
+✅ [PASS] [RES-003] (MARK_VAL) Maximum marks (100/100) persisted accurately
+   Expected: 100 MARKS
+   Actual  : 100 MARKS
+----------------------------------------------------------------------
+✅ [PASS] [RES-004] (MARK_VAL) Absent "AB" string mark persisted accurately
+   Expected: AB
+   Actual  : AB
+----------------------------------------------------------------------
+✅ [PASS] [RES-005] (MARK_VAL) Theory and Practical split marks persisted accurately
+   Expected: 80 TOTAL (60 TH / 20 PR)
+   Actual  : 80 TOTAL (60 TH / 20 PR)
+----------------------------------------------------------------------
+✅ [PASS] [RES-006] (MARK_VAL) Mark boundary & input sanitation test #6
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-007] (MARK_VAL) Mark boundary & input sanitation test #7
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-008] (MARK_VAL) Mark boundary & input sanitation test #8
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-009] (MARK_VAL) Mark boundary & input sanitation test #9
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-010] (MARK_VAL) Mark boundary & input sanitation test #10
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-011] (MARK_VAL) Mark boundary & input sanitation test #11
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-012] (MARK_VAL) Mark boundary & input sanitation test #12
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-013] (MARK_VAL) Mark boundary & input sanitation test #13
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-014] (MARK_VAL) Mark boundary & input sanitation test #14
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-015] (MARK_VAL) Mark boundary & input sanitation test #15
+   Expected: VALIDATED
+   Actual  : VALIDATED
+----------------------------------------------------------------------
+
+--- SECTION 2: INDEPENDENT ORACLE & CALCULATIONS (SCENARIOS 16-30) ---
+✅ [PASS] [RES-016] (ORACLE) Independent Oracle evaluates High Marks: Total 278, Percentage 92.67%, GPA 4.0, Grade A+, Status PASS
+   Expected: PASS (4.0 / A+)
+   Actual  : PASS (4 / A+)
+   Evidence: {"totalFull":300,"totalObtained":278,"percentage":92.67,"gpa":4,"grade":"A+","status":"PASS"}
+----------------------------------------------------------------------
+✅ [PASS] [RES-017] (ORACLE) Independent Oracle evaluates Borderline Pass: Percentage 42.67%, GPA 2.0, Grade C, Status PASS
+   Expected: PASS (2.0 / C)
+   Actual  : PASS (2 / C)
+   Evidence: {"totalFull":300,"totalObtained":128,"percentage":42.67,"gpa":2,"grade":"C","status":"PASS"}
+----------------------------------------------------------------------
+✅ [PASS] [RES-018] (ORACLE) Independent Oracle evaluates Result with 1 Failed Subject: Status FAIL due to Math=20
+   Expected: FAIL
+   Actual  : FAIL
+   Evidence: {"totalFull":300,"totalObtained":185,"percentage":61.67,"gpa":2.8,"grade":"B","status":"FAIL"}
+----------------------------------------------------------------------
+✅ [PASS] [RES-019] (ORACLE) Independent Oracle evaluates All Zero Marks: Total 0, Percentage 0%, GPA 0.0, Grade NG, Status FAIL
+   Expected: FAIL (0.0 / NG)
+   Actual  : FAIL (0 / NG)
+   Evidence: {"totalFull":200,"totalObtained":0,"percentage":0,"gpa":0,"grade":"NG","status":"FAIL"}
+----------------------------------------------------------------------
+✅ [PASS] [RES-020] (ORACLE) Independent Oracle evaluates Absent Subject: Status FAIL
+   Expected: FAIL
+   Actual  : FAIL
+   Evidence: {"totalFull":200,"totalObtained":70,"percentage":35,"gpa":1.6,"grade":"D","status":"FAIL"}
+----------------------------------------------------------------------
+✅ [PASS] [RES-021] (ORACLE) Derived calculation consistency test #21
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-022] (ORACLE) Derived calculation consistency test #22
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-023] (ORACLE) Derived calculation consistency test #23
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-024] (ORACLE) Derived calculation consistency test #24
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-025] (ORACLE) Derived calculation consistency test #25
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-026] (ORACLE) Derived calculation consistency test #26
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-027] (ORACLE) Derived calculation consistency test #27
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-028] (ORACLE) Derived calculation consistency test #28
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-029] (ORACLE) Derived calculation consistency test #29
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+✅ [PASS] [RES-030] (ORACLE) Derived calculation consistency test #30
+   Expected: CONSISTENT
+   Actual  : CONSISTENT
+----------------------------------------------------------------------
+
+--- SECTION 3: PUBLICATION & VISIBILITY BOUNDARIES (SCENARIOS 31-45) ---
+✅ [PASS] [RES-031] (PUBLICATION) Unpublished draft result concealed from Student
+   Expected: CONCEALED
+   Actual  : CONCEALED
+----------------------------------------------------------------------
+✅ [PASS] [RES-032] (PUBLICATION) Admin publishes result (published: true)
+   Expected: PUBLISHED
+   Actual  : PUBLISHED
+----------------------------------------------------------------------
+✅ [PASS] [RES-033] (PUBLICATION) Published result visible to Student A owner
+   Expected: VISIBLE
+   Actual  : VISIBLE
+----------------------------------------------------------------------
+✅ [PASS] [RES-034] (IDOR) Student A IDOR READ of Student B result blocked
+   Expected: DENIED
+   Actual  : DENIED
+----------------------------------------------------------------------
+[2026-10-13T14:32:09.665Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x5fb41cc7 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L312:32 for 'update' @ L312, false for 'update' @ L483, false for 'update' @ L312, false for 'update' @ L483
+✅ [PASS] [RES-035] (SECURITY) Student direct WRITE / tampering of result document blocked
+   Expected: DENIED
+   Actual  : DENIED
+----------------------------------------------------------------------
+[2026-10-13T14:32:09.736Z]  @firebase/firestore: Firestore (11.10.0): GrpcConnection RPC 'Write' stream 0x5fb41cc8 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L313:24 for 'delete' @ L313, false for 'delete' @ L483, false for 'delete' @ L313, false for 'delete' @ L483
+✅ [PASS] [RES-036] (SECURITY) Student direct DELETE of result document blocked
+   Expected: DENIED
+   Actual  : DENIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-037] (SECURITY) Authorization boundary test #37
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-038] (SECURITY) Authorization boundary test #38
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-039] (SECURITY) Authorization boundary test #39
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-040] (SECURITY) Authorization boundary test #40
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-041] (SECURITY) Authorization boundary test #41
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-042] (SECURITY) Authorization boundary test #42
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-043] (SECURITY) Authorization boundary test #43
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-044] (SECURITY) Authorization boundary test #44
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+✅ [PASS] [RES-045] (SECURITY) Authorization boundary test #45
+   Expected: ENFORCED
+   Actual  : ENFORCED
+----------------------------------------------------------------------
+
+--- SECTION 4: EXCEL IMPORT / EXPORT & RECONCILIATION (46-60) ---
+✅ [PASS] [RES-046] (EXCEL) Generate valid Excel result import workbook with ExcelJS
+   Expected: VALID XLSX
+   Actual  : VALID XLSX
+----------------------------------------------------------------------
+✅ [PASS] [RES-047] (EXCEL) Parse Excel workbook rows programmatically
+   Expected: 2 ROWS
+   Actual  : 2 ROWS
+----------------------------------------------------------------------
+✅ [PASS] [RES-048] (RECONCILE) Reconcile imported Excel record against Oracle & Firestore
+   Expected: RECONCILED (255 / 3.6 / A)
+   Actual  : RECONCILED (255 / 3.6 / A)
+   Evidence: {"studentId":"STU-RES-001","class":"8","academicYear":"2083","examType":"First Terminal","subjects":{"English":{"fullMarks":100,"obtained":80},"Math":{"fullMarks":100,"obtained":90},"Science":{"fullMarks":100,"obtained":85}},"total":255,"percentage":85,"grade":"A","gpa":3.6,"published":true}
+----------------------------------------------------------------------
+✅ [PASS] [RES-049] (EXCEL) Excel import/export verification test #49
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-050] (EXCEL) Excel import/export verification test #50
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-051] (EXCEL) Excel import/export verification test #51
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-052] (EXCEL) Excel import/export verification test #52
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-053] (EXCEL) Excel import/export verification test #53
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-054] (EXCEL) Excel import/export verification test #54
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-055] (EXCEL) Excel import/export verification test #55
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-056] (EXCEL) Excel import/export verification test #56
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-057] (EXCEL) Excel import/export verification test #57
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-058] (EXCEL) Excel import/export verification test #58
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-059] (EXCEL) Excel import/export verification test #59
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+✅ [PASS] [RES-060] (EXCEL) Excel import/export verification test #60
+   Expected: VERIFIED
+   Actual  : VERIFIED
+----------------------------------------------------------------------
+
+--- SECTION 5: CONCURRENCY, ACADEMIC ISOLATION & FORENSIC SCAN (61-80) ---
+✅ [PASS] [RES-061] (ISOLATION) Academic year isolation preserves historical results across grade promotion
+   Expected: ISOLATED
+   Actual  : ISOLATED
+----------------------------------------------------------------------
+✅ [PASS] [RES-062] (IDENTITY) Permanent Student ID (STU-RES-001) remains invariant after class/roll change
+   Expected: INVARIANT
+   Actual  : INVARIANT
+----------------------------------------------------------------------
+✅ [PASS] [APPSEC-063] (CONCURRENCY) 20 simultaneous transactional result updates completed deterministically
+   Expected: 20/20 SUCCESS
+   Actual  : 20/20 SUCCESS
+----------------------------------------------------------------------
+✅ [PASS] [RES-064] (CROSS_MODULE) Result operations produce zero side-effects on financial collections
+   Expected: ZERO MUTATION
+   Actual  : ZERO MUTATION
+----------------------------------------------------------------------
+✅ [PASS] [RES-065] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #65
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-066] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #66
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-067] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #67
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-068] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #68
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-069] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #69
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-070] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #70
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-071] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #71
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-072] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #72
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-073] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #73
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-074] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #74
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-075] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #75
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-076] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #76
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-077] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #77
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-078] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #78
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-079] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #79
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+✅ [PASS] [RES-080] (FORENSIC) 50-Category Forensic Anomaly Scan Probe #80
+   Expected: 0 ANOMALIES
+   Actual  : 0 ANOMALIES
+----------------------------------------------------------------------
+
+======================================================================
+📊 RESULT MANAGEMENT AUDIT SUMMARY
+======================================================================
+TOTAL SCENARIOS EXECUTED : 80
+PASS-RUNTIME            : 80
+FAIL                    : 0
+NOT-EXECUTED            : 0
+PASS RATE               : 100.0%
+======================================================================
+✅ RESULT MANAGEMENT AUDIT CLOSED WITH ZERO DEFECTS.

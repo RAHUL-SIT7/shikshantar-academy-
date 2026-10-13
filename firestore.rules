@@ -43,6 +43,17 @@ service cloud.firestore {
       );
     }
 
+    function isPrimaryAdmin() {
+      return isAdmin() && (
+        (hasUserDoc() && (
+          getUserData().adminTier == 'primary' || 
+          getUserData().adminTier == 'PRIMARY' ||
+          (!('adminTier' in getUserData()) && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com'))
+        )) ||
+        (!hasUserDoc() && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com'))
+      );
+    }
+
     function isTeacher() {
       return isSignedIn() && (
         (hasUserDoc() && isActiveUserDoc() && (
@@ -76,7 +87,7 @@ service cloud.firestore {
     }
 
     function isStudentOwner(studentId) {
-      return isSignedIn() && (
+      return isSignedIn() && isActiveUserDoc() && (
         request.auth.uid == studentId ||
         (resource != null && (
           resource.data.studentId == request.auth.uid ||
@@ -192,12 +203,33 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow update: if isAdmin() || (
-        isUserOwner(userId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'adminTier', 'status', 'active'])
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && (
+          !('role' in request.resource.data) || request.resource.data.role in ['student', 'guest']
+        ) && !('adminTier' in request.resource.data)) ||
+        (isAdmin() && (
+          (!('role' in request.resource.data) || request.resource.data.role != 'admin' || isPrimaryAdmin()) &&
+          (!('adminTier' in request.resource.data) || isPrimaryAdmin() || request.resource.data.adminTier == 'secondary')
+        ))
       );
-      allow delete: if isAdmin();
+      allow update: if (
+        isPrimaryAdmin() ||
+        (isAdmin() &&
+          // 2° Admin cannot change adminTier
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['adminTier']) &&
+          // 2° Admin cannot promote user to admin
+          (resource.data.role == 'admin' || request.resource.data.role != 'admin') &&
+          // 2° Admin cannot alter own role or tier
+          (userId != request.auth.uid || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'adminTier']))
+        ) ||
+        (isUserOwner(userId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'role', 'adminTier', 'status', 'active',
+            'advanceBalance', 'previousYearDue', 'monthlyFee', 'fees', 'scholarship', 'scholarshipStatus'
+          ])
+        )
+      );
+      allow delete: if isPrimaryAdmin() || (isAdmin() && resource.data.role != 'admin');
     }
 
     match /students/{studentId} {
@@ -276,7 +308,7 @@ service cloud.firestore {
     }
 
     match /results/{resultId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher() || (resource != null && isStudentOwner(resource.data.studentId)));
+      allow read: if isSignedIn() && (isAdmin() || isTeacher() || (resource != null && resource.data.published == true && isStudentOwner(resource.data.studentId)));
       allow create, update: if isAdmin() || isTeacher();
       allow delete: if isAdmin();
     }
@@ -413,6 +445,10 @@ service cloud.firestore {
     }
 
     match /billing_month_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /payment_receipt_locks/{lockId} {
       allow read, write: if isAdmin();
     }
 

@@ -93,7 +93,40 @@ export const handleDigitsOnlyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>
 };
 
 /**
+ * Strict Integer NPR Input Validator.
+ * Rejects:
+ * - Decimals and commas: "5000.75", "5000,75", "0.5", 5000.75
+ * - Spaced strings: "5000 75", " 5000", "5000\n", "5000\t"
+ * - Alphanumerics / scientific notation: "5000abc", "abc5000", "5e3", "5E3"
+ * - Signs: "-5000", "+5000"
+ * - Invalids / specials: "NaN", "Infinity", "", " ", null, undefined, NaN, Infinity, -Infinity
+ * - Non-integer or negative numbers: -5, 10.5
+ * 
+ * Accepts:
+ * - ASCII string digits only matching exact regex: ^[0-9]+$
+ * - Finite non-negative integers: Number.isFinite(n) && Number.isInteger(n) && n >= 0
+ */
+export const isValidIntegerCashInput = (val: any): boolean => {
+  if (val === undefined || val === null) return false;
+  if (typeof val === 'number') {
+    return Number.isFinite(val) && Number.isInteger(val) && val >= 0;
+  }
+  if (typeof val === 'string') {
+    if (val.length === 0) return false;
+    // Must match ASCII digits only exactly: ^[0-9]+$
+    return /^[0-9]+$/.test(val);
+  }
+  return false;
+};
+
+export const canonicalizeReceiptNo = (receiptNo?: string): string => {
+  if (!receiptNo) return '';
+  return receiptNo.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+};
+
+/**
  * Strips all non-digit characters from a string.
+ * Note: Strictly for UI display sanitization, never as a substitute for validation.
  */
 export const sanitizeDigitsOnly = (val: string | number | undefined | null): string => {
   if (val === undefined || val === null) return '';
@@ -102,17 +135,15 @@ export const sanitizeDigitsOnly = (val: string | number | undefined | null): str
 
 /**
  * Parses a value into a safe non-negative integer (NPR).
- * Rejects negative numbers, negative string inputs, null, and undefined by returning 0.
+ * Enforces strict integer validation and rejects malformed/decimal values by returning 0.
  */
 export const parseIntegerAmount = (val: any): number => {
   if (val === undefined || val === null || val === '') return 0;
-  if (typeof val === 'number') {
-    return Math.max(0, Math.floor(isNaN(val) ? 0 : val));
+  if (!isValidIntegerCashInput(val)) {
+    return 0;
   }
-  const str = String(val).trim();
-  if (str.startsWith('-')) return 0;
-  const digits = sanitizeDigitsOnly(str);
-  const parsed = parseInt(digits, 10);
+  if (typeof val === 'number') return val;
+  const parsed = parseInt(val, 10);
   return isNaN(parsed) ? 0 : Math.max(0, parsed);
 };
 
@@ -163,6 +194,19 @@ export const calculatePaymentBreakdown = (
     excessDecision = customAmountAppliedOrExcessDecision;
   } else {
     customAmountAppliedInput = customAmountAppliedOrExcessDecision;
+  }
+
+  // Strict validation of cash inputs
+  if (!isValidIntegerCashInput(netPayableInput)) {
+    throw new Error(`Invalid Net Payable input: "${String(netPayableInput)}". Cash amounts must be whole integer Nepalese Rupees without decimals, commas, spaces, or non-numeric characters.`);
+  }
+  if (!isValidIntegerCashInput(cashTenderedInput)) {
+    throw new Error(`Invalid Cash Tendered input: "${String(cashTenderedInput)}". Cash amounts must be whole integer Nepalese Rupees without decimals, commas, spaces, or non-numeric characters.`);
+  }
+  if (customAmountAppliedInput !== undefined && customAmountAppliedInput !== null && customAmountAppliedInput !== '') {
+    if (!isValidIntegerCashInput(customAmountAppliedInput)) {
+      throw new Error(`Invalid Amount Applied input: "${String(customAmountAppliedInput)}". Amount applied must be a whole integer.`);
+    }
   }
 
   const netPayable = parseIntegerAmount(netPayableInput);
@@ -288,7 +332,22 @@ export interface CashPaymentExecutionParams {
  * - Cash ledger and audit log generation.
  */
 export async function executeCashFeePayment(params: CashPaymentExecutionParams) {
-  const cashTendered = parseIntegerAmount(params.cashTendered || params.cashCollection);
+  const rawCash = params.cashTendered !== undefined ? params.cashTendered : params.cashCollection;
+
+  // Strict Fail-Closed Validation of all cash parameters before any financial processing or Firestore writes
+  if (!isValidIntegerCashInput(rawCash)) {
+    throw new Error(`Invalid Cash Tendered: "${String(rawCash)}". Cash amounts must be whole integer Nepalese Rupees without decimals, commas, spaces, or non-numeric characters.`);
+  }
+  if (!isValidIntegerCashInput(params.netPayable)) {
+    throw new Error(`Invalid Net Payable: "${String(params.netPayable)}". Net payable must be a valid whole integer amount in Nepalese Rupees.`);
+  }
+  if (params.amountApplied !== undefined && params.amountApplied !== null && params.amountApplied !== '') {
+    if (!isValidIntegerCashInput(params.amountApplied)) {
+      throw new Error(`Invalid Amount Applied: "${String(params.amountApplied)}". Amount applied must be a valid whole integer amount in Nepalese Rupees.`);
+    }
+  }
+
+  const cashTendered = parseIntegerAmount(rawCash);
   const netPayable = parseIntegerAmount(params.netPayable);
 
   if (cashTendered <= 0) {
@@ -312,20 +371,27 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
   const operatorName = params.operatorName || 'Cashier Desk';
   const operatorUid = params.operatorUid || auth.currentUser?.uid || 'system';
 
-  const txId = `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-  const paymentGroupId = `PAY_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+  const cleanReceipt = canonicalizeReceiptNo(params.receiptNo);
+  if (!cleanReceipt) {
+    throw new Error('A valid Receipt Number is required for cash payment execution.');
+  }
+
+  const txId = `TXN_${cleanReceipt}`;
+  const paymentGroupId = params.paymentGroupId || `PAY_${cleanReceipt}`;
   const firestoreDb = params.customDb || db;
   const txDocRef = doc(firestoreDb, 'transactions', txId);
-  const cashLedgerDocRef = doc(collection(firestoreDb, 'cash_ledger'));
+  const receiptLockRef = doc(firestoreDb, 'payment_receipt_locks', cleanReceipt);
+  const cashLedgerDocRef = doc(firestoreDb, 'cash_ledger', `LEDGER_${cleanReceipt}`);
 
   // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
   const authoritativeActor = await getAuthoritativeActor();
 
   // Run atomic transaction
   return await runTransaction(firestoreDb, async (transaction) => {
-    // 1. Idempotency Check
+    // 1. Idempotency & Concurrency Mutex Check
     const existingTxSnap = await transaction.get(txDocRef);
-    if (existingTxSnap.exists()) {
+    const existingLockSnap = await transaction.get(receiptLockRef);
+    if (existingTxSnap.exists() || existingLockSnap.exists()) {
       throw new Error(`Duplicate transaction detected for Receipt ${params.receiptNo}. Operation cancelled.`);
     }
 
@@ -516,7 +582,7 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
 
     if (breakdown.isExcess) {
       if (params.excessDecision === 'ADVANCE') {
-        const advRef = doc(collection(firestoreDb, 'student_advances'));
+        const advRef = doc(firestoreDb, 'student_advances', `ADV_${cleanReceipt}`);
         advanceDocId = advRef.id;
         const currentAdv = parseIntegerAmount(studentData.advanceBalance || 0);
 
@@ -544,7 +610,7 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
         }, { merge: true });
 
       } else if (params.excessDecision === 'RETURN') {
-        const refDoc = doc(collection(firestoreDb, 'refund_records'));
+        const refDoc = doc(firestoreDb, 'refund_records', `REF_${cleanReceipt}`);
         refundDocId = refDoc.id;
 
         transaction.set(refDoc, {
@@ -563,7 +629,7 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
         });
 
         // Add expense entry in cash_ledger for physical cash returned
-        const refundLedgerRef = doc(collection(firestoreDb, 'cash_ledger'));
+        const refundLedgerRef = doc(firestoreDb, 'cash_ledger', `LEDGER_REF_${cleanReceipt}`);
         transaction.set(refundLedgerRef, {
           type: 'Expense',
           date: bsDate,
@@ -577,6 +643,18 @@ export async function executeCashFeePayment(params: CashPaymentExecutionParams) 
         });
       }
     }
+
+    // Set deterministic receipt lock
+    transaction.set(receiptLockRef, {
+      receiptNo: params.receiptNo,
+      cleanReceipt: cleanReceipt,
+      transactionId: txId,
+      studentId: studentId,
+      studentName: params.student.fullName || params.student.name,
+      amount: breakdown.amountApplied,
+      cashTendered: cashTendered,
+      createdAt: serverTimestamp()
+    });
 
     // 5. Create immutable Transaction Record
     const baseRemarks = params.remarks?.trim() || `Cash Fee Settlement for ${params.student.name}`;

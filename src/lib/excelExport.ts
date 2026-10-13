@@ -1,5 +1,7 @@
-import * as ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import * as ExcelJSImport from 'exceljs';
+const ExcelJS: any = (ExcelJSImport as any)?.default || ExcelJSImport;
+import fileSaver from 'file-saver';
+const saveAs = (fileSaver as any)?.saveAs || (fileSaver as any)?.default || fileSaver;
 const logoImage = "/logo.png";
 
 const addSchoolHeaderToSheet = async (
@@ -40,14 +42,16 @@ const addSchoolHeaderToSheet = async (
   // Load logo
   let logoId;
   try {
-     const response = await fetch(logoImage);
-     const arrayBuffer = await response.arrayBuffer();
-     logoId = workbook.addImage({
-       buffer: arrayBuffer,
-       extension: 'png',
-     });
+    if (typeof window !== 'undefined' || (logoImage && logoImage.startsWith('http'))) {
+      const response = await fetch(logoImage);
+      const arrayBuffer = await response.arrayBuffer();
+      logoId = workbook.addImage({
+        buffer: arrayBuffer,
+        extension: 'png',
+      });
+    }
   } catch (e) {
-     console.error("Failed to load Excel logo", e);
+    // Optional logo in headless / server environments
   }
 
   // Add School Title and details
@@ -106,21 +110,33 @@ const populateSheetData = (sheet: ExcelJS.Worksheet, data: any[]) => {
   });
 };
 
+export const createExcelWorkbook = async (
+  title: string, 
+  columns: { header: string, key: string, width?: number }[], 
+  data: any[]
+): Promise<ExcelJS.Workbook> => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Data');
+
+  await addSchoolHeaderToSheet(workbook, sheet, title, columns);
+  populateSheetData(sheet, data);
+  return workbook;
+};
+
 export const exportToExcel = async (
   filename: string, 
   title: string, 
   columns: { header: string, key: string, width?: number }[], 
   data: any[]
 ) => {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Data');
-
-  await addSchoolHeaderToSheet(workbook, sheet, title, columns);
-  populateSheetData(sheet, data);
+  const workbook = await createExcelWorkbook(title, columns, data);
 
   // Write and Save
   const buffer = await workbook.xlsx.writeBuffer();
-  saveAs(new Blob([buffer]), `${filename}.xlsx`);
+  if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
+    saveAs(new Blob([buffer]), `${filename}.xlsx`);
+  }
+  return buffer;
 };
 
 export const exportMultiSheetExcel = async (

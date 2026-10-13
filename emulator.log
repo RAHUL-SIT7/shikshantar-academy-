@@ -1,0 +1,7 @@
+i  emulators: Starting emulators: auth, firestore
+i  emulators: Detected demo project ID "demo-shikshantar-test", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+i  firestore: downloading cloud-firestore-emulator-v1.22.0.jar...
+
+i  firestore: Firestore Emulator logging to firestore-debug.log
+✔  firestore: Firestore Emulator was started in standard edition.
+✔  firestore: Firestore Emulator UI websocket is running on 9150.

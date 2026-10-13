@@ -27,7 +27,7 @@ import {
 import { db, auth } from '../firebase';
 import { formatBSDate, formatBSDateYMD, getBSYearMonthDate } from './nepaliDate';
 import { recordLedgerAuditLog, getAuthoritativeActor } from './auditLogger';
-import { parseIntegerAmount, sanitizeDigitsOnly } from './cashPaymentEngine';
+import { parseIntegerAmount, sanitizeDigitsOnly, canonicalizeReceiptNo, isValidIntegerCashInput } from './cashPaymentEngine';
 import { allocateNextDocumentNumber } from './documentNumberingEngine';
 
 export interface FamilyChildSummary {
@@ -57,6 +57,7 @@ export interface FamilyChildSummary {
 
 export interface FamilyGroup {
   familyKey: string;
+  familyId?: string;
   guardianName: string;
   guardianPhone: string;
   children: FamilyChildSummary[];
@@ -103,15 +104,18 @@ export function groupStudentsByFamily(
   remitBills: any[] = [],
   currentAcademicYear: string = '2083'
 ): FamilyGroup[] {
-  const familyMap = new Map<string, { guardianName: string; guardianPhone: string; students: any[] }>();
+  const familyMap = new Map<string, { familyId?: string; guardianName: string; guardianPhone: string; students: any[] }>();
 
   students.forEach((s) => {
+    const rawFamilyId = String(s.familyId || s.familyIdentifier || '').trim();
     const phone = String(s.parentPhone || s.phone || s.guardianPhone || '').trim().replace(/\D/g, '');
     const guardian = String(s.guardianName || s.fatherName || 'Unknown Guardian').trim();
     
-    // Group key based on clean phone number (if >= 8 digits) or unique guardian key
+    // Group key based on authoritative familyId first, clean phone number (if >= 8 digits), or unique guardian key
     let groupKey = '';
-    if (phone.length >= 8) {
+    if (rawFamilyId) {
+      groupKey = `FAM_${rawFamilyId}`;
+    } else if (phone.length >= 8) {
       groupKey = `PHONE_${phone}`;
     } else if (guardian.length >= 3 && guardian.toLowerCase() !== 'unknown' && guardian.toLowerCase() !== 'unknown guardian') {
       groupKey = `NAME_${guardian.toLowerCase()}`;
@@ -121,6 +125,7 @@ export function groupStudentsByFamily(
 
     if (!familyMap.has(groupKey)) {
       familyMap.set(groupKey, {
+        familyId: rawFamilyId || undefined,
         guardianName: guardian,
         guardianPhone: phone || s.parentPhone || s.phone || '',
         students: []
@@ -136,7 +141,9 @@ export function groupStudentsByFamily(
     const childrenSummaries: FamilyChildSummary[] = entry.students.map((st) => {
       // Find bills for this student
       const studentBills = remitBills.filter((b) => {
-        const isMatch = b.studentId === st.id || (b.studentName === (st.fullName || st.name) && b.class === st.class);
+        const isMatch = b.studentId 
+          ? (b.studentId === st.id || b.studentId === st.studentId) 
+          : (b.studentName === (st.fullName || st.name) && b.class === st.class);
         const isActive = b.status !== 'void';
         return isMatch && isActive;
       });
@@ -199,6 +206,7 @@ export function groupStudentsByFamily(
 
     familyGroups.push({
       familyKey: key,
+      familyId: entry.familyId,
       guardianName: entry.guardianName,
       guardianPhone: entry.guardianPhone,
       children: childrenSummaries,
@@ -394,6 +402,11 @@ export interface ExecuteFamilyPaymentParams {
  */
 export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentParams) {
   const firestoreDb = params.customDb || db;
+
+  if (!isValidIntegerCashInput(params.cashTendered)) {
+    throw new Error(`Invalid Cash Tendered input: "${String(params.cashTendered)}". Cash amounts must be whole integer Nepalese Rupees without decimals, commas, spaces, or non-numeric characters.`);
+  }
+
   const cashTendered = parseIntegerAmount(params.cashTendered);
 
   if (cashTendered <= 0) {
@@ -424,23 +437,33 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
   const operatorName = params.operatorName || 'Cashier Desk';
   const operatorUid = params.operatorUid || auth.currentUser?.uid || 'system';
 
-  const txId = `TXN_FAM_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
   const receiptNo = params.receiptNo || (await allocateNextDocumentNumber({
     db: firestoreDb,
     academicYear,
     documentType: 'RECEIPT'
   }));
 
+  const cleanReceipt = canonicalizeReceiptNo(receiptNo);
+  if (!cleanReceipt) {
+    throw new Error('A valid Receipt Number is required for family cash payment execution.');
+  }
+
+  const txId = `TXN_${cleanReceipt}`;
   const txDocRef = doc(firestoreDb, 'transactions', txId);
-  const cashLedgerDocRef = doc(collection(firestoreDb, 'cash_ledger'));
+  const receiptLockRef = doc(firestoreDb, 'payment_receipt_locks', cleanReceipt);
+  const cashLedgerDocRef = doc(firestoreDb, 'cash_ledger', `LEDGER_${cleanReceipt}`);
 
   // Security check: Authoritative Admin actor
   const authoritativeActor = await getAuthoritativeActor();
 
   return await runTransaction(firestoreDb, async (transaction) => {
-    // 1. Idempotency Check
-    const existingTxSnap = await transaction.get(txDocRef);
-    if (existingTxSnap.exists()) {
+    // 1. Idempotency Check & Receipt Mutex Guard
+    const [existingTxSnap, existingLockSnap] = await Promise.all([
+      transaction.get(txDocRef),
+      transaction.get(receiptLockRef)
+    ]);
+
+    if (existingTxSnap.exists() || existingLockSnap.exists()) {
       throw new Error(`Duplicate transaction detected for Receipt ${receiptNo}. Operation cancelled.`);
     }
 
@@ -453,6 +476,16 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
           billDocFetches.push({ childId: child.id, billId: bill.id, ref: billRef });
         }
       }
+    }
+
+    // Read designated child user doc if advance credit is created
+    let designatedChildUserRef: any = null;
+    let designatedChildUserSnap: any = null;
+    if (breakdown.advanceCreated > 0 && params.advanceDesignatedChildId) {
+      const designatedChild = params.children.find((c) => c.id === params.advanceDesignatedChildId);
+      const childDocId = designatedChild?.id || params.advanceDesignatedChildId;
+      designatedChildUserRef = doc(firestoreDb, 'users', childDocId);
+      designatedChildUserSnap = await transaction.get(designatedChildUserRef);
     }
 
     const billSnaps = await Promise.all(
@@ -469,15 +502,22 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
       let childAllocBudget = alloc.allocatedAmount;
       const childBillsModified: any[] = [];
 
-      // Find all live bills for this child
-      const childBillSnaps = billSnaps.filter((b) => b.childId === alloc.studentDocId);
+      // Find all live bills for this child, sorted oldest first (previous years first, then chronological)
+      const childBillSnaps = billSnaps
+        .filter((b) => b.childId === alloc.studentDocId)
+        .sort((a, b) => {
+          const aYear = String(a.snap.data()?.academicYear || '2083').replace(/\D/g, '');
+          const bYear = String(b.snap.data()?.academicYear || '2083').replace(/\D/g, '');
+          if (aYear !== bYear) return aYear.localeCompare(bYear);
+          return (a.snap.data()?.createdAt?.seconds || 0) - (b.snap.data()?.createdAt?.seconds || 0);
+        });
 
       for (const bItem of childBillSnaps) {
         if (childAllocBudget <= 0) break;
         if (!bItem.snap.exists()) continue;
 
         const bData = bItem.snap.data();
-        if (bData.status === 'void') continue;
+        if (bData.status === 'void' || bData.status === 'cancelled') continue;
 
         const totalAmt = parseIntegerAmount(bData.totalAmount || 0);
         const currentPaid = parseIntegerAmount(bData.paidAmount || 0);
@@ -488,7 +528,7 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
         const payTowardsBill = Math.min(childAllocBudget, currentDue);
         const newPaid = currentPaid + payTowardsBill;
         const newDue = Math.max(0, totalAmt - newPaid);
-        const newStatus = newDue === 0 ? 'paid' : (newPaid > 0 ? 'partial' : 'due');
+        const newStatus = newDue === 0 ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
 
         transaction.update(bItem.ref, {
           paidAmount: newPaid,
@@ -527,28 +567,52 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
     // 4. Handle Advance Creation if chosen
     let advanceDocId = '';
     if (breakdown.advanceCreated > 0 && params.advanceDesignatedChildId) {
-      const advanceRef = doc(collection(firestoreDb, 'student_advances'));
-      advanceDocId = advanceRef.id;
+      const advRef = doc(firestoreDb, 'student_advances', `ADV_${cleanReceipt}`);
+      advanceDocId = advRef.id;
       const designatedChild = params.children.find((c) => c.id === params.advanceDesignatedChildId);
 
-      transaction.set(advanceRef, {
+      transaction.set(advRef, {
+        id: advanceDocId,
         studentId: designatedChild?.id || params.advanceDesignatedChildId,
         permanentStudentId: designatedChild?.studentId || '',
         studentName: designatedChild?.name || 'Student',
         guardianName: params.guardianName,
         amount: breakdown.advanceCreated,
+        remainingCredit: breakdown.advanceCreated,
         remainingBalance: breakdown.advanceCreated,
         sourceReceiptNo: receiptNo,
         sourceTxId: txId,
         academicYear,
         dateBS: bsDate,
         createdAt: serverTimestamp(),
-        status: 'active',
+        status: 'ACTIVE',
         note: `Advance credit from Family Consolidated Payment (${params.guardianName})`
       });
+
+      // Update designated student doc advanceBalance
+      const currentAdv = designatedChildUserSnap?.exists() ? Number(designatedChildUserSnap.data()?.advanceBalance || 0) : 0;
+      if (designatedChildUserRef) {
+        transaction.set(designatedChildUserRef, {
+          advanceBalance: currentAdv + breakdown.advanceCreated,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
     }
 
-    // 5. Create Authoritative Transaction Document
+    // 5. Create Deterministic Receipt Mutex Lock Document
+    transaction.set(receiptLockRef, {
+      receiptNo,
+      cleanReceipt,
+      transactionId: txId,
+      guardianName: params.guardianName,
+      guardianPhone: params.guardianPhone,
+      amount: breakdown.amountApplied,
+      cashTendered: cashTendered,
+      isFamilyPayment: true,
+      createdAt: serverTimestamp()
+    });
+
+    // 6. Create Authoritative Transaction Document
     transaction.set(txDocRef, {
       id: txId,
       receiptNo,
@@ -578,7 +642,7 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
       createdAt: serverTimestamp()
     });
 
-    // 6. Record in Physical Cash Ledger (Actual cash in counter)
+    // 7. Record in Physical Cash Ledger (Actual cash retained in school register)
     transaction.set(cashLedgerDocRef, {
       receiptNo,
       type: 'Income',
@@ -595,14 +659,16 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
       timestamp: serverTimestamp()
     });
 
-    // 7. Authoritative Immutable Audit Log
-    const auditLogRef = doc(collection(firestoreDb, 'ledger_audit_logs'));
+    // 8. Authoritative Immutable Audit Log
+    const opId = `OP_FAM_PAY_${cleanReceipt}`;
+    const auditLogRef = doc(firestoreDb, 'ledger_audit_logs', opId);
     transaction.set(auditLogRef, {
+      id: opId,
       actionType: 'FAMILY_PAYMENT_COLLECTED',
       category: 'financial',
-      actorUid: authoritativeActor.uid,
-      actorEmail: authoritativeActor.email,
-      actorRole: authoritativeActor.role,
+      actorUid: authoritativeActor.actorUid,
+      actorEmail: authoritativeActor.actorEmail,
+      actorRole: authoritativeActor.actorRole,
       actorTier: authoritativeActor.adminTier,
       targetId: txId,
       receiptNo,
