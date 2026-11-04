@@ -1,5 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface TestRecord {
   testNumber: number;
@@ -112,7 +116,7 @@ async function runSecurityTestSuite() {
   console.log('===================================================================================\n');
 
   // Verify Rules File loaded
-  const rulesPath = path.join(__dirname, '../firestore.rules');
+  const rulesPath = path.resolve(__dirname, '../firestore.rules');
   const rulesContent = fs.readFileSync(rulesPath, 'utf8');
   console.log(`Verified active firestore.rules file loaded (${rulesContent.length} bytes, 316 lines).\n`);
 
@@ -285,8 +289,9 @@ async function runSecurityTestSuite() {
 
 // Execute and save JSON evidence
 runSecurityTestSuite().then((res) => {
+  const outputPath = path.resolve(__dirname, 'emulator_test_results.json');
   fs.writeFileSync(
-    path.join(__dirname, 'emulator_test_results.json'),
+    outputPath,
     JSON.stringify(res, null, 2)
   );
   if (res.failed > 0) {
@@ -296,5 +301,21 @@ runSecurityTestSuite().then((res) => {
   }
 }).catch((err) => {
   console.error('Fatal error running security suite:', err);
+  try {
+    const outputPath = path.resolve(__dirname, 'emulator_test_results.json');
+    fs.writeFileSync(
+      outputPath,
+      JSON.stringify({
+        total: records.length,
+        passed: records.filter(r => r.status === 'PASS').length,
+        failed: records.filter(r => r.status === 'FAIL').length + 1,
+        fatalError: err.message || String(err),
+        records
+      }, null, 2)
+    );
+  } catch (writeErr) {
+    console.error('Failed writing fallback diagnostic JSON:', writeErr);
+  }
   process.exit(1);
 });
+
