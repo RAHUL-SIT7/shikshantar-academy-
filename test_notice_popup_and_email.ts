@@ -146,7 +146,7 @@ const notice5: Notice = {
 assert(isNoticePopupEligible(notice5) === false, 'Expired Pinned notice does NOT bypass 7-day popup expiry');
 
 // 6. Notice with explicit validUntil in past -> NO popup
-const yesterdayBs = formatBSDateYMD(new Date(Date.now() - 86400000));
+const yesterdayBs = formatBSDateYMD(new Date(Date.now() - 2 * 86400000));
 const notice6: Notice = {
   id: 'n6',
   title: 'Special Parent Meeting',
