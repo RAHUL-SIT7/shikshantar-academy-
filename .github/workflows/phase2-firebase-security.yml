@@ -1,0 +1,59 @@
+name: Phase 2 Firebase Firestore Security Emulator Audit
+
+on:
+  push:
+    branches: [ main, master, "phase2*" ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  security-emulator-test:
+    name: Firestore Emulator Security Rules Audit (40 Scenarios)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Set up Java 21 Runtime (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Verify Environment & Java Version
+        run: |
+          echo "Node version: $(node -v)"
+          echo "NPM version: $(npm -v)"
+          java -version
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Verify Active Firestore Rules File
+        run: |
+          ls -la firestore.rules
+          wc -l firestore.rules
+          echo "SHA256: $(sha256sum firestore.rules)"
+
+      - name: Execute Firestore Emulator Security Suite (40 Scenarios)
+        run: |
+          npx firebase-tools emulators:exec \
+            --config firebase.json \
+            --only firestore \
+            "npx tsx tests/test_firestore_emulator_security.ts"
+
+      - name: Upload Security Test Evidence Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-security-test-results
+          path: tests/emulator_test_results.json
+          retention-days: 30
