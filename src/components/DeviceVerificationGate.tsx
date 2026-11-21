@@ -32,12 +32,18 @@ export default function DeviceVerificationGate() {
   const [resendCooldown, setResendCooldown] = useState<number>(
     deviceVerificationMeta?.resendCooldownSeconds ?? 60
   );
+  const [activeChallengeToken, setActiveChallengeToken] = useState<string>(
+    deviceVerificationMeta?.challengeToken || ''
+  );
 
   const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
     setResendCooldown(deviceVerificationMeta?.resendCooldownSeconds ?? 60);
-  }, [deviceVerificationMeta?.sessionId]);
+    if (deviceVerificationMeta?.challengeToken) {
+      setActiveChallengeToken(deviceVerificationMeta.challengeToken);
+    }
+  }, [deviceVerificationMeta?.sessionId, deviceVerificationMeta?.challengeToken]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -126,6 +132,7 @@ export default function DeviceVerificationGate() {
       const targetSessionId = deviceVerificationMeta?.sessionId || sessionId;
       const res = await fetch('/api/auth/verify-device-otp', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
@@ -133,7 +140,8 @@ export default function DeviceVerificationGate() {
         body: JSON.stringify({
           sessionId: targetSessionId,
           code: codeValue,
-          trustDevice
+          trustDevice,
+          challengeToken: activeChallengeToken || deviceVerificationMeta?.challengeToken || ''
         })
       });
 
@@ -165,11 +173,15 @@ export default function DeviceVerificationGate() {
       const targetSessionId = deviceVerificationMeta?.sessionId || sessionId;
       const res = await fetch('/api/auth/resend-device-otp', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ sessionId: targetSessionId })
+        body: JSON.stringify({
+          sessionId: targetSessionId,
+          challengeToken: activeChallengeToken || deviceVerificationMeta?.challengeToken || ''
+        })
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.success) {
@@ -180,9 +192,16 @@ export default function DeviceVerificationGate() {
         return;
       }
 
+      if (typeof body?.challengeToken === 'string' && body.challengeToken) {
+        setActiveChallengeToken(body.challengeToken);
+      }
       setDigits(['', '', '', '', '', '']);
       setResendCooldown(body?.resendCooldownSeconds ?? 60);
-      setStatusMessage('A fresh 6-digit verification code has been sent to your registered email.');
+      if (body?.smtpNotConfigured) {
+        setError('Outbound SMTP email delivery is not configured in this environment yet.');
+      } else {
+        setStatusMessage('A fresh 6-digit verification code has been sent to your registered email.');
+      }
       inputRefs.current[0]?.focus();
     } catch {
       setError('Network error while requesting a new security code.');
@@ -198,7 +217,12 @@ export default function DeviceVerificationGate() {
         ? 'Browser / Device Profile Changed'
         : 'New Browser or Device Detected';
 
-  const roleLabel = userRole === 'admin' ? 'Administrator Account' : 'Teacher Account';
+  const roleLabel =
+    userRole === 'admin'
+      ? 'Administrator Account'
+      : userRole === 'teacher'
+        ? 'Teacher Account'
+        : 'Student Account';
 
   return (
     <div className="min-h-screen bg-[#06182C] bg-gradient-to-br from-[#041C2E] via-[#0A2540] to-[#0F172A] flex items-center justify-center px-4 py-10">
@@ -234,15 +258,27 @@ export default function DeviceVerificationGate() {
               Verify this sign-in to continue
             </h2>
             <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
-              We sent a 6-digit security code to{' '}
-              <span className="font-semibold text-slate-900">
-                {deviceVerificationMeta?.maskedEmail || 'your registered email'}
-              </span>{' '}
-              from{' '}
-              <span className="font-mono text-xs bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded">
-                {deviceVerificationMeta?.senderEmail || 'securityalerts@shikshantaracademy.edu.np'}
-              </span>
-              .
+              {deviceVerificationMeta?.smtpNotConfigured ? (
+                <>
+                  A 6-digit security code is required for{' '}
+                  <span className="font-semibold text-slate-900">
+                    {deviceVerificationMeta?.maskedEmail || 'your registered email'}
+                  </span>
+                  , but outbound SMTP email delivery is not configured in this environment yet.
+                </>
+              ) : (
+                <>
+                  We sent a 6-digit security code to{' '}
+                  <span className="font-semibold text-slate-900">
+                    {deviceVerificationMeta?.maskedEmail || 'your registered email'}
+                  </span>{' '}
+                  from{' '}
+                  <span className="font-mono text-xs bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded">
+                    {deviceVerificationMeta?.senderEmail || 'securityalerts@shikshantaracademy.edu.np'}
+                  </span>
+                  .
+                </>
+              )}
             </p>
           </div>
 
@@ -280,7 +316,16 @@ export default function DeviceVerificationGate() {
             )}
           </div>
 
-          {deviceVerificationMeta?.emailDispatched === false && (
+          {deviceVerificationMeta?.smtpNotConfigured ? (
+            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-900 flex items-start gap-2">
+              <Mail className="w-4 h-4 shrink-0 mt-0.5 text-red-700" />
+              <span>
+                <strong>Email delivery not configured in this environment:</strong> Configure{' '}
+                <span className="font-mono">SMTP_HOST</span>, <span className="font-mono">SMTP_USER</span>, and{' '}
+                <span className="font-mono">SMTP_PASSWORD</span> on this server so 6-digit security codes are delivered to your inbox.
+              </span>
+            </div>
+          ) : deviceVerificationMeta?.emailDispatched === false && (
             <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
               <Mail className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
               <span>

@@ -19,6 +19,8 @@ export interface DeviceVerificationMeta {
   expiresInSeconds: number;
   resendCooldownSeconds: number;
   emailDispatched: boolean;
+  smtpNotConfigured?: boolean;
+  challengeToken?: string;
 }
 
 export interface AuthContextValue {
@@ -35,7 +37,10 @@ export interface AuthContextValue {
   verifyingDeviceSession: boolean;
   deviceVerificationRequired: boolean;
   deviceVerificationMeta: DeviceVerificationMeta | null;
+  deviceVerificationError: string | null;
   completeDeviceVerification: (newTrustToken?: string | null) => void;
+  retryDeviceVerification: () => void;
+  clearCurrentDeviceTrust: () => void;
   logout: (redirectReason?: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -52,6 +57,32 @@ const INACTIVE_STATUSES = new Set([
   'PENDING',
   'ARCHIVED'
 ]);
+
+function isDeliverableEmail(email?: string | null): boolean {
+  const clean = String(email || '').trim().toLowerCase();
+  if (!clean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+  if (clean.endsWith('@shikshantar.edu.np')) return false;
+  return true;
+}
+
+async function detectClientBrowser(): Promise<string> {
+  try {
+    const nav = navigator as any;
+    if (nav?.brave && typeof nav.brave.isBrave === 'function') {
+      const isBrave = await nav.brave.isBrave().catch(() => false);
+      if (isBrave) return 'Brave';
+    }
+  } catch {}
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  if (ua.includes('Edg/')) return 'Edge';
+  if (ua.includes('OPR/') || ua.includes('Opera/')) return 'Opera';
+  if (ua.includes('Vivaldi/')) return 'Vivaldi';
+  if (ua.includes('SamsungBrowser/')) return 'Samsung Internet';
+  if (ua.includes('Firefox/')) return 'Firefox';
+  if (ua.includes('Chrome/') && !ua.includes('Edg/')) return 'Chrome';
+  if (ua.includes('Safari/') && !ua.includes('Chrome/')) return 'Safari';
+  return '';
+}
 
 function isProfileInactive(data: any): boolean {
   if (!data || typeof data !== 'object') return true;
@@ -85,6 +116,14 @@ function setStoredDeviceTrustToken(uid: string, token: string): void {
   try {
     if (uid && token) {
       localStorage.setItem(getDeviceTrustStorageKey(uid), token);
+    }
+  } catch {}
+}
+
+function removeStoredDeviceTrustToken(uid: string): void {
+  try {
+    if (uid) {
+      localStorage.removeItem(getDeviceTrustStorageKey(uid));
     }
   } catch {}
 }
@@ -164,6 +203,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [verifyingDeviceSession, setVerifyingDeviceSession] = useState(false);
   const [deviceVerificationRequired, setDeviceVerificationRequired] = useState(false);
   const [deviceVerificationMeta, setDeviceVerificationMeta] = useState<DeviceVerificationMeta | null>(null);
+  const [deviceVerificationError, setDeviceVerificationError] = useState<string | null>(null);
+  const [verificationAttemptNonce, setVerificationAttemptNonce] = useState(0);
 
   const inFlightSessionsRef = useRef<Set<string>>(new Set());
   const serverConfirmedSessionsRef = useRef<Set<string>>(new Set());
@@ -183,6 +224,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Note: intentionally preserve per-UID shikshantar_device_trust_${uid} across logouts
   }, []);
 
+  const clearCurrentDeviceTrust = useCallback(() => {
+    const uid = auth.currentUser?.uid || user?.uid;
+    if (uid) {
+      removeStoredDeviceTrustToken(uid);
+    }
+  }, [user]);
+
+  const retryDeviceVerification = useCallback(() => {
+    const uid = auth.currentUser?.uid || user?.uid;
+    const currentSid = localStorage.getItem('localSessionId') || sessionId;
+    if (uid && currentSid) {
+      const key = `${uid}:${currentSid}`;
+      inFlightSessionsRef.current.delete(key);
+      serverConfirmedSessionsRef.current.delete(key);
+    }
+    setDeviceVerificationError(null);
+    setVerifyingDeviceSession(true);
+    setVerificationAttemptNonce((n) => n + 1);
+  }, [sessionId, user]);
+
   const completeDeviceVerification = useCallback((newTrustToken?: string | null) => {
     const uid = auth.currentUser?.uid || user?.uid;
     const currentSid = localStorage.getItem('localSessionId') || sessionId;
@@ -197,6 +258,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
     setDeviceVerificationRequired(false);
     setDeviceVerificationMeta(null);
+    setDeviceVerificationError(null);
     setVerifyingDeviceSession(false);
   }, [sessionId, user]);
 
@@ -284,6 +346,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setVerifyingDeviceSession(false);
       setDeviceVerificationRequired(false);
       setDeviceVerificationMeta(null);
+      setDeviceVerificationError(null);
     }
   }, [clearClientSessionStorage, sessionId]);
 
@@ -303,6 +366,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setVerifyingDeviceSession(false);
       setDeviceVerificationRequired(false);
       setDeviceVerificationMeta(null);
+      setDeviceVerificationError(null);
       setAuthError(resolved.reason);
       return;
     }
@@ -313,13 +377,173 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthError(null);
   }, [clearClientSessionStorage, resolveAuthoritativeState]);
 
+  const runRecordLoginHandshake = useCallback(
+    async (
+      fbUser: FirebaseUser,
+      currentSid: string,
+      requiresStrictDeviceCheck: boolean,
+      isCancelledRef: { current: boolean }
+    ) => {
+      const sessionKey = `${fbUser.uid}:${currentSid}`;
+      if (inFlightSessionsRef.current.has(sessionKey)) return;
+      inFlightSessionsRef.current.add(sessionKey);
+
+      const storedTrustToken = getStoredDeviceTrustToken(fbUser.uid);
+      const clientBrowser = await detectClientBrowser();
+
+      const attemptRequest = async (): Promise<{
+        ok: boolean;
+        status: number;
+        body: any;
+        networkError?: boolean;
+      }> => {
+        try {
+          const token = await fbUser.getIdToken();
+          const res = await fetch('/api/auth/record-login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              sessionId: currentSid,
+              deviceTrustToken: storedTrustToken || undefined,
+              clientBrowser: clientBrowser || undefined
+            })
+          });
+          const body = await res.json().catch(() => ({}));
+          return { ok: res.ok, status: res.status, body };
+        } catch {
+          return { ok: false, status: 0, body: {}, networkError: true };
+        }
+      };
+
+      try {
+        let result = await attemptRequest();
+        if (!result.ok && (result.status === 0 || result.status >= 500) && !isCancelledRef.current) {
+          await new Promise((r) => setTimeout(r, 800));
+          if (!isCancelledRef.current) {
+            result = await attemptRequest();
+          }
+        }
+
+        if (isCancelledRef.current) return;
+
+        if (result.status === 423) {
+          setAuthError('Account is temporarily locked due to repeated failed login attempts.');
+          setVerifyingDeviceSession(false);
+          signOut(auth).catch(() => {});
+          return;
+        }
+        if (result.status === 401 && result.body?.revoked) {
+          setVerifyingDeviceSession(false);
+          signOut(auth).catch(() => {});
+          return;
+        }
+
+        if (result.ok && result.body?.success) {
+          if (result.body?.deviceTrustToken && typeof result.body.deviceTrustToken === 'string') {
+            setStoredDeviceTrustToken(fbUser.uid, result.body.deviceTrustToken);
+          }
+
+          if (result.body?.requiresDeviceVerification === true && result.body?.verification) {
+            setDeviceVerificationMeta(result.body.verification);
+            setDeviceVerificationRequired(true);
+            setDeviceVerificationError(null);
+            setVerifyingDeviceSession(false);
+            return;
+          }
+
+          setDeviceVerificationRequired(false);
+          setDeviceVerificationMeta(null);
+          setDeviceVerificationError(null);
+          setVerifyingDeviceSession(false);
+          serverConfirmedSessionsRef.current.add(sessionKey);
+          return;
+        }
+
+        // Fail-closed for OTP-protected accounts: NEVER silently bypass device security verification!
+        inFlightSessionsRef.current.delete(sessionKey);
+        setVerifyingDeviceSession(false);
+        if (requiresStrictDeviceCheck) {
+          const serverErrMsg = result.body?.error
+            ? String(result.body.error)
+            : result.networkError
+              ? 'Unable to reach the security verification server. Please check your connection and retry.'
+              : `Security verification server returned HTTP ${result.status || 500}. Please ensure backend server credentials are configured and retry.`;
+          setDeviceVerificationError(serverErrMsg);
+        }
+      } catch {
+        inFlightSessionsRef.current.delete(sessionKey);
+        if (!isCancelledRef.current) {
+          setVerifyingDeviceSession(false);
+          if (requiresStrictDeviceCheck) {
+            setDeviceVerificationError('Unable to verify device security. Please retry or sign out.');
+          }
+        }
+      }
+    },
+    []
+  );
+
+  // Trigger retry handshake when user clicks "Retry Verification"
+  useEffect(() => {
+    if (verificationAttemptNonce === 0) return;
+    const current = auth.currentUser;
+    if (!current || !isAuthenticated) return;
+    const currentSid = localStorage.getItem('localSessionId') || sessionId;
+    const requiresStrict =
+      (userRole === 'admin' || userRole === 'teacher' || userRole === 'student') &&
+      isDeliverableEmail(current.email || userProfile?.email);
+    const cancelledRef = { current: false };
+    runRecordLoginHandshake(current, currentSid, requiresStrict, cancelledRef);
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, [verificationAttemptNonce, isAuthenticated, userRole, userProfile?.email, sessionId, runRecordLoginHandshake]);
+
+  // Periodic authenticated heartbeat to keep lastActiveAt accurate & detect remote session revocation
+  useEffect(() => {
+    if (!isAuthenticated || !user || deviceVerificationRequired || verifyingDeviceSession || deviceVerificationError) {
+      return;
+    }
+
+    const sendHeartbeat = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const current = auth.currentUser;
+      if (!current) return;
+      const currentSid = localStorage.getItem('localSessionId') || sessionId;
+      if (!currentSid) return;
+      try {
+        const token = await current.getIdToken();
+        const res = await fetch('/api/auth/heartbeat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ sessionId: currentSid })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data?.revoked === true || (res.status === 401 && data?.revoked)) {
+          signOut(auth).catch(() => {});
+        }
+      } catch {
+        // Non-fatal network hiccup during background heartbeat
+      }
+    };
+
+    const intervalId = window.setInterval(sendHeartbeat, 2 * 60 * 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isAuthenticated, user, sessionId, deviceVerificationRequired, verifyingDeviceSession, deviceVerificationError]);
+
   useEffect(() => {
     // Scrub any leftover insecure role keys immediately
     localStorage.removeItem('userRole');
     localStorage.removeItem('userRoleOverride');
 
     let unsubDoc: (() => void) | null = null;
-    let isCancelled = false;
+    const isCancelledRef = { current: false };
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (unsubDoc) {
@@ -332,7 +556,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         inFlightSessionsRef.current.clear();
         serverConfirmedSessionsRef.current.clear();
         sawCurrentSidInActiveSessionsRef.current.clear();
-        if (!isCancelled) {
+        if (!isCancelledRef.current) {
           setUser(null);
           setUserProfile(null);
           setUserRole('guest');
@@ -341,6 +565,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setVerifyingDeviceSession(false);
           setDeviceVerificationRequired(false);
           setDeviceVerificationMeta(null);
+          setDeviceVerificationError(null);
           setLoading(false);
         }
         return;
@@ -359,7 +584,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           getDoc(doc(db, 'users', fbUser.uid)),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Profile lookup timeout')), 15000))
         ]);
-        if (isCancelled) return;
+        if (isCancelledRef.current) return;
 
         const resolved = resolveAuthoritativeState(fbUser, userSnap.exists() ? userSnap.data() : null);
         if (!resolved.valid) {
@@ -373,6 +598,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setVerifyingDeviceSession(false);
           setDeviceVerificationRequired(false);
           setDeviceVerificationMeta(null);
+          setDeviceVerificationError(null);
           setAuthError(resolved.reason);
           setLoading(false);
           return;
@@ -394,7 +620,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem('shikshantar_last_activity', Date.now().toString());
         } catch {}
 
-        const isPrivilegedRole = resolved.role === 'admin' || resolved.role === 'teacher';
+        const requiresStrictDeviceCheck =
+          (resolved.role === 'admin' || resolved.role === 'teacher' || resolved.role === 'student') &&
+          isDeliverableEmail(fbUser.email || prof.email);
         const sessionKey = `${fbUser.uid}:${currentSid}`;
 
         setUser(fbUser);
@@ -403,80 +631,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAdminTier(resolved.tier);
         setIsAuthenticated(true);
         setAuthError(null);
-        // Hold privileged roles on a brief verification check until record-login confirms trusted device or OTP gate
-        if (isPrivilegedRole && !serverConfirmedSessionsRef.current.has(sessionKey)) {
+        setDeviceVerificationError(null);
+        // Hold OTP-eligible accounts on verification check until record-login confirms trusted device or OTP gate
+        if (requiresStrictDeviceCheck && !serverConfirmedSessionsRef.current.has(sessionKey)) {
           setVerifyingDeviceSession(true);
         }
         setLoading(false);
 
-        if (!inFlightSessionsRef.current.has(sessionKey)) {
-          inFlightSessionsRef.current.add(sessionKey);
-          const storedTrustToken = getStoredDeviceTrustToken(fbUser.uid);
-
-          fbUser.getIdToken().then(token => {
-            fetch('/api/auth/record-login', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                sessionId: currentSid,
-                deviceTrustToken: storedTrustToken || undefined
-              })
-            }).then(async (res) => {
-              if (isCancelled) return;
-              if (res.status === 423) {
-                setAuthError('Account is temporarily locked due to repeated failed login attempts.');
-                setVerifyingDeviceSession(false);
-                signOut(auth).catch(() => {});
-                return;
-              }
-              const body = await res.json().catch(() => ({}));
-              if (res.status === 401 && body?.revoked) {
-                setVerifyingDeviceSession(false);
-                signOut(auth).catch(() => {});
-                return;
-              }
-              if (res.ok && body?.success) {
-                if (body?.deviceTrustToken && typeof body.deviceTrustToken === 'string') {
-                  setStoredDeviceTrustToken(fbUser.uid, body.deviceTrustToken);
-                }
-
-                if (body?.requiresDeviceVerification === true && body?.verification) {
-                  setDeviceVerificationMeta(body.verification);
-                  setDeviceVerificationRequired(true);
-                  setVerifyingDeviceSession(false);
-                  return;
-                }
-
-                setDeviceVerificationRequired(false);
-                setDeviceVerificationMeta(null);
-                setVerifyingDeviceSession(false);
-                serverConfirmedSessionsRef.current.add(sessionKey);
-              } else {
-                inFlightSessionsRef.current.delete(sessionKey);
-                setVerifyingDeviceSession(false);
-              }
-            }).catch(() => {
-              inFlightSessionsRef.current.delete(sessionKey);
-              if (!isCancelled) {
-                setVerifyingDeviceSession(false);
-              }
-            });
-          }).catch(() => {
-            inFlightSessionsRef.current.delete(sessionKey);
-            if (!isCancelled) {
-              setVerifyingDeviceSession(false);
-            }
-          });
-        }
+        runRecordLoginHandshake(fbUser, currentSid, requiresStrictDeviceCheck, isCancelledRef);
 
         let docExisted = userSnap.exists();
         unsubDoc = onSnapshot(
           doc(db, 'users', fbUser.uid),
           (snap) => {
-            if (isCancelled) return;
+            if (isCancelledRef.current) return;
             if (!snap.exists()) {
               if (docExisted) {
                 signOut(auth).catch(() => {});
@@ -517,7 +685,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
       } catch (err: any) {
         console.error('AuthContext authoritative verification failed (failing closed):', err);
-        if (!isCancelled) {
+        if (!isCancelledRef.current) {
           await signOut(auth).catch(() => {});
           clearClientSessionStorage();
           setUser(null);
@@ -528,6 +696,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setVerifyingDeviceSession(false);
           setDeviceVerificationRequired(false);
           setDeviceVerificationMeta(null);
+          setDeviceVerificationError(null);
           setAuthError('Unable to verify authoritative user profile.');
           setLoading(false);
         }
@@ -535,11 +704,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
-      isCancelled = true;
+      isCancelledRef.current = true;
       unsubAuth();
       if (unsubDoc) unsubDoc();
     };
-  }, [clearClientSessionStorage, resolveAuthoritativeState]);
+  }, [clearClientSessionStorage, resolveAuthoritativeState, runRecordLoginHandshake]);
 
   const value: AuthContextValue = {
     user,
@@ -555,7 +724,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     verifyingDeviceSession,
     deviceVerificationRequired,
     deviceVerificationMeta,
+    deviceVerificationError,
     completeDeviceVerification,
+    retryDeviceVerification,
+    clearCurrentDeviceTrust,
     logout,
     refreshProfile
   };

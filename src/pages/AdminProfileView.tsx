@@ -1,10 +1,69 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Edit2, Lock, MonitorSmartphone, Shield, CheckCircle2, ChevronRight, CircleUserRound, Check, X, Activity, GraduationCap, LogOut, AlertCircle, Eye, EyeOff, FileText, Banknote, Settings } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Camera, Edit2, Lock, MonitorSmartphone, Shield, CheckCircle2, ChevronRight, CircleUserRound, Check, X, Activity, GraduationCap, AlertCircle, Eye, EyeOff, Banknote } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { doc, getDoc, updateDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useNavigate } from 'react-router-dom';
+import SecuritySessionsPanel, { SecuritySessionsSummary } from '../components/SecuritySessionsPanel';
+import { formatBSDateTime } from '../lib/nepaliDate';
+
+interface ActivityItem {
+  id: string;
+  kind: 'security' | 'fee';
+  title: string;
+  subtitle: string;
+  timestampMs: number;
+  status?: string;
+}
+
+function toTimestampMs(val: any): number {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const ms = Date.parse(val);
+    return Number.isNaN(ms) ? 0 : ms;
+  }
+  if (typeof val?.toMillis === 'function') return val.toMillis();
+  if (typeof val?.seconds === 'number') return val.seconds * 1000;
+  return 0;
+}
+
+function formatActivityTime(ms: number, fallbackStr?: string): string {
+  if (ms > 0) {
+    try {
+      return formatBSDateTime(new Date(ms));
+    } catch {
+      return new Date(ms).toLocaleString();
+    }
+  }
+  return fallbackStr || 'Recent';
+}
+
+function formatAuditTitle(log: any): string {
+  const action = String(log.action || '').toUpperCase();
+  switch (action) {
+    case 'LOGIN_SUCCESS':
+      return 'Account signed in';
+    case 'LOGIN_FAILED':
+      return 'Failed sign-in attempt';
+    case 'DEVICE_OTP_CHALLENGE_ISSUED':
+      return 'New browser/device detected — 6-digit OTP sent';
+    case 'DEVICE_OTP_VERIFIED':
+      return 'New device verified via 6-digit email code';
+    case 'DEVICE_OTP_FAILED':
+      return 'Invalid 6-digit device verification attempt';
+    case 'TRUSTED_DEVICE_REVOKED':
+      return 'Trusted browser removed';
+    case 'SESSION_REVOKED':
+      return 'Remote session signed out';
+    case 'LOGOUT_OTHER_SESSIONS':
+      return 'Signed out all other active devices';
+    case 'LOGOUT':
+      return 'Signed out of portal';
+    default:
+      return action ? action.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : 'System security event';
+  }
+}
 
 export default function AdminProfileView() {
   const [loading, setLoading] = useState(true);
@@ -21,14 +80,22 @@ export default function AdminProfileView() {
   const [gender, setGender] = useState('Male');
   
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
-  const [activities, setActivities] = useState<any[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [sessionSummary, setSessionSummary] = useState<SecuritySessionsSummary | null>(null);
+  const [quickStats, setQuickStats] = useState({
+    feesRecorded: 0,
+    noticesPosted: 0,
+    admissionsApproved: 0,
+    resultsPublished: 0,
+    loaded: false
+  });
 
   // Security state
   const [showPasswordSection, setShowPasswordSection] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [passwordLastChanged, setPasswordLastChanged] = useState('30 days ago');
+  const [passwordLastChanged, setPasswordLastChanged] = useState('Unknown');
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -36,31 +103,14 @@ export default function AdminProfileView() {
   const [pwdLoading, setPwdLoading] = useState(false);
   const [pwdError, setPwdError] = useState('');
   const [isActivityLogOpen, setIsActivityLogOpen] = useState(false);
-  const [deviceInfo, setDeviceInfo] = useState('Current Device');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
+
+  const handleSessionsSummary = useCallback((summaryData: SecuritySessionsSummary) => {
+    setSessionSummary(summaryData);
+  }, []);
 
   useEffect(() => {
-    // Parse user agent
-    const ua = navigator.userAgent;
-    let browser = 'Unknown Browser';
-    let os = 'Unknown OS';
-
-    if (ua.includes('Chrome') && !ua.includes('Edg/')) browser = 'Chrome';
-    else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
-    else if (ua.includes('Firefox')) browser = 'Firefox';
-    else if (ua.includes('Edg/')) browser = 'Edge';
-    else if (ua.includes('Trident/')) browser = 'Internet Explorer';
-
-    if (ua.includes('Win')) os = 'Windows';
-    else if (ua.includes('Mac')) os = 'MacOS';
-    else if (ua.includes('Linux')) os = 'Linux';
-    else if (ua.includes('Android')) os = 'Android';
-    else if (ua.includes('like Mac OS X')) os = 'iOS';
-
-    setDeviceInfo(`${browser} on ${os}`);
-
     const fetchAdminData = async () => {
       if (auth.currentUser) {
         try {
@@ -87,14 +137,101 @@ export default function AdminProfileView() {
           console.error("Error fetching admin profile", e);
         }
 
+        // Fetch real Recent Activity (audit_logs + transactions merged newest-first)
+        const merged: ActivityItem[] = [];
         try {
-          // Fetch real recent activity from transactions
-          const txSnap = await getDocs(query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(15)));
-          const txActs = txSnap.docs.map(d => ({ type: 'fee', id: d.id, ...d.data() }));
-          
-          setActivities(txActs);
-        } catch(e) {
-          // Ignore
+          let auditSnap;
+          try {
+            auditSnap = await getDocs(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(25)));
+          } catch {
+            auditSnap = await getDocs(query(collection(db, 'audit_logs'), limit(40)));
+          }
+          auditSnap.docs.forEach((d) => {
+            const log = d.data() || {};
+            const tsMs = toTimestampMs(log.timestamp || log.createdAt);
+            const reasonText = typeof log.reason === 'string' && log.reason.trim() ? log.reason.trim() : '';
+            const actorText = log.actorEmail ? ` • ${log.actorEmail}` : '';
+            merged.push({
+              id: `audit_${d.id}`,
+              kind: 'security',
+              title: formatAuditTitle(log),
+              subtitle: `${formatActivityTime(tsMs)}${actorText}${reasonText ? ` — ${reasonText}` : ''}`,
+              timestampMs: tsMs,
+              status: log.result || 'INFO'
+            });
+          });
+        } catch {
+          // Ignore if audit_logs unavailable
+        }
+
+        try {
+          let txSnap;
+          try {
+            txSnap = await getDocs(query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(15)));
+          } catch {
+            txSnap = await getDocs(query(collection(db, 'transactions'), limit(20)));
+          }
+          txSnap.docs.forEach((d) => {
+            const tx = d.data() || {};
+            const tsMs = toTimestampMs(tx.createdAt || tx.date);
+            merged.push({
+              id: `tx_${d.id}`,
+              kind: 'fee',
+              title: `Recorded fee payment for ${tx.studentName || 'Student'} (NRs. ${Number(tx.amount || 0).toLocaleString()})`,
+              subtitle: `${formatActivityTime(tsMs, tx.date)}${tx.method ? ` • ${tx.method}` : ''}`,
+              timestampMs: tsMs
+            });
+          });
+        } catch {
+          // Ignore if transactions unavailable
+        }
+
+        merged.sort((a, b) => b.timestampMs - a.timestampMs);
+        setActivities(merged.slice(0, 30));
+
+        // Fetch live Quick Stats from Firestore (no fake numbers)
+        try {
+          const [txAllSnap, noticesSnap, admissionsSnap, examsSnap] = await Promise.all([
+            getDocs(collection(db, 'transactions')).catch(() => null),
+            getDocs(collection(db, 'notices')).catch(() => null),
+            getDocs(collection(db, 'admissions')).catch(() => null),
+            getDocs(collection(db, 'exams')).catch(() => null)
+          ]);
+
+          let feesTotal = 0;
+          txAllSnap?.docs.forEach((d) => {
+            const data = d.data() || {};
+            if (String(data.status || '').toUpperCase() !== 'VOIDED' && data.voided !== true) {
+              feesTotal += Number(data.amount || 0);
+            }
+          });
+
+          let approvedAdmissions = 0;
+          admissionsSnap?.docs.forEach((d) => {
+            const st = String(d.data()?.status || '').toLowerCase();
+            if (st === 'approved' || st === 'admitted' || st === 'enrolled') {
+              approvedAdmissions++;
+            }
+          });
+
+          let publishedExams = 0;
+          examsSnap?.docs.forEach((d) => {
+            const data = d.data() || {};
+            const st = String(data.status || '').toUpperCase();
+            if (data.published === true || st === 'PUBLISHED') {
+              publishedExams++;
+            }
+          });
+
+          setQuickStats({
+            feesRecorded: feesTotal,
+            noticesPosted: noticesSnap?.size || 0,
+            admissionsApproved: approvedAdmissions,
+            resultsPublished: publishedExams,
+            loaded: true
+          });
+        } catch {
+          setQuickStats((prev) => ({ ...prev, loaded: true }));
         }
       }
       setLoading(false);
@@ -210,33 +347,6 @@ export default function AdminProfileView() {
     }
   };
 
-  const handleLogoutAllOtherDevices = async () => {
-    if (window.confirm("Are you sure you want to log out from all other devices? You will remain logged in on this device.")) {
-       if (auth.currentUser) {
-          try {
-            const localSessionId = localStorage.getItem('localSessionId');
-            const idToken = await auth.currentUser.getIdToken();
-            const res = await fetch('/api/auth/logout-other-sessions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${idToken}`
-              },
-              body: JSON.stringify({ sessionId: localSessionId })
-            });
-            const data = await res.json();
-            if (!res.ok || !data.success) {
-              throw new Error(data.error || 'Failed to logout other devices.');
-            }
-            setSuccessToast('Successfully logged out from all other active sessions.');
-          } catch(e: any) {
-             console.error(e);
-             setPwdError(e?.message || 'Failed to logout other devices. Please try again.');
-          }
-       }
-       setTimeout(() => setSuccessToast(''), 4000);
-    }
-  };
 
   const getInitials = (nameStr: string) => {
     const parts = nameStr.split(' ').filter(Boolean);
@@ -317,9 +427,12 @@ export default function AdminProfileView() {
             <p className="text-gray-300 font-medium text-sm mb-4">School Administrator • Shikshantar Academy | Siraha</p>
 
             {/* Status row */}
-            <div className="flex flex-wrap gap-4 text-xs font-bold text-gray-300 items-center">
+            <div className="flex flex-wrap gap-3 text-xs font-bold text-gray-300 items-center">
                <div className="flex items-center gap-1.5 bg-black/20 px-3 py-1.5 rounded-full border border-white/10">
-                 <div className="w-2 h-2 rounded-full bg-emerald-400"></div> Active Session
+                 <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
+                 {sessionSummary
+                   ? `${sessionSummary.totalActiveSessions} Active ${sessionSummary.totalActiveSessions === 1 ? 'Session' : 'Sessions'}`
+                   : 'Active Session'}
                </div>
                <button 
                  type="button"
@@ -334,7 +447,11 @@ export default function AdminProfileView() {
                  <span>⚡ Test Timeout Warning</span>
                </button>
                <div className="flex items-center gap-1.5 bg-black/20 px-3 py-1.5 rounded-full border border-white/10">
-                 <MonitorSmartphone className="w-3.5 h-3.5 text-blue-300" /> Last Login: Today, 3:17 PM
+                 <MonitorSmartphone className="w-3.5 h-3.5 text-blue-300" />
+                 Last Login:{' '}
+                 {sessionSummary?.lastLoginAt
+                   ? formatActivityTime(toTimestampMs(sessionSummary.lastLoginAt))
+                   : 'Loading...'}
                </div>
                <div className="flex items-center gap-1.5 bg-black/20 px-3 py-1.5 rounded-full border border-white/10">
                  <Shield className="w-3.5 h-3.5 text-orange-300" /> Password updated {passwordLastChanged}
@@ -582,123 +699,141 @@ export default function AdminProfileView() {
               {/* Spacer on Desktop */}
               <div className="hidden md:block w-px bg-gray-100"></div>
 
-              {/* Right Side: Sessions */}
-              <div className="flex-1 md:pt-0 pt-6 md:border-t-0 border-t border-gray-100">
-                 <h3 className="text-sm font-bold text-gray-900 mb-4">Active Sessions</h3>
-                 <div className="space-y-3">
-                    <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3 flex gap-3 items-start">
-                       <MonitorSmartphone className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-                       <div>
-                          <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                            {deviceInfo}
-                            <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">This device</span>
-                          </p>
-                          <p className="text-xs text-gray-500 font-medium">Active now</p>
-                       </div>
+               {/* Right Side: Security Summary */}
+               <div className="flex-1 md:pt-0 pt-6 md:border-t-0 border-t border-gray-100">
+                  <h3 className="text-sm font-bold text-gray-900 mb-3">New-Device Verification & Trust</h3>
+                  <div className="rounded-xl bg-emerald-50/70 border border-emerald-200/80 p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs">
+                      <Shield className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>6-Digit Email OTP Protection Enabled</span>
+                    </div>
+                    <p className="text-xs text-emerald-900/80 leading-relaxed">
+                      Whenever this account signs in from a new browser or unrecognized device, a 6-digit verification code is sent to <strong>{email}</strong> before access is granted.
+                    </p>
+                    {sessionSummary && (
+                      <div className="flex flex-wrap gap-3 pt-1 text-[11px] font-bold text-emerald-900">
+                        <span>Active Devices: {sessionSummary.totalActiveSessions}</span>
+                        <span>•</span>
+                        <span>Trusted Browsers: {sessionSummary.totalTrustedDevices}</span>
+                      </div>
+                    )}
+                  </div>
+               </div>
+            </div>
+         </div>
+       </div>
+
+       {/* SECTION 3B: REAL ACTIVE SESSIONS, LOGIN HISTORY & TRUSTED BROWSERS */}
+       <div className="mb-6">
+         <SecuritySessionsPanel onSummaryLoaded={handleSessionsSummary} />
+       </div>
+
+       {/* SECTION 4: RECENT ACTIVITY (Admin Only) */}
+       <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.08)] overflow-hidden mb-6">
+         <div className="p-5 border-b border-gray-100 text-primary flex items-center justify-between">
+            <h2 className="text-[15px] font-bold text-gray-900 flex items-center gap-2">
+               <Activity className="w-5 h-5 text-primary" /> Recent Activity
+            </h2>
+            <span className="text-[11px] font-bold text-gray-400">
+              {activities.length} {activities.length === 1 ? 'event' : 'events'}
+            </span>
+         </div>
+         <div className="p-2 md:p-4">
+            {/* Timeline */}
+            <div className="relative pl-4 pr-4 py-2">
+               {activities.length > 0 && (
+                 <div className="absolute left-6 top-6 bottom-6 w-px bg-gray-200"></div>
+               )}
+               
+               {activities.slice(0, 6).map((act, i) => (
+                 <div className={`relative flex gap-4 items-start ${i < Math.min(activities.length, 6) - 1 ? 'mb-5' : ''}`} key={act.id}>
+                    <div className={`w-4 h-4 rounded-full border-2 border-white shadow-sm shrink-0 mt-1 relative z-10 ${act.kind === 'fee' ? 'bg-emerald-500' : 'bg-blue-600'}`}></div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-800">{act.title}</p>
+                      <p className="text-[11px] font-semibold text-gray-500 mt-0.5 break-words">{act.subtitle}</p>
                     </div>
                  </div>
-
-                 <button onClick={handleLogoutAllOtherDevices} className="mt-5 w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 text-sm font-bold px-4 py-2.5 rounded-lg flex justify-center items-center gap-2 transition-colors">
-                    <LogOut className="w-4 h-4" /> Logout All Other Devices
-                 </button>
-              </div>
-           </div>
-        </div>
-      </div>
-
-      {/* SECTION 4: RECENT ACTIVITY (Admin Only) */}
-      <div className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.08)] overflow-hidden mb-6">
-        <div className="p-5 border-b border-gray-100 text-primary">
-           <h2 className="text-[15px] font-bold text-gray-900 flex items-center gap-2">
-              <Activity className="w-5 h-5 text-primary" /> Recent Activity
-           </h2>
-        </div>
-        <div className="p-2 md:p-4">
-           {/* Timeline */}
-           <div className="relative pl-4 pr-4 py-2">
-              <div className="absolute left-6 top-6 bottom-6 w-px bg-gray-200"></div>
-              
-              {activities.slice(0,5).map((act, i) => (
-                <div className={`relative flex gap-4 items-start ${i < activities.slice(0,5).length - 1 ? 'mb-6' : ''}`} key={act.id}>
-                   <div className="w-4 h-4 rounded-full border-2 border-white bg-emerald-500 shadow-sm shrink-0 mt-1 relative z-10"></div>
-                   <div>
-                     <p className="text-sm font-bold text-gray-800">Recorded fee payment for {act.studentName} (NRs. {(act.amount||0).toLocaleString()})</p>
-                     <p className="text-[11px] font-bold text-gray-400 mt-0.5 uppercase">{act.date} • {act.method}</p>
-                   </div>
-                </div>
-              ))}
-              {activities.length === 0 && (
-                <p className="text-gray-500 font-bold text-sm text-center italic py-4">No recent activity found.</p>
-              )}
-           </div>
-        </div>
-        <div className="border-t border-gray-100 p-4">
-           <button onClick={() => setIsActivityLogOpen(true)} className="text-sm font-bold text-primary hover:text-blue-700 flex items-center gap-1 mx-auto">
-             View Full Activity Log <ChevronRight className="w-4 h-4" />
-           </button>
-        </div>
-      </div>
-
-      {/* SECTION 5: QUICK STATS */}
-      <h2 className="text-sm font-bold text-gray-500 uppercase tracking-widest pl-1 mb-3">Today's Quick Stats</h2>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-         <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Fees Recorded</p>
-            <p className="text-xl md:text-2xl font-black text-gray-900">NRs. 3,600</p>
-         </div>
-         <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Notices Posted</p>
-            <p className="text-xl md:text-2xl font-black text-gray-900">4 <span className="text-xs text-gray-400 font-bold ml-1">/ month</span></p>
-         </div>
-         <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Admissions Appr.</p>
-            <p className="text-xl md:text-2xl font-black text-gray-900">3</p>
-         </div>
-         <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Results Published</p>
-            <p className="text-xl md:text-2xl font-black text-gray-900">2 <span className="text-xs text-gray-400 font-bold ml-1">exams</span></p>
-         </div>
-      </div>
-
-      {isActivityLogOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center text-primary shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                  <Activity className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-black text-gray-900">Activity Log</h3>
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-0.5">Your recent system actions</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsActivityLogOpen(false)}
-                className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+               ))}
+               {activities.length === 0 && (
+                 <p className="text-gray-500 font-bold text-sm text-center italic py-4">No recent activity found.</p>
+               )}
             </div>
-            
-             <div className="p-6 overflow-y-auto space-y-6">
-               <div className="relative border-l-2 border-gray-100 pl-6 ml-3 space-y-8">
-                 {activities.length > 0 ? activities.map(act => (
-                   <div className="relative" key={act.id}>
-                      <div className="absolute -left-[31px] top-1 rounded-full border-4 border-white bg-emerald-500 p-1.5 shadow-sm">
-                        <Banknote className="w-3 h-3 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-gray-800">Recorded fee payment of रू {(act.amount||0).toLocaleString()} for {act.studentName}</p>
-                        <p className="text-[11px] font-bold text-gray-400 mt-0.5 uppercase tracking-wider">{act.date} • {act.method}</p>
-                      </div>
-                   </div>
-                 )) : (
-                   <p className="text-gray-500 font-bold text-sm text-center italic py-4">No recent activity found.</p>
-                 )}
+         </div>
+         <div className="border-t border-gray-100 p-4">
+            <button onClick={() => setIsActivityLogOpen(true)} className="text-sm font-bold text-primary hover:text-blue-700 flex items-center gap-1 mx-auto cursor-pointer">
+              View Full Activity Log <ChevronRight className="w-4 h-4" />
+            </button>
+         </div>
+       </div>
+
+       {/* SECTION 5: LIVE SCHOOL QUICK STATS */}
+       <h2 className="text-sm font-bold text-gray-500 uppercase tracking-widest pl-1 mb-3">Live Overview Stats</h2>
+       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Fees Recorded</p>
+             <p className="text-xl md:text-2xl font-black text-gray-900">
+               {quickStats.loaded ? `NRs. ${quickStats.feesRecorded.toLocaleString()}` : '...'}
+             </p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Notices Posted</p>
+             <p className="text-xl md:text-2xl font-black text-gray-900">
+               {quickStats.loaded ? quickStats.noticesPosted : '...'} <span className="text-xs text-gray-400 font-bold ml-1">total</span>
+             </p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Admissions Appr.</p>
+             <p className="text-xl md:text-2xl font-black text-gray-900">
+               {quickStats.loaded ? quickStats.admissionsApproved : '...'}
+             </p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Results Published</p>
+             <p className="text-xl md:text-2xl font-black text-gray-900">
+               {quickStats.loaded ? quickStats.resultsPublished : '...'} <span className="text-xs text-gray-400 font-bold ml-1">exams</span>
+             </p>
+          </div>
+       </div>
+
+       {isActivityLogOpen && (
+         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+             <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center text-primary shrink-0">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                   <Activity className="w-5 h-5" />
+                 </div>
+                 <div>
+                   <h3 className="text-xl font-black text-gray-900">Activity Log</h3>
+                   <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-0.5">Recent security & financial actions</p>
+                 </div>
                </div>
+               <button 
+                 onClick={() => setIsActivityLogOpen(false)}
+                 className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
+               >
+                 <X className="w-5 h-5" />
+               </button>
              </div>
-            <div className="px-6 py-4 text-primary border-t border-gray-100 flex justify-end shrink-0">
+             
+              <div className="p-6 overflow-y-auto space-y-6">
+                <div className="relative border-l-2 border-gray-100 pl-6 ml-3 space-y-6">
+                  {activities.length > 0 ? activities.map(act => (
+                    <div className="relative" key={act.id}>
+                       <div className={`absolute -left-[31px] top-1 rounded-full border-4 border-white p-1.5 shadow-sm ${act.kind === 'fee' ? 'bg-emerald-500' : 'bg-blue-600'}`}>
+                         {act.kind === 'fee' ? <Banknote className="w-3 h-3 text-white" /> : <Shield className="w-3 h-3 text-white" />}
+                       </div>
+                       <div>
+                         <p className="text-sm font-bold text-gray-800">{act.title}</p>
+                         <p className="text-[11px] font-semibold text-gray-500 mt-0.5 break-words">{act.subtitle}</p>
+                       </div>
+                    </div>
+                  )) : (
+                    <p className="text-gray-500 font-bold text-sm text-center italic py-4">No recent activity found.</p>
+                  )}
+                </div>
+              </div>
+             <div className="px-6 py-4 text-primary border-t border-gray-100 flex justify-end shrink-0">
                <button 
                  onClick={() => setIsActivityLogOpen(false)}
                  className="px-5 py-2.5 bg-gray-200 text-gray-700 font-bold rounded-xl text-sm hover:bg-gray-300 transition-colors"

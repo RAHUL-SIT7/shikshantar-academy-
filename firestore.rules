@@ -304,14 +304,15 @@ service cloud.firestore {
         ) ||
         (
           isUserOwner(userId) &&
-          isActiveUserDoc() &&
+          (isActiveUserDoc() || isBootstrapOwner()) &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny([
             'role', 'adminTier', 'status', 'active', 'deleted', 'activeSessions',
             'assignmentKeys', 'teachingAssignments',
             'primaryClassTeacher', 'primaryClassTeacherYear', 'primaryClassTeacherSection',
             'advanceBalance', 'previousYearDue', 'monthlyFee', 'fees',
             'scholarship', 'scholarshipStatus', 'scholarshipAmount'
-          ])
+          ]) &&
+          !(resource.data.deviceVerificationEnforced == true && request.resource.data.deviceVerificationEnforced != true)
         )
       );
 
@@ -628,7 +629,28 @@ service cloud.firestore {
 
     match /user_sessions/{sessionId} {
       allow read: if isSignedIn() && (resource == null || resource.data.userUid == request.auth.uid || isAdmin());
-      allow create, update, delete: if false;
+      allow create: if isSignedIn() && (isActiveUserDoc() || isBootstrapOwner()) &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.status in ['ACTIVE', 'PENDING_VERIFICATION', 'LOGGED_OUT', 'REVOKED'] &&
+        request.resource.data.keys().size() <= 40;
+      allow update: if isSignedIn() && (isActiveUserDoc() || isBootstrapOwner()) &&
+        resource.data.userUid == request.auth.uid &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.status in ['ACTIVE', 'PENDING_VERIFICATION', 'LOGGED_OUT', 'REVOKED'] &&
+        request.resource.data.keys().size() <= 40;
+      allow delete: if false;
+    }
+
+    match /trusted_devices/{deviceId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.userUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (isActiveUserDoc() || isBootstrapOwner()) &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.keys().size() <= 25;
+      allow update: if isSignedIn() && (isActiveUserDoc() || isBootstrapOwner()) &&
+        resource.data.userUid == request.auth.uid &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.keys().size() <= 25;
+      allow delete: if false;
     }
 
     match /remitBills/{billId} {

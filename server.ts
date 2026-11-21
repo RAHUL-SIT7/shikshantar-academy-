@@ -22,6 +22,82 @@ import {
   isFirestoreCredentialUnavailableError,
   hasValidFirebaseIdTokenFormat
 } from './api/_lib/auth.js';
+import {
+  hybridGetDoc,
+  hybridSetDoc,
+  hybridQueryEq,
+  hashOtpKeyed,
+  issueSessionSeal,
+  verifySessionSeal,
+  issueSignedTrustToken,
+  verifySignedTrustToken,
+  issueSignedOtpChallengeToken,
+  verifySignedOtpChallengeToken,
+  resolveTrustedDeviceDocId,
+  isAdminCredentialError
+} from './api/_lib/firestoreRest.js';
+
+function parseCookieHeader(req: Request): Record<string, string> {
+  const rawCookieHeader = String(req.headers.cookie || '');
+  const parsed: Record<string, string> = {};
+  if (!rawCookieHeader) return parsed;
+  rawCookieHeader.split(';').forEach((part) => {
+    const eqIdx = part.indexOf('=');
+    if (eqIdx > 0) {
+      const k = part.slice(0, eqIdx).trim();
+      const v = part.slice(eqIdx + 1).trim();
+      if (k) {
+        try {
+          parsed[k] = decodeURIComponent(v);
+        } catch {
+          parsed[k] = v;
+        }
+      }
+    }
+  });
+  return parsed;
+}
+
+const statelessOtpAttempts = new Map<string, { attempts: number; locked: boolean; expiresAtMs: number }>();
+
+async function syncUserSessionState(
+  db: FirebaseFirestore.Firestore,
+  idToken: string,
+  uid: string,
+  opts: {
+    addSessionId?: string;
+    removeSessionId?: string;
+    replaceActiveSessions?: string[];
+    enforceDeviceVerification?: boolean;
+  }
+): Promise<void> {
+  const adminPayload: Record<string, any> = {};
+  if (opts.replaceActiveSessions) {
+    adminPayload.activeSessions = opts.replaceActiveSessions;
+  } else if (opts.addSessionId) {
+    adminPayload.activeSessions = FieldValue.arrayUnion(opts.addSessionId);
+  } else if (opts.removeSessionId) {
+    adminPayload.activeSessions = FieldValue.arrayRemove(opts.removeSessionId);
+  }
+  if (opts.enforceDeviceVerification) {
+    adminPayload.deviceVerificationEnforced = true;
+  }
+  if (Object.keys(adminPayload).length === 0) return;
+
+  try {
+    await db.collection('users').doc(uid).set(adminPayload, { merge: true });
+  } catch (err: any) {
+    if (!isAdminCredentialError(err)) throw err;
+    // In Firestore REST mode, only persist deviceVerificationEnforced (activeSessions is tracked in user_sessions)
+    if (opts.enforceDeviceVerification) {
+      try {
+        await hybridSetDoc(db, idToken, 'users', uid, { deviceVerificationEnforced: true }, { merge: true });
+      } catch (restErr: any) {
+        console.warn('[SECURITY] Could not persist deviceVerificationEnforced via REST:', restErr?.message || restErr);
+      }
+    }
+  }
+}
 
 function loadServerFirebaseConfig(): { projectId: string; firestoreDatabaseId: string } {
   try {
@@ -659,6 +735,8 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     } catch (err: any) {
       const msg = String(err?.message || err || '');
       const isHostProjectIamLookupError =
+        isFirestoreCredentialUnavailableError(err) ||
+        isAdminCredentialError(err) ||
         msg.includes('USER_PROJECT_DENIED') ||
         msg.includes('SERVICE_DISABLED') ||
         msg.includes('accessNotConfigured') ||
@@ -686,11 +764,11 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     }
 
     const db = getAdminDb();
-    const userSnap = await db.collection('users').doc(decoded.uid).get();
+    const userDoc = await hybridGetDoc(db, token, 'users', decoded.uid);
     const emailLower = (decoded.email || '').trim().toLowerCase();
     const isVerifiedBootstrapOwner = emailLower === BOOTSTRAP_OWNER_EMAIL && decoded.email_verified === true;
 
-    if (!userSnap.exists) {
+    if (!userDoc.exists) {
       if (isVerifiedBootstrapOwner) {
         return {
           uid: decoded.uid,
@@ -712,7 +790,7 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
       return null;
     }
 
-    const userData = userSnap.data() || {};
+    const userData = userDoc.data || {};
     if (isUserProfileInactive(userData)) {
       res.status(403).json({ error: 'Forbidden: User account is inactive, pending, or deleted.' });
       return null;
@@ -744,34 +822,17 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
       }
     }
 
-    if (!options?.allowPendingDeviceVerification && (role === 'admin' || role === 'teacher')) {
-      const rawCookieHeader = String(req.headers.cookie || '');
-      const parsedCookies: Record<string, string> = {};
-      if (rawCookieHeader) {
-        rawCookieHeader.split(';').forEach((part) => {
-          const eqIdx = part.indexOf('=');
-          if (eqIdx > 0) {
-            const k = part.slice(0, eqIdx).trim();
-            const v = part.slice(eqIdx + 1).trim();
-            if (k) {
-              try {
-                parsedCookies[k] = decodeURIComponent(v);
-              } catch {
-                parsedCookies[k] = v;
-              }
-            }
-          }
-        });
-      }
+    if (!options?.allowPendingDeviceVerification && (role === 'admin' || role === 'teacher' || role === 'student')) {
+      const parsedCookies = parseCookieHeader(req);
       const reqSessionId = String(req.headers['x-shikshantar-session-id'] || parsedCookies.shikshantar_sid || '').trim();
       const reqDeviceToken = String(req.headers['x-shikshantar-device-token'] || parsedCookies.shikshantar_dt || '').trim();
       const nowMs = Date.now();
       let sessionVerified = false;
 
       if (reqSessionId) {
-        const sSnap = await db.collection('user_sessions').doc(reqSessionId).get();
-        if (sSnap.exists) {
-          const sData = sSnap.data() || {};
+        const sDoc = await hybridGetDoc(db, token, 'user_sessions', reqSessionId);
+        if (sDoc.exists) {
+          const sData = sDoc.data || {};
           if (sData.userUid === decoded.uid) {
             if (sData.status === 'PENDING_VERIFICATION') {
               res.status(403).json({
@@ -780,8 +841,20 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
               });
               return null;
             }
+            if (sData.status === 'REVOKED' || sData.status === 'LOGGED_OUT') {
+              res.status(401).json({
+                error: 'Your session has been ended or revoked. Please sign in again.',
+                code: 'SESSION_REVOKED',
+                revoked: true
+              });
+              return null;
+            }
             if (sData.status === 'ACTIVE') {
-              sessionVerified = true;
+              const sealValid = verifySessionSeal(decoded.uid, reqSessionId, sData.sessionSeal);
+              // In REST mode (no Admin SDK) when device verification is enforced, require unforgeable server sessionSeal
+              if (sealValid || !userData.deviceVerificationEnforced || (!sDoc.viaRest && !sData.sessionSeal)) {
+                sessionVerified = true;
+              }
             }
           }
         }
@@ -790,27 +863,42 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
       if (!sessionVerified && userData.deviceVerificationEnforced === true) {
         let trustedTokenValid = false;
         if (reqDeviceToken) {
-          const trustDocId = crypto
-            .createHash('sha256')
-            .update(`${decoded.uid}:${reqDeviceToken}`)
-            .digest('hex')
-            .slice(0, 48);
-          const trustSnap = await db.collection('trusted_devices').doc(trustDocId).get();
-          if (trustSnap.exists) {
-            const tData = trustSnap.data() || {};
-            if (
-              tData.userUid === decoded.uid &&
-              tData.revoked !== true &&
-              Number(tData.expiresAtMs || 0) > nowMs
-            ) {
+          const signedPayload = verifySignedTrustToken(reqDeviceToken, decoded.uid, nowMs);
+          if (signedPayload) {
+            const trustDoc = await hybridGetDoc(db, token, 'trusted_devices', signedPayload.did);
+            if (trustDoc.exists) {
+              const tData = trustDoc.data || {};
+              if (
+                tData.userUid === decoded.uid &&
+                tData.revoked !== true &&
+                Number(tData.expiresAtMs || 0) > nowMs
+              ) {
+                trustedTokenValid = true;
+              }
+            } else {
+              // Signed token is cryptographically valid and has not been revoked in Firestore
               trustedTokenValid = true;
+            }
+          } else {
+            const trustDocId = resolveTrustedDeviceDocId(decoded.uid, reqDeviceToken);
+            const trustDoc = await hybridGetDoc(db, token, 'trusted_devices', trustDocId);
+            if (trustDoc.exists && !trustDoc.viaRest) {
+              const tData = trustDoc.data || {};
+              if (
+                tData.userUid === decoded.uid &&
+                tData.revoked !== true &&
+                tData.signedTrust !== true &&
+                Number(tData.expiresAtMs || 0) > nowMs
+              ) {
+                trustedTokenValid = true;
+              }
             }
           }
         }
 
         if (!trustedTokenValid) {
           res.status(403).json({
-            error: 'Device verification required for this administrative or faculty account.',
+            error: 'Device verification required. Please complete the 6-digit email verification code.',
             code: 'DEVICE_VERIFICATION_REQUIRED'
           });
           return null;
@@ -1112,7 +1200,7 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
 
       if (normOutcome === 'SUCCESS') {
         // Security requirement: ONLY reset consecutive failure counter when caller presents a valid Firebase ID token
-        const caller = await verifyUserAuth(req, res);
+        const caller = await verifyUserAuth(req, res, { allowPendingDeviceVerification: true });
         if (!caller) return;
 
         let lockResult = { locked: false, lockedUntilMs: 0 };
@@ -5686,23 +5774,50 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     return fields;
   }
 
-  function parseDeviceDetails(userAgent: string) {
+  function isDeliverableRealEmail(email: string): boolean {
+    const clean = String(email || '').trim().toLowerCase();
+    if (!clean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return false;
+    // Exclude synthetic student username aliases (e.g. std101@shikshantar.edu.np) that have no real mailbox
+    if (clean.endsWith('@shikshantar.edu.np')) return false;
+    return true;
+  }
+
+  function parseDeviceDetails(userAgent: string, clientBrowser?: unknown) {
     const ua = userAgent || '';
     let browser = 'Browser';
     let os = 'Unknown OS';
     let deviceType = 'Unknown Device';
     let deviceName = 'Unknown Device';
 
-    if (ua.includes('Edg/')) browser = 'Edge';
+    const allowedClientBrowsers = new Set([
+      'Brave',
+      'Chrome',
+      'Safari',
+      'Firefox',
+      'Edge',
+      'Microsoft Edge',
+      'Opera',
+      'Vivaldi',
+      'Samsung Internet',
+      'Arc'
+    ]);
+    const cleanClientBrowser = typeof clientBrowser === 'string' ? clientBrowser.trim() : '';
+
+    if (cleanClientBrowser && allowedClientBrowsers.has(cleanClientBrowser)) {
+      browser = cleanClientBrowser === 'Microsoft Edge' ? 'Edge' : cleanClientBrowser;
+    } else if (ua.includes('Edg/')) browser = 'Edge';
+    else if (ua.includes('OPR/') || ua.includes('Opera/')) browser = 'Opera';
+    else if (ua.includes('Vivaldi/')) browser = 'Vivaldi';
+    else if (ua.includes('SamsungBrowser/')) browser = 'Samsung Internet';
     else if (ua.includes('Chrome/')) browser = 'Chrome';
     else if (ua.includes('Safari/') && !ua.includes('Chrome/')) browser = 'Safari';
     else if (ua.includes('Firefox/')) browser = 'Firefox';
     else if (ua.includes('MSIE') || ua.includes('Trident/')) browser = 'Internet Explorer';
 
     if (ua.includes('Windows') || ua.includes('Win32') || ua.includes('Win64')) os = 'Windows';
+    else if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) os = 'iOS';
     else if (ua.includes('Macintosh') || ua.includes('Mac OS X')) os = 'macOS';
     else if (ua.includes('Android')) os = 'Android';
-    else if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) os = 'iOS';
     else if (ua.includes('Linux')) os = 'Linux';
 
     if (ua.includes('iPhone')) {
@@ -5909,7 +6024,7 @@ https://www.shikshantaracademy.edu.np/`;
   }
 
   function buildTrustedDeviceDocId(uid: string, rawToken: string): string {
-    return crypto.createHash('sha256').update(`${uid}:${rawToken}`).digest('hex').slice(0, 48);
+    return resolveTrustedDeviceDocId(uid, rawToken);
   }
 
   function hashDeviceOtp(otp: string, salt: string): string {
@@ -6058,11 +6173,12 @@ https://www.shikshantaracademy.edu.np/`;
       const authUser = await verifyUserAuth(req, res, { allowPendingDeviceVerification: true });
       if (!authUser) return;
 
-      const { sessionId, loginEventId, deviceTrustToken } = req.body || {};
+      const { sessionId, loginEventId, deviceTrustToken, clientBrowser } = req.body || {};
       if (!sessionId || typeof sessionId !== 'string' || !sessionId.trim()) {
         return res.status(400).json({ error: 'Missing or invalid sessionId.' });
       }
 
+      const parsedCookies = parseCookieHeader(req);
       const cleanSessionId = sessionId.trim();
       const cleanLoginEventId = (typeof loginEventId === 'string' && loginEventId.trim())
         ? loginEventId.trim()
@@ -6070,24 +6186,28 @@ https://www.shikshantaracademy.edu.np/`;
       const incomingTrustToken = (
         typeof deviceTrustToken === 'string' && deviceTrustToken.trim()
           ? deviceTrustToken.trim()
-          : String(req.headers['x-shikshantar-device-token'] || '').trim()
+          : String(req.headers['x-shikshantar-device-token'] || parsedCookies.shikshantar_dt || '').trim()
       );
 
       const db = getAdminDb();
       const nowMs = getEffectiveNowMs(req);
       const normEmail = String(authUser.email || '').trim().toLowerCase();
       if (normEmail) {
-        const acctKey = `login_acct_${crypto.createHash('sha256').update(normEmail).digest('hex').slice(0, 32)}`;
-        const acctSnap = await db.collection('security_rate_limits').doc(acctKey).get();
-        const lockedUntilMs = Number(acctSnap.data()?.lockedUntilMs || 0);
-        if (lockedUntilMs > nowMs) {
-          const retryAfterSeconds = Math.ceil((lockedUntilMs - nowMs) / 1000);
-          return res.status(423).json({
-            error: `Account is temporarily locked for ${Math.ceil(retryAfterSeconds / 60)} minute(s). Please wait before signing in.`,
-            locked: true,
-            retryAfterSeconds,
-            lockedUntil: new Date(lockedUntilMs).toISOString()
-          });
+        try {
+          const acctKey = `login_acct_${crypto.createHash('sha256').update(normEmail).digest('hex').slice(0, 32)}`;
+          const acctSnap = await db.collection('security_rate_limits').doc(acctKey).get();
+          const lockedUntilMs = Number(acctSnap.data()?.lockedUntilMs || 0);
+          if (lockedUntilMs > nowMs) {
+            const retryAfterSeconds = Math.ceil((lockedUntilMs - nowMs) / 1000);
+            return res.status(423).json({
+              error: `Account is temporarily locked for ${Math.ceil(retryAfterSeconds / 60)} minute(s). Please wait before signing in.`,
+              locked: true,
+              retryAfterSeconds,
+              lockedUntil: new Date(lockedUntilMs).toISOString()
+            });
+          }
+        } catch (lockErr: any) {
+          if (!isAdminCredentialError(lockErr)) throw lockErr;
         }
       }
 
@@ -6095,11 +6215,13 @@ https://www.shikshantaracademy.edu.np/`;
       const userName = userData.fullName || userData.name || authUser.email.split('@')[0];
       const userRole = authUser.role;
       const activeSessions: string[] = Array.isArray(userData.activeSessions) ? [...userData.activeSessions] : [];
-      const requiresHighPrivilegeOtp = userRole === 'admin' || userRole === 'teacher';
+      // Enforce 6-digit email OTP on unrecognized devices for ALL accounts with a real deliverable email
+      const requiresDeviceOtp =
+        (userRole === 'admin' || userRole === 'teacher' || userRole === 'student') &&
+        isDeliverableRealEmail(authUser.email);
 
-      const sessionRef = db.collection('user_sessions').doc(cleanSessionId);
-      const sessionSnap = await sessionRef.get();
-      const existingSession: any = sessionSnap.exists ? sessionSnap.data() : null;
+      const sessionDoc = await hybridGetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId);
+      const existingSession: any = sessionDoc.exists ? sessionDoc.data : null;
 
       if (existingSession && existingSession.userUid && existingSession.userUid !== authUser.uid) {
         return res.status(403).json({ error: 'Forbidden: Session identifier belongs to another user.' });
@@ -6111,39 +6233,61 @@ https://www.shikshantaracademy.edu.np/`;
       const now = new Date();
       const nowIso = now.toISOString();
       const ua = req.headers['user-agent'] || '';
-      const device = parseDeviceDetails(ua);
+      const device = parseDeviceDetails(ua, clientBrowser);
       const forwarded = req.headers['x-forwarded-for'];
       const ip = typeof forwarded === 'string'
         ? forwarded.split(',')[0].trim()
         : (req.socket.remoteAddress || req.ip || '127.0.0.1');
       const location = await resolveApproximateLocation(ip);
       const dateTimeFormatted = now.toLocaleDateString('en-US', {
+        timeZone: 'Asia/Kathmandu',
         day: 'numeric',
         month: 'long',
         year: 'numeric'
       }) + ', ' + now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kathmandu',
         hour: 'numeric',
         minute: '2-digit',
         hour12: true
-      });
+      }) + ' NPT';
       const smtpConfig = getSmtpTransportConfig();
+      const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      const cookieOpts = {
+        httpOnly: true,
+        path: '/api',
+        sameSite: (isSecureReq ? 'none' : 'lax') as 'none' | 'lax',
+        secure: isSecureReq,
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      };
+      const currentSessionSeal = issueSessionSeal(authUser.uid, cleanSessionId);
 
       // A. Existing ACTIVE session refresh -> touch lastActiveAt only (ZERO duplicate emails!)
-      if (existingSession && existingSession.status === 'ACTIVE') {
+      const existingSessionSealValid = existingSession && (
+        verifySessionSeal(authUser.uid, cleanSessionId, existingSession.sessionSeal) ||
+        !requiresDeviceOtp ||
+        (!sessionDoc.viaRest && !existingSession.sessionSeal)
+      );
+      if (existingSession && existingSession.status === 'ACTIVE' && existingSessionSealValid) {
         if (!activeSessions.includes(cleanSessionId)) {
-          await db.collection('users').doc(authUser.uid).set({
-            activeSessions: FieldValue.arrayUnion(cleanSessionId)
-          }, { merge: true });
+          await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+            addSessionId: cleanSessionId
+          });
         }
-        await sessionRef.set({ lastActiveAt: nowIso, updatedAt: nowIso }, { merge: true });
-        const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
-        res.cookie('shikshantar_sid', cleanSessionId, {
-          httpOnly: true,
-          path: '/api',
-          sameSite: isSecureReq ? 'none' : 'lax',
-          secure: isSecureReq,
-          maxAge: 30 * 24 * 60 * 60 * 1000
-        });
+        await hybridSetDoc(
+          db,
+          authUser.rawToken,
+          'user_sessions',
+          cleanSessionId,
+          {
+            userUid: authUser.uid,
+            status: 'ACTIVE',
+            sessionSeal: existingSession.sessionSeal || currentSessionSeal,
+            lastActiveAt: nowIso,
+            updatedAt: nowIso
+          },
+          { merge: true }
+        );
+        res.cookie('shikshantar_sid', cleanSessionId, cookieOpts);
         return res.json({
           success: true,
           alreadyProcessed: true,
@@ -6154,12 +6298,61 @@ https://www.shikshantaracademy.edu.np/`;
       }
 
       // B. Existing PENDING_VERIFICATION session refresh -> reuse active challenge without spamming new OTPs
-      if (existingSession && existingSession.status === 'PENDING_VERIFICATION' && requiresHighPrivilegeOtp) {
-        const challengeSnap = await db.collection('device_verification_challenges').doc(cleanSessionId).get();
-        const ch = challengeSnap.exists ? challengeSnap.data() : null;
-        if (ch && ch.status === 'PENDING' && Number(ch.expiresAtMs || 0) > nowMs) {
-          const remainingSec = Math.max(1, Math.ceil((Number(ch.expiresAtMs) - nowMs) / 1000));
-          const cooldownLeft = Math.max(0, Math.ceil(((Number(ch.lastSentAtMs || 0) + 60000) - nowMs) / 1000));
+      if (existingSession && existingSession.status === 'PENDING_VERIFICATION' && requiresDeviceOtp) {
+        let activeChallenge: any = null;
+        let reusedChallengeToken = '';
+        try {
+          const challengeSnap = await db.collection('device_verification_challenges').doc(cleanSessionId).get();
+          const ch = challengeSnap.exists ? challengeSnap.data() : null;
+          if (ch && ch.status === 'PENDING' && Number(ch.expiresAtMs || 0) > nowMs) {
+            activeChallenge = ch;
+            reusedChallengeToken = issueSignedOtpChallengeToken({
+              uid: authUser.uid,
+              sid: cleanSessionId,
+              h: String(ch.otpHash || ''),
+              s: String(ch.otpSalt || ''),
+              r: String(ch.reason || existingSession.verificationReason || 'NEW_BROWSER_OR_DEVICE'),
+              b: String(ch.browser || existingSession.browser || device.browser),
+              o: String(ch.os || existingSession.operatingSystem || device.os),
+              d: String(ch.deviceName || existingSession.deviceName || device.deviceName),
+              loc: String(ch.location || existingSession.approximateLocation || location),
+              ip: String(ch.ipAddress || existingSession.ipAddress || ip),
+              rc: Number(ch.resendCount || 0),
+              ls: Number(ch.lastSentAtMs || nowMs),
+              exp: Number(ch.expiresAtMs || nowMs + 600000),
+              ed: ch.emailDispatched === true,
+              sn: ch.smtpNotConfigured === true
+            });
+          }
+        } catch (chErr: any) {
+          if (!isAdminCredentialError(chErr)) throw chErr;
+        }
+
+        if (!activeChallenge && parsedCookies.shikshantar_otp_ch) {
+          const parsedSignedCh = verifySignedOtpChallengeToken(
+            parsedCookies.shikshantar_otp_ch,
+            authUser.uid,
+            cleanSessionId
+          );
+          if (parsedSignedCh && Number(parsedSignedCh.exp || 0) > nowMs) {
+            const attemptKey = `${authUser.uid}:${cleanSessionId}:${parsedSignedCh.s}`;
+            const attemptState = statelessOtpAttempts.get(attemptKey);
+            if (!attemptState?.locked) {
+              activeChallenge = {
+                reason: parsedSignedCh.r,
+                expiresAtMs: parsedSignedCh.exp,
+                lastSentAtMs: parsedSignedCh.ls,
+                emailDispatched: parsedSignedCh.ed,
+                smtpNotConfigured: parsedSignedCh.sn
+              };
+              reusedChallengeToken = parsedCookies.shikshantar_otp_ch;
+            }
+          }
+        }
+
+        if (activeChallenge) {
+          const remainingSec = Math.max(1, Math.ceil((Number(activeChallenge.expiresAtMs) - nowMs) / 1000));
+          const cooldownLeft = Math.max(0, Math.ceil(((Number(activeChallenge.lastSentAtMs || 0) + 60000) - nowMs) / 1000));
           return res.json({
             success: true,
             requiresDeviceVerification: true,
@@ -6168,7 +6361,7 @@ https://www.shikshantaracademy.edu.np/`;
               sessionId: cleanSessionId,
               maskedEmail: maskEmailAddress(authUser.email),
               senderEmail: smtpConfig.fromSecurity || 'securityalerts@shikshantaracademy.edu.np',
-              reason: ch.reason || existingSession.verificationReason || 'NEW_BROWSER_OR_DEVICE',
+              reason: activeChallenge.reason || existingSession.verificationReason || 'NEW_BROWSER_OR_DEVICE',
               browser: existingSession.browser || device.browser,
               os: existingSession.operatingSystem || device.os,
               deviceName: existingSession.deviceName || device.deviceName,
@@ -6176,7 +6369,9 @@ https://www.shikshantaracademy.edu.np/`;
               ipAddress: existingSession.ipAddress || ip,
               expiresInSeconds: remainingSec,
               resendCooldownSeconds: cooldownLeft,
-              emailDispatched: ch.emailDispatched !== false
+              emailDispatched: activeChallenge.emailDispatched === true,
+              smtpNotConfigured: activeChallenge.smtpNotConfigured === true,
+              challengeToken: reusedChallengeToken || undefined
             }
           });
         }
@@ -6184,23 +6379,41 @@ https://www.shikshantaracademy.edu.np/`;
 
       // C. Evaluate Trusted Devices for this user
       const TRUST_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-      const trustedQuerySnap = await db.collection('trusted_devices')
-        .where('userUid', '==', authUser.uid)
-        .get();
-      const activeTrustedDocs = trustedQuerySnap.docs.filter((d) => {
-        const data = d.data() || {};
+      const trustedQuery = await hybridQueryEq(
+        db,
+        authUser.rawToken,
+        'trusted_devices',
+        'userUid',
+        authUser.uid
+      );
+      const activeTrustedDocs = trustedQuery.docs.filter((d) => {
+        const data = d.data || {};
         return data.revoked !== true && Number(data.expiresAtMs || 0) > nowMs;
       });
+      // Once a user has EVER been enrolled (even if all trusted devices were later revoked or expired),
+      // NEVER auto-trust a new device without passing 6-digit OTP verification!
+      const hasPriorEnrollment =
+        userData.deviceVerificationEnforced === true ||
+        trustedQuery.docs.length > 0;
 
       const currentLocKey = normalizeLocationKey(location);
-      let matchedTrustDocRef: FirebaseFirestore.DocumentReference | null = null;
+      let matchedTrustDocId: string | null = null;
+      let upgradedTrustToken: string | null = null;
       let verificationReason: 'NEW_BROWSER_OR_DEVICE' | 'NEW_LOCATION' | 'DEVICE_MISMATCH' | null = null;
 
-      if (activeTrustedDocs.length === 0) {
+      if (activeTrustedDocs.length === 0 && !hasPriorEnrollment) {
         // First trusted device ever -> register automatically as Trusted Device #1
-        const firstTrustToken = crypto.randomBytes(32).toString('hex');
-        const firstTrustDocId = buildTrustedDeviceDocId(authUser.uid, firstTrustToken);
-        await db.collection('trusted_devices').doc(firstTrustDocId).set({
+        const issuedFirst = issueSignedTrustToken({
+          uid: authUser.uid,
+          browser: device.browser,
+          os: device.os,
+          locationKey: currentLocKey,
+          nowMs,
+          ttlMs: TRUST_TTL_MS
+        });
+        const firstTrustToken = issuedFirst.token;
+        const firstTrustDocId = issuedFirst.deviceId;
+        await hybridSetDoc(db, authUser.rawToken, 'trusted_devices', firstTrustDocId, {
           userUid: authUser.uid,
           email: authUser.email,
           role: userRole,
@@ -6210,15 +6423,16 @@ https://www.shikshantaracademy.edu.np/`;
           lastLocation: location,
           lastIp: ip,
           revoked: false,
+          signedTrust: true,
           createdAt: nowIso,
           lastUsedAt: nowIso,
           expiresAtMs: nowMs + TRUST_TTL_MS
         });
 
-        await db.collection('users').doc(authUser.uid).set({
-          activeSessions: FieldValue.arrayUnion(cleanSessionId),
-          ...(requiresHighPrivilegeOtp ? { deviceVerificationEnforced: true } : {})
-        }, { merge: true });
+        await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+          addSessionId: cleanSessionId,
+          enforceDeviceVerification: requiresDeviceOtp
+        });
 
         let emailResult: { success: boolean; simulated?: boolean; error?: any } = { success: false, error: 'Email skipped' };
         if (authUser.email) {
@@ -6247,6 +6461,7 @@ https://www.shikshantaracademy.edu.np/`;
           revokedAt: null,
           logoutAt: null,
           status: 'ACTIVE',
+          sessionSeal: currentSessionSeal,
           ipAddress: ip,
           approximateLocation: location,
           userAgent: ua,
@@ -6261,7 +6476,7 @@ https://www.shikshantaracademy.edu.np/`;
           createdAt: existingSession?.createdAt || nowIso,
           updatedAt: nowIso
         };
-        await sessionRef.set(sessionData, { merge: true });
+        await hybridSetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId, sessionData, { merge: true });
 
         await recordServerAuditLog({
           actorUid: authUser.uid,
@@ -6275,14 +6490,6 @@ https://www.shikshantaracademy.edu.np/`;
           reason: `First trusted device registered: ${device.compositeName} (${location}, IP: ${ip})`
         });
 
-        const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
-        const cookieOpts = {
-          httpOnly: true,
-          path: '/api',
-          sameSite: (isSecureReq ? 'none' : 'lax') as 'none' | 'lax',
-          secure: isSecureReq,
-          maxAge: 30 * 24 * 60 * 60 * 1000
-        };
         res.cookie('shikshantar_sid', cleanSessionId, cookieOpts);
         res.cookie('shikshantar_dt', firstTrustToken, cookieOpts);
 
@@ -6296,24 +6503,59 @@ https://www.shikshantaracademy.edu.np/`;
         });
       }
 
-      // Check if incoming token matches an active trusted device
+      // Check if incoming token cryptographically matches an active trusted device
       if (incomingTrustToken) {
-        const candidateDocId = buildTrustedDeviceDocId(authUser.uid, incomingTrustToken);
-        const candidateSnap = activeTrustedDocs.find((d) => d.id === candidateDocId);
-        if (candidateSnap) {
-          const tData = candidateSnap.data() || {};
-          const browserOsMatch =
-            String(tData.browser || '') === String(device.browser || '') &&
-            String(tData.os || '') === String(device.os || '');
-          const savedLocKey = normalizeLocationKey(String(tData.lastLocation || ''));
-          const locationChanged = Boolean(savedLocKey && currentLocKey && savedLocKey !== currentLocKey);
+        const signedTrust = verifySignedTrustToken(incomingTrustToken, authUser.uid, nowMs);
+        if (signedTrust) {
+          const candidateDoc = activeTrustedDocs.find((d) => d.id === signedTrust.did);
+          if (candidateDoc) {
+            const tData = candidateDoc.data || {};
+            const browserOsMatch =
+              String(tData.browser || signedTrust.b || '') === String(device.browser || '') &&
+              String(tData.os || signedTrust.o || '') === String(device.os || '');
+            const savedLocKey = normalizeLocationKey(String(tData.lastLocation || signedTrust.l || ''));
+            const locationChanged = Boolean(savedLocKey && currentLocKey && savedLocKey !== currentLocKey);
 
-          if (!browserOsMatch) {
-            verificationReason = 'DEVICE_MISMATCH';
-          } else if (locationChanged) {
-            verificationReason = 'NEW_LOCATION';
+            if (!browserOsMatch) {
+              verificationReason = 'DEVICE_MISMATCH';
+            } else if (locationChanged) {
+              verificationReason = 'NEW_LOCATION';
+            } else {
+              matchedTrustDocId = candidateDoc.id;
+            }
           } else {
-            matchedTrustDocRef = candidateSnap.ref;
+            verificationReason = 'NEW_BROWSER_OR_DEVICE';
+          }
+        } else if (!trustedQuery.viaRest) {
+          // Legacy unsigned token only honored when verified by Admin SDK (never forged via REST)
+          const legacyDocId = buildTrustedDeviceDocId(authUser.uid, incomingTrustToken);
+          const candidateDoc = activeTrustedDocs.find((d) => d.id === legacyDocId);
+          if (candidateDoc && candidateDoc.data?.signedTrust !== true) {
+            const tData = candidateDoc.data || {};
+            const browserOsMatch =
+              String(tData.browser || '') === String(device.browser || '') &&
+              String(tData.os || '') === String(device.os || '');
+            const savedLocKey = normalizeLocationKey(String(tData.lastLocation || ''));
+            const locationChanged = Boolean(savedLocKey && currentLocKey && savedLocKey !== currentLocKey);
+
+            if (!browserOsMatch) {
+              verificationReason = 'DEVICE_MISMATCH';
+            } else if (locationChanged) {
+              verificationReason = 'NEW_LOCATION';
+            } else {
+              matchedTrustDocId = candidateDoc.id;
+              upgradedTrustToken = issueSignedTrustToken({
+                uid: authUser.uid,
+                deviceId: candidateDoc.id,
+                browser: device.browser,
+                os: device.os,
+                locationKey: currentLocKey,
+                nowMs,
+                ttlMs: TRUST_TTL_MS
+              }).token;
+            }
+          } else {
+            verificationReason = 'NEW_BROWSER_OR_DEVICE';
           }
         } else {
           verificationReason = 'NEW_BROWSER_OR_DEVICE';
@@ -6323,18 +6565,27 @@ https://www.shikshantaracademy.edu.np/`;
       }
 
       // D. Known trusted browser + matching location -> instant sign-in, ZERO email spam
-      if (matchedTrustDocRef) {
-        await matchedTrustDocRef.set({
-          lastUsedAt: nowIso,
-          lastIp: ip,
-          ...(currentLocKey ? { lastLocation: location } : {}),
-          expiresAtMs: nowMs + TRUST_TTL_MS
-        }, { merge: true });
+      if (matchedTrustDocId) {
+        await hybridSetDoc(
+          db,
+          authUser.rawToken,
+          'trusted_devices',
+          matchedTrustDocId,
+          {
+            userUid: authUser.uid,
+            lastUsedAt: nowIso,
+            lastIp: ip,
+            signedTrust: true,
+            ...(currentLocKey ? { lastLocation: location } : {}),
+            expiresAtMs: nowMs + TRUST_TTL_MS
+          },
+          { merge: true }
+        );
 
-        await db.collection('users').doc(authUser.uid).set({
-          activeSessions: FieldValue.arrayUnion(cleanSessionId),
-          ...(requiresHighPrivilegeOtp ? { deviceVerificationEnforced: true } : {})
-        }, { merge: true });
+        await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+          addSessionId: cleanSessionId,
+          enforceDeviceVerification: requiresDeviceOtp
+        });
 
         const sessionData = {
           sessionId: cleanSessionId,
@@ -6348,6 +6599,7 @@ https://www.shikshantaracademy.edu.np/`;
           revokedAt: null,
           logoutAt: null,
           status: 'ACTIVE',
+          sessionSeal: currentSessionSeal,
           ipAddress: ip,
           approximateLocation: location,
           userAgent: ua,
@@ -6362,7 +6614,7 @@ https://www.shikshantaracademy.edu.np/`;
           createdAt: existingSession?.createdAt || nowIso,
           updatedAt: nowIso
         };
-        await sessionRef.set(sessionData, { merge: true });
+        await hybridSetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId, sessionData, { merge: true });
 
         await recordServerAuditLog({
           actorUid: authUser.uid,
@@ -6376,23 +6628,17 @@ https://www.shikshantaracademy.edu.np/`;
           reason: `Trusted device sign-in from ${device.compositeName} (${location}, IP: ${ip})`
         });
 
-        const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
-        const cookieOpts = {
-          httpOnly: true,
-          path: '/api',
-          sameSite: (isSecureReq ? 'none' : 'lax') as 'none' | 'lax',
-          secure: isSecureReq,
-          maxAge: 30 * 24 * 60 * 60 * 1000
-        };
+        const finalTrustToken = upgradedTrustToken || incomingTrustToken;
         res.cookie('shikshantar_sid', cleanSessionId, cookieOpts);
-        if (incomingTrustToken) {
-          res.cookie('shikshantar_dt', incomingTrustToken, cookieOpts);
+        if (finalTrustToken) {
+          res.cookie('shikshantar_dt', finalTrustToken, cookieOpts);
         }
 
         return res.json({
           success: true,
           requiresDeviceVerification: false,
           trustedDeviceMatched: true,
+          ...(upgradedTrustToken ? { deviceTrustToken: upgradedTrustToken } : {}),
           sessionId: cleanSessionId,
           session: sessionData
         });
@@ -6400,10 +6646,10 @@ https://www.shikshantaracademy.edu.np/`;
 
       // E. Unrecognized Browser/Device or New Location
       const finalReason = verificationReason || 'NEW_BROWSER_OR_DEVICE';
-      if (requiresHighPrivilegeOtp && authUser.email) {
+      if (requiresDeviceOtp && authUser.email) {
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         const otpSalt = crypto.randomBytes(16).toString('hex');
-        const otpHash = hashDeviceOtp(otpCode, otpSalt);
+        const otpHash = hashOtpKeyed(otpCode, otpSalt);
         const expiresMinutes = 10;
         const expiresAtMs = nowMs + expiresMinutes * 60 * 1000;
         const reasonLabel =
@@ -6413,32 +6659,40 @@ https://www.shikshantaracademy.edu.np/`;
               ? 'different browser or device profile'
               : 'new browser or unrecognized device';
 
-        // Hold session in PENDING_VERIFICATION (do NOT add to activeSessions until OTP passes)
-        await sessionRef.set({
-          sessionId: cleanSessionId,
-          userUid: authUser.uid,
-          loginEventId: cleanLoginEventId,
-          email: authUser.email,
-          userName,
-          role: userRole,
-          loginAt: existingSession?.loginAt || nowIso,
-          lastActiveAt: nowIso,
-          revokedAt: null,
-          logoutAt: null,
-          status: 'PENDING_VERIFICATION',
-          verificationReason: finalReason,
-          ipAddress: ip,
-          approximateLocation: location,
-          userAgent: ua,
-          deviceType: device.deviceType,
-          deviceName: device.deviceName,
-          browser: device.browser,
-          operatingSystem: (device as any).operatingSystem || device.os,
-          compositeName: device.compositeName,
-          emailSent: false,
-          createdAt: existingSession?.createdAt || nowIso,
-          updatedAt: nowIso
-        }, { merge: true });
+        // Hold session in PENDING_VERIFICATION (NO sessionSeal and NOT added to activeSessions until OTP passes)
+        await hybridSetDoc(
+          db,
+          authUser.rawToken,
+          'user_sessions',
+          cleanSessionId,
+          {
+            sessionId: cleanSessionId,
+            userUid: authUser.uid,
+            loginEventId: cleanLoginEventId,
+            email: authUser.email,
+            userName,
+            role: userRole,
+            loginAt: existingSession?.loginAt || nowIso,
+            lastActiveAt: nowIso,
+            revokedAt: null,
+            logoutAt: null,
+            status: 'PENDING_VERIFICATION',
+            sessionSeal: null,
+            verificationReason: finalReason,
+            ipAddress: ip,
+            approximateLocation: location,
+            userAgent: ua,
+            deviceType: device.deviceType,
+            deviceName: device.deviceName,
+            browser: device.browser,
+            operatingSystem: (device as any).operatingSystem || device.os,
+            compositeName: device.compositeName,
+            emailSent: false,
+            createdAt: existingSession?.createdAt || nowIso,
+            updatedAt: nowIso
+          },
+          { merge: true }
+        );
 
         const otpEmailResult = await sendDeviceVerificationOtpEmail({
           toEmail: authUser.email,
@@ -6454,29 +6708,64 @@ https://www.shikshantaracademy.edu.np/`;
           expiresMinutes
         });
 
-        await db.collection('device_verification_challenges').doc(cleanSessionId).set({
-          sessionId: cleanSessionId,
-          userUid: authUser.uid,
-          email: authUser.email,
-          role: userRole,
-          reason: finalReason,
-          otpHash,
-          otpSalt,
-          attempts: 0,
-          maxAttempts: 5,
-          resendCount: 0,
-          maxResends: 5,
-          status: 'PENDING',
-          browser: device.browser,
-          os: device.os,
-          deviceName: device.deviceName,
-          location,
-          ipAddress: ip,
-          emailDispatched: otpEmailResult.success === true,
-          lastSentAtMs: nowMs,
-          expiresAtMs,
-          createdAt: nowIso,
-          updatedAt: nowIso
+        const realOtpDispatched = otpEmailResult.success === true && otpEmailResult.simulated !== true;
+        const smtpNotConfigured = otpEmailResult.simulated === true;
+
+        const signedChallengeToken = issueSignedOtpChallengeToken({
+          uid: authUser.uid,
+          sid: cleanSessionId,
+          h: otpHash,
+          s: otpSalt,
+          r: finalReason,
+          b: device.browser,
+          o: device.os,
+          d: device.deviceName,
+          loc: location,
+          ip,
+          rc: 0,
+          ls: nowMs,
+          exp: expiresAtMs,
+          ed: realOtpDispatched,
+          sn: smtpNotConfigured
+        });
+
+        try {
+          await db.collection('device_verification_challenges').doc(cleanSessionId).set({
+            sessionId: cleanSessionId,
+            userUid: authUser.uid,
+            email: authUser.email,
+            role: userRole,
+            reason: finalReason,
+            otpHash,
+            otpSalt,
+            hashVersion: 'hmac_v1',
+            attempts: 0,
+            maxAttempts: 5,
+            resendCount: 0,
+            maxResends: 5,
+            status: 'PENDING',
+            browser: device.browser,
+            os: device.os,
+            deviceName: device.deviceName,
+            location,
+            ipAddress: ip,
+            emailDispatched: realOtpDispatched,
+            smtpNotConfigured,
+            lastSentAtMs: nowMs,
+            expiresAtMs,
+            createdAt: nowIso,
+            updatedAt: nowIso
+          });
+        } catch (chWriteErr: any) {
+          if (!isAdminCredentialError(chWriteErr)) throw chWriteErr;
+        }
+
+        res.cookie('shikshantar_otp_ch', signedChallengeToken, {
+          httpOnly: true,
+          path: '/api',
+          sameSite: isSecureReq ? 'none' : 'lax',
+          secure: isSecureReq,
+          maxAge: expiresMinutes * 60 * 1000
         });
 
         await recordServerAuditLog({
@@ -6487,8 +6776,8 @@ https://www.shikshantaracademy.edu.np/`;
           adminTier: authUser.adminTier,
           targetUid: authUser.uid,
           action: 'SUSPICIOUS_LOGIN_OTP_SENT',
-          result: otpEmailResult.success ? 'SUCCESS' : 'FAILED',
-          reason: `New-device OTP required (${finalReason}) for ${device.compositeName} (${location}, IP: ${ip})`
+          result: realOtpDispatched ? 'SUCCESS' : 'FAILED',
+          reason: `New-device OTP required (${finalReason}) for ${device.compositeName} (${location}, IP: ${ip})${smtpNotConfigured ? ' [SMTP not configured in this environment]' : ''}`
         });
 
         return res.json({
@@ -6507,15 +6796,25 @@ https://www.shikshantaracademy.edu.np/`;
             ipAddress: ip,
             expiresInSeconds: expiresMinutes * 60,
             resendCooldownSeconds: 60,
-            emailDispatched: otpEmailResult.success === true
+            emailDispatched: realOtpDispatched,
+            smtpNotConfigured,
+            challengeToken: signedChallengeToken
           }
         });
       }
 
-      // F. Student / Guest on a new device -> no OTP friction, register device & send one security alert email
-      const newDeviceToken = crypto.randomBytes(32).toString('hex');
-      const newTrustDocId = buildTrustedDeviceDocId(authUser.uid, newDeviceToken);
-      await db.collection('trusted_devices').doc(newTrustDocId).set({
+      // F. Student without deliverable email / Guest on a new device -> register device & send alert if applicable
+      const issuedFallback = issueSignedTrustToken({
+        uid: authUser.uid,
+        browser: device.browser,
+        os: device.os,
+        locationKey: currentLocKey,
+        nowMs,
+        ttlMs: TRUST_TTL_MS
+      });
+      const newDeviceToken = issuedFallback.token;
+      const newTrustDocId = issuedFallback.deviceId;
+      await hybridSetDoc(db, authUser.rawToken, 'trusted_devices', newTrustDocId, {
         userUid: authUser.uid,
         email: authUser.email,
         role: userRole,
@@ -6525,14 +6824,15 @@ https://www.shikshantaracademy.edu.np/`;
         lastLocation: location,
         lastIp: ip,
         revoked: false,
+        signedTrust: true,
         createdAt: nowIso,
         lastUsedAt: nowIso,
         expiresAtMs: nowMs + TRUST_TTL_MS
       });
 
-      await db.collection('users').doc(authUser.uid).set({
-        activeSessions: FieldValue.arrayUnion(cleanSessionId)
-      }, { merge: true });
+      await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+        addSessionId: cleanSessionId
+      });
 
       let emailResult: { success: boolean; simulated?: boolean; error?: any } = { success: false, error: 'Email skipped' };
       if (authUser.email) {
@@ -6561,6 +6861,7 @@ https://www.shikshantaracademy.edu.np/`;
         revokedAt: null,
         logoutAt: null,
         status: 'ACTIVE',
+        sessionSeal: currentSessionSeal,
         ipAddress: ip,
         approximateLocation: location,
         userAgent: ua,
@@ -6575,7 +6876,7 @@ https://www.shikshantaracademy.edu.np/`;
         updatedAt: nowIso
       };
 
-      await sessionRef.set(sessionData, { merge: true });
+      await hybridSetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId, sessionData, { merge: true });
 
       await recordServerAuditLog({
         actorUid: authUser.uid,
@@ -6588,6 +6889,9 @@ https://www.shikshantaracademy.edu.np/`;
         result: 'SUCCESS',
         reason: `New-device sign-in alert sent for ${device.compositeName} (${location}, IP: ${ip})`
       });
+
+      res.cookie('shikshantar_sid', cleanSessionId, cookieOpts);
+      res.cookie('shikshantar_dt', newDeviceToken, cookieOpts);
 
       return res.json({
         success: true,
@@ -6602,15 +6906,21 @@ https://www.shikshantaracademy.edu.np/`;
     }
   });
 
-  // 1b. Verify 6-Digit New Browser / New Location Email OTP (Admin & Teacher)
+  // 1b. Verify 6-Digit New Browser / New Location Email OTP (All Roles)
   app.post('/api/auth/verify-device-otp', rateLimiter(20, 60000), async (req: Request, res: Response) => {
     try {
       const authUser = await verifyUserAuth(req, res, { allowPendingDeviceVerification: true });
       if (!authUser) return;
 
-      const { sessionId, code, trustDevice = true } = req.body || {};
+      const parsedCookies = parseCookieHeader(req);
+      const { sessionId, code, trustDevice = true, challengeToken } = req.body || {};
       const cleanSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
       const cleanCode = String(code || '').replace(/\s+/g, '').trim();
+      const rawChallengeToken = String(
+        (typeof challengeToken === 'string' && challengeToken.trim()) ||
+        parsedCookies.shikshantar_otp_ch ||
+        ''
+      ).trim();
 
       if (!cleanSessionId) {
         return res.status(400).json({ error: 'Missing sessionId.' });
@@ -6622,18 +6932,56 @@ https://www.shikshantaracademy.edu.np/`;
       const db = getAdminDb();
       const nowMs = getEffectiveNowMs(req);
       const nowIso = new Date().toISOString();
-      const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
-      const challengeSnap = await challengeRef.get();
 
-      if (!challengeSnap.exists) {
+      let adminChallengeRef: FirebaseFirestore.DocumentReference | null = null;
+      let ch: Record<string, any> | null = null;
+      let usingStatelessChallenge = false;
+
+      try {
+        const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
+        const challengeSnap = await challengeRef.get();
+        if (challengeSnap.exists) {
+          adminChallengeRef = challengeRef;
+          ch = challengeSnap.data() || {};
+        }
+      } catch (chErr: any) {
+        if (!isAdminCredentialError(chErr)) throw chErr;
+      }
+
+      if (!ch && rawChallengeToken) {
+        const signedCh = verifySignedOtpChallengeToken(rawChallengeToken, authUser.uid, cleanSessionId);
+        if (signedCh) {
+          usingStatelessChallenge = true;
+          ch = {
+            userUid: signedCh.uid,
+            sessionId: signedCh.sid,
+            otpHash: signedCh.h,
+            otpSalt: signedCh.s,
+            hashVersion: 'hmac_v1',
+            reason: signedCh.r,
+            browser: signedCh.b,
+            os: signedCh.o,
+            deviceName: signedCh.d,
+            location: signedCh.loc,
+            ipAddress: signedCh.ip,
+            expiresAtMs: signedCh.exp,
+            maxAttempts: 5,
+            status: 'PENDING'
+          };
+        }
+      }
+
+      if (!ch) {
         return res.status(404).json({ error: 'Verification challenge not found. Please sign in again.' });
       }
 
-      const ch = challengeSnap.data() || {};
       if (ch.userUid !== authUser.uid) {
         return res.status(403).json({ error: 'Forbidden: Verification challenge belongs to another account.' });
       }
-      if (ch.status === 'LOCKED') {
+
+      const attemptKey = `${authUser.uid}:${cleanSessionId}:${String(ch.otpSalt || '')}`;
+      const statelessState = statelessOtpAttempts.get(attemptKey);
+      if (ch.status === 'LOCKED' || statelessState?.locked) {
         return res.status(429).json({
           error: 'Too many invalid code attempts. This sign-in challenge is locked. Please request a new code or sign in again.',
           locked: true
@@ -6643,7 +6991,9 @@ https://www.shikshantaracademy.edu.np/`;
         return res.json({ success: true, verified: true, alreadyVerified: true });
       }
       if (Number(ch.expiresAtMs || 0) <= nowMs) {
-        await challengeRef.set({ status: 'EXPIRED', updatedAt: nowIso }, { merge: true });
+        if (adminChallengeRef) {
+          await adminChallengeRef.set({ status: 'EXPIRED', updatedAt: nowIso }, { merge: true }).catch(() => {});
+        }
         return res.status(410).json({
           error: 'Verification code has expired. Click "Resend Code" to receive a fresh 6-digit code.',
           expired: true
@@ -6651,25 +7001,39 @@ https://www.shikshantaracademy.edu.np/`;
       }
 
       const expectedHash = String(ch.otpHash || '');
-      const candidateHash = hashDeviceOtp(cleanCode, String(ch.otpSalt || ''));
-      const expectedBuf = Buffer.from(expectedHash, 'hex');
-      const candidateBuf = Buffer.from(candidateHash, 'hex');
+      const salt = String(ch.otpSalt || '');
+      const candidateKeyed = hashOtpKeyed(cleanCode, salt);
+      const candidateLegacy = hashDeviceOtp(cleanCode, salt);
+
+      const safeHexEq = (a: string, b: string) => {
+        const bufA = Buffer.from(a, 'hex');
+        const bufB = Buffer.from(b, 'hex');
+        return bufA.length > 0 && bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+      };
       const matched =
-        expectedBuf.length > 0 &&
-        expectedBuf.length === candidateBuf.length &&
-        crypto.timingSafeEqual(expectedBuf, candidateBuf);
+        safeHexEq(expectedHash, candidateKeyed) ||
+        (!usingStatelessChallenge && ch.hashVersion !== 'hmac_v1' && safeHexEq(expectedHash, candidateLegacy));
 
       if (!matched) {
-        const nextAttempts = Number(ch.attempts || 0) + 1;
+        const currentAttempts = Math.max(Number(ch.attempts || 0), Number(statelessState?.attempts || 0));
+        const nextAttempts = currentAttempts + 1;
         const maxAttempts = Number(ch.maxAttempts || 5);
         const remainingAttempts = Math.max(0, maxAttempts - nextAttempts);
 
+        statelessOtpAttempts.set(attemptKey, {
+          attempts: nextAttempts,
+          locked: nextAttempts >= maxAttempts,
+          expiresAtMs: Number(ch.expiresAtMs || nowMs + 600000)
+        });
+
         if (nextAttempts >= maxAttempts) {
-          await challengeRef.set({
-            attempts: nextAttempts,
-            status: 'LOCKED',
-            updatedAt: nowIso
-          }, { merge: true });
+          if (adminChallengeRef) {
+            await adminChallengeRef.set({
+              attempts: nextAttempts,
+              status: 'LOCKED',
+              updatedAt: nowIso
+            }, { merge: true }).catch(() => {});
+          }
 
           await recordServerAuditLog({
             actorUid: authUser.uid,
@@ -6689,39 +7053,61 @@ https://www.shikshantaracademy.edu.np/`;
           });
         }
 
-        await challengeRef.set({ attempts: nextAttempts, updatedAt: nowIso }, { merge: true });
+        if (adminChallengeRef) {
+          await adminChallengeRef.set({ attempts: nextAttempts, updatedAt: nowIso }, { merge: true }).catch(() => {});
+        }
         return res.status(400).json({
           error: `Incorrect verification code. ${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining.`,
           remainingAttempts
         });
       }
 
-      // OTP Verified -> activate session and optionally issue 30-day trusted device token
-      await challengeRef.set({
-        status: 'VERIFIED',
-        verifiedAt: nowIso,
-        updatedAt: nowIso
-      }, { merge: true });
+      // OTP Verified -> activate session with server-signed sessionSeal and optionally issue 30-day signed trust token
+      statelessOtpAttempts.delete(attemptKey);
+      if (adminChallengeRef) {
+        await adminChallengeRef.set({
+          status: 'VERIFIED',
+          verifiedAt: nowIso,
+          updatedAt: nowIso
+        }, { merge: true }).catch(() => {});
+      }
 
-      const sessionRef = db.collection('user_sessions').doc(cleanSessionId);
-      await sessionRef.set({
-        status: 'ACTIVE',
-        verifiedAt: nowIso,
-        lastActiveAt: nowIso,
-        updatedAt: nowIso
-      }, { merge: true });
+      const verifiedSeal = issueSessionSeal(authUser.uid, cleanSessionId);
+      await hybridSetDoc(
+        db,
+        authUser.rawToken,
+        'user_sessions',
+        cleanSessionId,
+        {
+          sessionId: cleanSessionId,
+          userUid: authUser.uid,
+          status: 'ACTIVE',
+          sessionSeal: verifiedSeal,
+          verifiedAt: nowIso,
+          lastActiveAt: nowIso,
+          updatedAt: nowIso
+        },
+        { merge: true }
+      );
 
-      await db.collection('users').doc(authUser.uid).set({
-        activeSessions: FieldValue.arrayUnion(cleanSessionId),
-        deviceVerificationEnforced: true
-      }, { merge: true });
+      await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+        addSessionId: cleanSessionId,
+        enforceDeviceVerification: true
+      });
 
       let issuedTrustToken: string | null = null;
       if (trustDevice !== false) {
         const TRUST_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-        issuedTrustToken = crypto.randomBytes(32).toString('hex');
-        const trustDocId = buildTrustedDeviceDocId(authUser.uid, issuedTrustToken);
-        await db.collection('trusted_devices').doc(trustDocId).set({
+        const issued = issueSignedTrustToken({
+          uid: authUser.uid,
+          browser: String(ch.browser || 'Unknown Browser'),
+          os: String(ch.os || 'Unknown OS'),
+          locationKey: normalizeLocationKey(String(ch.location || '')),
+          nowMs,
+          ttlMs: TRUST_TTL_MS
+        });
+        issuedTrustToken = issued.token;
+        await hybridSetDoc(db, authUser.rawToken, 'trusted_devices', issued.deviceId, {
           userUid: authUser.uid,
           email: authUser.email,
           role: authUser.role,
@@ -6731,6 +7117,7 @@ https://www.shikshantaracademy.edu.np/`;
           lastLocation: ch.location || 'Unknown Location',
           lastIp: ch.ipAddress || '',
           revoked: false,
+          signedTrust: true,
           createdAt: nowIso,
           lastUsedAt: nowIso,
           expiresAtMs: nowMs + TRUST_TTL_MS
@@ -6756,6 +7143,12 @@ https://www.shikshantaracademy.edu.np/`;
         secure: isSecureReq,
         maxAge: 30 * 24 * 60 * 60 * 1000
       };
+      res.clearCookie('shikshantar_otp_ch', {
+        httpOnly: true,
+        path: '/api',
+        sameSite: isSecureReq ? 'none' : 'lax',
+        secure: isSecureReq
+      });
       res.cookie('shikshantar_sid', cleanSessionId, cookieOpts);
       if (issuedTrustToken) {
         res.cookie('shikshantar_dt', issuedTrustToken, cookieOpts);
@@ -6778,8 +7171,15 @@ https://www.shikshantaracademy.edu.np/`;
       const authUser = await verifyUserAuth(req, res, { allowPendingDeviceVerification: true });
       if (!authUser) return;
 
-      const { sessionId } = req.body || {};
+      const parsedCookies = parseCookieHeader(req);
+      const { sessionId, challengeToken } = req.body || {};
       const cleanSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+      const rawChallengeToken = String(
+        (typeof challengeToken === 'string' && challengeToken.trim()) ||
+        parsedCookies.shikshantar_otp_ch ||
+        ''
+      ).trim();
+
       if (!cleanSessionId) {
         return res.status(400).json({ error: 'Missing sessionId.' });
       }
@@ -6787,14 +7187,65 @@ https://www.shikshantaracademy.edu.np/`;
       const db = getAdminDb();
       const nowMs = getEffectiveNowMs(req);
       const nowIso = new Date().toISOString();
-      const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
-      const challengeSnap = await challengeRef.get();
 
-      if (!challengeSnap.exists) {
-        return res.status(404).json({ error: 'Verification session not found. Please sign in again.' });
+      let adminChallengeRef: FirebaseFirestore.DocumentReference | null = null;
+      let ch: Record<string, any> | null = null;
+
+      try {
+        const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
+        const challengeSnap = await challengeRef.get();
+        if (challengeSnap.exists) {
+          adminChallengeRef = challengeRef;
+          ch = challengeSnap.data() || {};
+        }
+      } catch (chErr: any) {
+        if (!isAdminCredentialError(chErr)) throw chErr;
       }
 
-      const ch = challengeSnap.data() || {};
+      if (!ch && rawChallengeToken) {
+        const signedCh = verifySignedOtpChallengeToken(rawChallengeToken, authUser.uid, cleanSessionId);
+        if (signedCh) {
+          ch = {
+            userUid: signedCh.uid,
+            sessionId: signedCh.sid,
+            reason: signedCh.r,
+            browser: signedCh.b,
+            os: signedCh.o,
+            deviceName: signedCh.d,
+            location: signedCh.loc,
+            ipAddress: signedCh.ip,
+            resendCount: signedCh.rc,
+            maxResends: 5,
+            lastSentAtMs: signedCh.ls,
+            status: 'PENDING'
+          };
+        }
+      }
+
+      if (!ch) {
+        const sessDoc = await hybridGetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId);
+        if (sessDoc.exists && sessDoc.data?.userUid === authUser.uid && sessDoc.data?.status === 'PENDING_VERIFICATION') {
+          const s = sessDoc.data;
+          ch = {
+            userUid: authUser.uid,
+            sessionId: cleanSessionId,
+            reason: s.verificationReason || 'NEW_BROWSER_OR_DEVICE',
+            browser: s.browser || 'Browser',
+            os: s.operatingSystem || 'OS',
+            deviceName: s.deviceName || 'Device',
+            location: s.approximateLocation || 'Unknown Location',
+            ipAddress: s.ipAddress || '',
+            resendCount: 0,
+            maxResends: 5,
+            lastSentAtMs: 0,
+            status: 'PENDING'
+          };
+        }
+      }
+
+      if (!ch) {
+        return res.status(404).json({ error: 'Verification session not found. Please sign in again.' });
+      }
       if (ch.userUid !== authUser.uid) {
         return res.status(403).json({ error: 'Forbidden: Challenge does not belong to your account.' });
       }
@@ -6822,21 +7273,23 @@ https://www.shikshantaracademy.edu.np/`;
 
       const otpCode = crypto.randomInt(100000, 1000000).toString();
       const otpSalt = crypto.randomBytes(16).toString('hex');
-      const otpHash = hashDeviceOtp(otpCode, otpSalt);
+      const otpHash = hashOtpKeyed(otpCode, otpSalt);
       const expiresMinutes = 10;
       const expiresAtMs = nowMs + expiresMinutes * 60 * 1000;
       const userData = authUser.userData || {};
       const userName = userData.fullName || userData.name || authUser.email.split('@')[0];
       const now = new Date();
       const dateTimeFormatted = now.toLocaleDateString('en-US', {
+        timeZone: 'Asia/Kathmandu',
         day: 'numeric',
         month: 'long',
         year: 'numeric'
       }) + ', ' + now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kathmandu',
         hour: 'numeric',
         minute: '2-digit',
         hour12: true
-      });
+      }) + ' NPT';
       const reasonLabel =
         ch.reason === 'NEW_LOCATION'
           ? `new location (${ch.location || 'Unknown Location'})`
@@ -6858,23 +7311,60 @@ https://www.shikshantaracademy.edu.np/`;
         expiresMinutes
       });
 
-      await challengeRef.set({
-        otpHash,
-        otpSalt,
-        attempts: 0,
-        status: 'PENDING',
-        resendCount: resendCount + 1,
-        lastSentAtMs: nowMs,
-        expiresAtMs,
-        emailDispatched: emailResult.success === true,
-        updatedAt: nowIso
-      }, { merge: true });
+      const realOtpDispatched = emailResult.success === true && emailResult.simulated !== true;
+      const smtpNotConfigured = emailResult.simulated === true;
+      const nextResendCount = resendCount + 1;
+
+      const nextChallengeToken = issueSignedOtpChallengeToken({
+        uid: authUser.uid,
+        sid: cleanSessionId,
+        h: otpHash,
+        s: otpSalt,
+        r: String(ch.reason || 'NEW_BROWSER_OR_DEVICE'),
+        b: String(ch.browser || 'Browser'),
+        o: String(ch.os || 'OS'),
+        d: String(ch.deviceName || 'Device'),
+        loc: String(ch.location || 'Unknown Location'),
+        ip: String(ch.ipAddress || ''),
+        rc: nextResendCount,
+        ls: nowMs,
+        exp: expiresAtMs,
+        ed: realOtpDispatched,
+        sn: smtpNotConfigured
+      });
+
+      if (adminChallengeRef) {
+        await adminChallengeRef.set({
+          otpHash,
+          otpSalt,
+          hashVersion: 'hmac_v1',
+          attempts: 0,
+          status: 'PENDING',
+          resendCount: nextResendCount,
+          lastSentAtMs: nowMs,
+          expiresAtMs,
+          emailDispatched: realOtpDispatched,
+          smtpNotConfigured,
+          updatedAt: nowIso
+        }, { merge: true }).catch(() => {});
+      }
+
+      const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      res.cookie('shikshantar_otp_ch', nextChallengeToken, {
+        httpOnly: true,
+        path: '/api',
+        sameSite: isSecureReq ? 'none' : 'lax',
+        secure: isSecureReq,
+        maxAge: expiresMinutes * 60 * 1000
+      });
 
       return res.json({
         success: true,
-        emailDispatched: emailResult.success === true,
+        emailDispatched: realOtpDispatched,
+        smtpNotConfigured,
         expiresInSeconds: expiresMinutes * 60,
-        resendCooldownSeconds: 60
+        resendCooldownSeconds: 60,
+        challengeToken: nextChallengeToken
       });
     } catch (err: any) {
       console.error('[SECURITY] Error resending device OTP:', err);
@@ -6882,7 +7372,244 @@ https://www.shikshantaracademy.edu.np/`;
     }
   });
 
-  // 2. Revoke a Single Session (Admin SDK)
+  // 1d. List Active Sessions, Login History & Trusted Devices (Self or Admin for Target User)
+  app.get('/api/auth/sessions', rateLimiter(60, 60000), async (req: Request, res: Response) => {
+    try {
+      const authUser = await verifyUserAuth(req, res);
+      if (!authUser) return;
+
+      const requestedUid = typeof req.query.uid === 'string' ? req.query.uid.trim() : '';
+      const targetUid = requestedUid && authUser.role === 'admin' ? requestedUid : authUser.uid;
+      if (requestedUid && requestedUid !== authUser.uid && authUser.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: You can only view your own login sessions.' });
+      }
+
+      const db = getAdminDb();
+      const nowMs = Date.now();
+      const parsedCookies = parseCookieHeader(req);
+      const currentSessionId = String(req.headers['x-shikshantar-session-id'] || parsedCookies.shikshantar_sid || '').trim();
+      const currentDeviceToken = String(req.headers['x-shikshantar-device-token'] || parsedCookies.shikshantar_dt || '').trim();
+      const currentTrustDocId = currentDeviceToken && targetUid === authUser.uid
+        ? buildTrustedDeviceDocId(authUser.uid, currentDeviceToken)
+        : '';
+
+      const [sessionsResult, trustedResult, targetUserDoc] = await Promise.all([
+        hybridQueryEq(db, authUser.rawToken, 'user_sessions', 'userUid', targetUid),
+        hybridQueryEq(db, authUser.rawToken, 'trusted_devices', 'userUid', targetUid),
+        targetUid === authUser.uid
+          ? Promise.resolve(null)
+          : hybridGetDoc(db, authUser.rawToken, 'users', targetUid)
+      ]);
+
+      const toSortableMs = (v: any): number => {
+        if (!v) return 0;
+        if (typeof v === 'string') {
+          const parsed = Date.parse(v);
+          return Number.isNaN(parsed) ? 0 : parsed;
+        }
+        if (typeof v === 'number') return v;
+        if (typeof v?.toMillis === 'function') return v.toMillis();
+        if (typeof v?.seconds === 'number') return v.seconds * 1000;
+        return 0;
+      };
+
+      const allSessions = sessionsResult.docs.map((docSnap) => {
+        const d = docSnap.data || {};
+        return {
+          sessionId: d.sessionId || docSnap.id,
+          userUid: d.userUid || targetUid,
+          email: d.email || '',
+          userName: d.userName || '',
+          role: d.role || '',
+          status: String(d.status || 'UNKNOWN').toUpperCase(),
+          browser: d.browser || 'Unknown Browser',
+          operatingSystem: d.operatingSystem || d.os || 'Unknown OS',
+          deviceType: d.deviceType || 'Device',
+          deviceName: d.deviceName || 'Unknown Device',
+          compositeName: d.compositeName || `${d.browser || 'Browser'} on ${d.operatingSystem || d.os || 'Device'}`,
+          approximateLocation: d.approximateLocation || 'Location unavailable',
+          ipAddress: d.ipAddress || '',
+          loginAt: d.loginAt || d.createdAt || d.updatedAt || null,
+          lastActiveAt: d.lastActiveAt || d.updatedAt || d.loginAt || null,
+          logoutAt: d.logoutAt || null,
+          revokedAt: d.revokedAt || null,
+          verifiedAt: d.verifiedAt || null,
+          trustedDeviceMatched: Boolean(d.trustedDeviceMatched),
+          isCurrent: Boolean(currentSessionId && (d.sessionId === currentSessionId || docSnap.id === currentSessionId))
+        };
+      });
+
+      const activeSessions = allSessions
+        .filter((s) => s.status === 'ACTIVE' || s.status === 'PENDING_VERIFICATION')
+        .sort((a, b) => {
+          if (a.isCurrent && !b.isCurrent) return -1;
+          if (!a.isCurrent && b.isCurrent) return 1;
+          return toSortableMs(b.lastActiveAt || b.loginAt) - toSortableMs(a.lastActiveAt || a.loginAt);
+        });
+
+      const loginHistory = allSessions
+        .filter((s) => s.status !== 'ACTIVE' && s.status !== 'PENDING_VERIFICATION' && Boolean(s.loginAt || s.browser !== 'Unknown Browser'))
+        .sort((a, b) => toSortableMs(b.loginAt || b.lastActiveAt || b.revokedAt) - toSortableMs(a.loginAt || a.lastActiveAt || a.revokedAt))
+        .slice(0, 30);
+
+      const trustedDevices = trustedResult.docs
+        .map((docSnap) => {
+          const d = docSnap.data || {};
+          return {
+            deviceId: docSnap.id,
+            browser: d.browser || 'Unknown Browser',
+            os: d.os || 'Unknown OS',
+            deviceName: d.deviceName || 'Device',
+            lastLocation: d.lastLocation || 'Location unavailable',
+            lastIp: d.lastIp || '',
+            revoked: d.revoked === true,
+            createdAt: d.createdAt || null,
+            lastUsedAt: d.lastUsedAt || d.createdAt || null,
+            expiresAtMs: Number(d.expiresAtMs || 0),
+            isCurrentDevice: Boolean(currentTrustDocId && docSnap.id === currentTrustDocId)
+          };
+        })
+        .filter((t) => !t.revoked && t.expiresAtMs > nowMs)
+        .sort((a, b) => {
+          if (a.isCurrentDevice && !b.isCurrentDevice) return -1;
+          if (!a.isCurrentDevice && b.isCurrentDevice) return 1;
+          return toSortableMs(b.lastUsedAt) - toSortableMs(a.lastUsedAt);
+        });
+
+      const targetUserData = targetUid === authUser.uid
+        ? (authUser.userData || {})
+        : (targetUserDoc?.exists ? (targetUserDoc.data || {}) : {});
+
+      const latestSession = [...activeSessions, ...loginHistory]
+        .sort((a, b) => toSortableMs(b.loginAt) - toSortableMs(a.loginAt))[0] || null;
+
+      return res.json({
+        success: true,
+        activeSessions,
+        loginHistory,
+        trustedDevices,
+        securitySummary: {
+          deviceVerificationEnforced: targetUserData.deviceVerificationEnforced === true || trustedResult.docs.length > 0,
+          otpProtectionEligible: isDeliverableRealEmail(targetUid === authUser.uid ? authUser.email : String(targetUserData.email || '')),
+          totalActiveSessions: activeSessions.length,
+          totalTrustedDevices: trustedDevices.length,
+          lastLoginAt: latestSession?.loginAt || null,
+          lastLoginDevice: latestSession?.compositeName || null,
+          lastLoginLocation: latestSession?.approximateLocation || null
+        }
+      });
+    } catch (err: any) {
+      console.error('[SECURITY] Error loading user sessions:', err);
+      return res.status(500).json({ error: 'Unable to load login sessions.' });
+    }
+  });
+
+  // 1e. Revoke One or All Trusted Devices (forces 6-digit OTP on next login from revoked browser)
+  app.post('/api/auth/revoke-trusted-device', rateLimiter(20, 60000), async (req: Request, res: Response) => {
+    try {
+      const authUser = await verifyUserAuth(req, res);
+      if (!authUser) return;
+
+      const { deviceId, revokeAll } = req.body || {};
+      const db = getAdminDb();
+      const nowIso = new Date().toISOString();
+      const parsedCookies = parseCookieHeader(req);
+      const currentDeviceToken = String(req.headers['x-shikshantar-device-token'] || parsedCookies.shikshantar_dt || '').trim();
+      const currentTrustDocId = currentDeviceToken ? buildTrustedDeviceDocId(authUser.uid, currentDeviceToken) : '';
+
+      let clearedCurrentDeviceTrust = false;
+      let revokedCount = 0;
+
+      if (revokeAll === true) {
+        const snap = await hybridQueryEq(db, authUser.rawToken, 'trusted_devices', 'userUid', authUser.uid);
+        for (const docSnap of snap.docs) {
+          const d = docSnap.data || {};
+          if (d.revoked !== true) {
+            await hybridSetDoc(
+              db,
+              authUser.rawToken,
+              'trusted_devices',
+              docSnap.id,
+              { userUid: authUser.uid, revoked: true, revokedAt: nowIso, updatedAt: nowIso },
+              { merge: true }
+            );
+            revokedCount++;
+            if (currentTrustDocId && docSnap.id === currentTrustDocId) {
+              clearedCurrentDeviceTrust = true;
+            }
+          }
+        }
+        clearedCurrentDeviceTrust = true;
+      } else {
+        const cleanDeviceId = typeof deviceId === 'string' ? deviceId.trim() : '';
+        if (!cleanDeviceId) {
+          return res.status(400).json({ error: 'Missing deviceId or revokeAll flag.' });
+        }
+        const devDoc = await hybridGetDoc(db, authUser.rawToken, 'trusted_devices', cleanDeviceId);
+        if (!devDoc.exists) {
+          return res.status(404).json({ error: 'Trusted device record not found.' });
+        }
+        const d = devDoc.data || {};
+        if (d.userUid !== authUser.uid) {
+          return res.status(403).json({ error: 'Forbidden: You can only revoke your own trusted devices.' });
+        }
+        await hybridSetDoc(
+          db,
+          authUser.rawToken,
+          'trusted_devices',
+          cleanDeviceId,
+          { userUid: authUser.uid, revoked: true, revokedAt: nowIso, updatedAt: nowIso },
+          { merge: true }
+        );
+        revokedCount = 1;
+        if (currentTrustDocId && cleanDeviceId === currentTrustDocId) {
+          clearedCurrentDeviceTrust = true;
+        }
+      }
+
+      // Ensure deviceVerificationEnforced stays true so next login ALWAYS requires 6-digit OTP
+      await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+        enforceDeviceVerification: true
+      });
+
+      if (clearedCurrentDeviceTrust) {
+        const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
+        res.clearCookie('shikshantar_dt', {
+          httpOnly: true,
+          path: '/api',
+          sameSite: isSecureReq ? 'none' : 'lax',
+          secure: isSecureReq
+        });
+      }
+
+      await recordServerAuditLog({
+        actorUid: authUser.uid,
+        actorEmail: authUser.email,
+        actorRole: authUser.role,
+        adminTier: authUser.adminTier,
+        targetUid: authUser.uid,
+        action: 'TRUSTED_DEVICE_REVOKED',
+        result: 'SUCCESS',
+        reason: revokeAll === true
+          ? `Revoked all trusted devices (${revokedCount}). Next sign-in requires 6-digit OTP.`
+          : `Revoked trusted device ${String(deviceId || '')}. Next sign-in from that browser requires 6-digit OTP.`
+      });
+
+      return res.json({
+        success: true,
+        revokedCount,
+        clearedCurrentDeviceTrust,
+        message: revokeAll === true
+          ? 'All trusted browsers removed. Your next login will require a 6-digit verification code.'
+          : 'Trusted browser removed. Next sign-in from that browser will require a 6-digit verification code.'
+      });
+    } catch (err: any) {
+      console.error('[SECURITY] Error revoking trusted device:', err);
+      return res.status(500).json({ error: 'Failed to revoke trusted device.' });
+    }
+  });
+
+  // 2. Revoke a Single Session
   app.post('/api/auth/revoke-session', rateLimiter(30, 60000), async (req: Request, res: Response) => {
     try {
       const authUser = await verifyUserAuth(req, res);
@@ -6901,28 +7628,35 @@ https://www.shikshantaracademy.edu.np/`;
       }
 
       const db = getAdminDb();
-      const sessionRef = db.collection('user_sessions').doc(cleanSessionId);
-      const sSnap = await sessionRef.get();
-      if (!sSnap.exists) {
+      const sDoc = await hybridGetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId);
+      if (!sDoc.exists) {
         return res.status(404).json({ error: 'Session not found.' });
       }
 
-      const sessionData = sSnap.data() || {};
+      const sessionData = sDoc.data || {};
       if (sessionData.userUid !== authUser.uid) {
         return res.status(403).json({ error: 'Forbidden: You can only revoke your own active sessions.' });
       }
 
       const nowIso = new Date().toISOString();
-      await sessionRef.set({
-        userUid: authUser.uid,
-        status: 'REVOKED',
-        revokedAt: nowIso,
-        updatedAt: nowIso
-      }, { merge: true });
+      await hybridSetDoc(
+        db,
+        authUser.rawToken,
+        'user_sessions',
+        cleanSessionId,
+        {
+          userUid: authUser.uid,
+          status: 'REVOKED',
+          sessionSeal: null,
+          revokedAt: nowIso,
+          updatedAt: nowIso
+        },
+        { merge: true }
+      );
 
-      await db.collection('users').doc(authUser.uid).set({
-        activeSessions: FieldValue.arrayRemove(cleanSessionId)
-      }, { merge: true });
+      await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+        removeSessionId: cleanSessionId
+      });
 
       await recordServerAuditLog({
         actorUid: authUser.uid,
@@ -6941,41 +7675,55 @@ https://www.shikshantaracademy.edu.np/`;
     }
   });
 
-  // 3. Logout All Other Devices (Admin SDK)
+  // 3. Logout All Other Devices
   app.post('/api/auth/logout-other-sessions', rateLimiter(20, 60000), async (req: Request, res: Response) => {
     try {
       const authUser = await verifyUserAuth(req, res);
       if (!authUser) return;
 
-      const { currentSessionId } = req.body || {};
-      if (!currentSessionId || typeof currentSessionId !== 'string' || !currentSessionId.trim()) {
+      const { currentSessionId, sessionId } = req.body || {};
+      const resolvedCurrentSessionId = typeof currentSessionId === 'string' && currentSessionId.trim()
+        ? currentSessionId.trim()
+        : (typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : '');
+      if (!resolvedCurrentSessionId) {
         return res.status(400).json({ error: 'Missing currentSessionId.' });
       }
 
-      const cleanCurrentSessionId = currentSessionId.trim();
+      const cleanCurrentSessionId = resolvedCurrentSessionId;
       const db = getAdminDb();
       const nowIso = new Date().toISOString();
 
-      const activeSessionsSnap = await db.collection('user_sessions')
-        .where('userUid', '==', authUser.uid)
-        .get();
+      const activeSessionsRes = await hybridQueryEq(
+        db,
+        authUser.rawToken,
+        'user_sessions',
+        'userUid',
+        authUser.uid
+      );
 
-      const batch = db.batch();
-      activeSessionsSnap.forEach(docSnap => {
-        const sData = docSnap.data() || {};
-        if (docSnap.id !== cleanCurrentSessionId && sData.status === 'ACTIVE') {
-          batch.set(docSnap.ref, {
-            status: 'REVOKED',
-            revokedAt: nowIso,
-            updatedAt: nowIso
-          }, { merge: true });
+      for (const docSnap of activeSessionsRes.docs) {
+        const sData = docSnap.data || {};
+        if (docSnap.id !== cleanCurrentSessionId && (sData.status === 'ACTIVE' || sData.status === 'PENDING_VERIFICATION')) {
+          await hybridSetDoc(
+            db,
+            authUser.rawToken,
+            'user_sessions',
+            docSnap.id,
+            {
+              userUid: authUser.uid,
+              status: 'REVOKED',
+              sessionSeal: null,
+              revokedAt: nowIso,
+              updatedAt: nowIso
+            },
+            { merge: true }
+          );
         }
-      });
-      await batch.commit();
+      }
 
-      await db.collection('users').doc(authUser.uid).set({
-        activeSessions: [cleanCurrentSessionId]
-      }, { merge: true });
+      await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+        replaceActiveSessions: [cleanCurrentSessionId]
+      });
 
       await recordServerAuditLog({
         actorUid: authUser.uid,
@@ -6994,7 +7742,7 @@ https://www.shikshantaracademy.edu.np/`;
     }
   });
 
-  // 4. Logout Current Session Cleanly (Admin SDK)
+  // 4. Logout Current Session Cleanly
   app.post('/api/auth/logout', rateLimiter(60, 60000), async (req: Request, res: Response) => {
     try {
       const authUser = await verifyUserAuth(req, res, { allowPendingDeviceVerification: true });
@@ -7006,22 +7754,36 @@ https://www.shikshantaracademy.edu.np/`;
 
       if (sessionId && typeof sessionId === 'string' && sessionId.trim()) {
         const cleanSessionId = sessionId.trim();
-        const sessionRef = db.collection('user_sessions').doc(cleanSessionId);
-        const sSnap = await sessionRef.get();
-        if (sSnap.exists && sSnap.data()?.userUid === authUser.uid) {
-          await sessionRef.set({
-            status: 'LOGGED_OUT',
-            logoutAt: nowIso,
-            updatedAt: nowIso
-          }, { merge: true });
+        const sDoc = await hybridGetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId);
+        if (sDoc.exists && sDoc.data?.userUid === authUser.uid) {
+          await hybridSetDoc(
+            db,
+            authUser.rawToken,
+            'user_sessions',
+            cleanSessionId,
+            {
+              userUid: authUser.uid,
+              status: 'LOGGED_OUT',
+              sessionSeal: null,
+              logoutAt: nowIso,
+              updatedAt: nowIso
+            },
+            { merge: true }
+          );
         }
-        await db.collection('users').doc(authUser.uid).set({
-          activeSessions: FieldValue.arrayRemove(cleanSessionId)
-        }, { merge: true });
+        await syncUserSessionState(db, authUser.rawToken, authUser.uid, {
+          removeSessionId: cleanSessionId
+        });
       }
 
       const isSecureReq = req.secure || req.headers['x-forwarded-proto'] === 'https';
       res.clearCookie('shikshantar_sid', {
+        httpOnly: true,
+        path: '/api',
+        sameSite: isSecureReq ? 'none' : 'lax',
+        secure: isSecureReq
+      });
+      res.clearCookie('shikshantar_otp_ch', {
         httpOnly: true,
         path: '/api',
         sameSite: isSecureReq ? 'none' : 'lax',
@@ -7049,18 +7811,25 @@ https://www.shikshantaracademy.edu.np/`;
       const cleanSessionId = sessionId.trim();
       const db = getAdminDb();
       const nowIso = new Date().toISOString();
-      const sessionRef = db.collection('user_sessions').doc(cleanSessionId);
-      const sSnap = await sessionRef.get();
+      const sDoc = await hybridGetDoc(db, authUser.rawToken, 'user_sessions', cleanSessionId);
 
-      if (sSnap.exists) {
-        const sData = sSnap.data() || {};
+      if (sDoc.exists) {
+        const sData = sDoc.data || {};
         if (sData.userUid !== authUser.uid || sData.status === 'REVOKED' || sData.status === 'LOGGED_OUT') {
           return res.json({ success: false, revoked: true });
         }
-        await sessionRef.set({
-          lastActiveAt: nowIso,
-          updatedAt: nowIso
-        }, { merge: true });
+        await hybridSetDoc(
+          db,
+          authUser.rawToken,
+          'user_sessions',
+          cleanSessionId,
+          {
+            userUid: authUser.uid,
+            lastActiveAt: nowIso,
+            updatedAt: nowIso
+          },
+          { merge: true }
+        );
       } else {
         const activeSessions: string[] = Array.isArray(authUser.userData?.activeSessions) ? authUser.userData.activeSessions : [];
         if (activeSessions.length > 0 && !activeSessions.includes(cleanSessionId)) {

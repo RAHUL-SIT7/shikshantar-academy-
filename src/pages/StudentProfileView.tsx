@@ -29,6 +29,7 @@ import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firesto
 import { getStudentAcademicEnrollments, AcademicEnrollment } from '../lib/academicPromotionEngine';
 import { formatBSDate } from '../lib/nepaliDate';
 import { useAuth } from '../contexts/AuthContext';
+import SecuritySessionsPanel from '../components/SecuritySessionsPanel';
 
 export default function StudentProfileView() {
   const { id } = useParams<{ id: string }>();
@@ -652,6 +653,17 @@ export default function StudentProfileView() {
             </div>
           </div>
         </div>
+
+        {/* 6. ACCOUNT LOGIN ACTIVITY & ACTIVE SESSIONS (Admin Visibility) */}
+        {userRole === 'admin' && student?.id && (
+          <div className="lg:col-span-2">
+            <SecuritySessionsPanel
+              targetUid={student.id}
+              readOnly={true}
+              title="6. Account Login Activity & Active Sessions"
+            />
+          </div>
+        )}
 
       </div>
 

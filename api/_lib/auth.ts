@@ -3,6 +3,7 @@ import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
+import { hybridGetDoc } from './firestoreRest.js';
 
 export const BOOTSTRAP_OWNER_EMAIL = 'rahulsah4534@gmail.com';
 
@@ -215,6 +216,7 @@ export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCa
   } catch (err: any) {
     const msg = String(err?.message || err || '');
     const isHostProjectIamLookupError =
+      isFirestoreCredentialUnavailableError(err) ||
       msg.includes('USER_PROJECT_DENIED') ||
       msg.includes('SERVICE_DISABLED') ||
       msg.includes('accessNotConfigured') ||
@@ -242,11 +244,11 @@ export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCa
   }
 
   const db = getVercelAdminDb();
-  const userSnap = await db.collection('users').doc(decoded.uid).get();
+  const userDoc = await hybridGetDoc(db, token, 'users', decoded.uid);
   const emailLower = (decoded.email || '').trim().toLowerCase();
   const isVerifiedBootstrapOwner = emailLower === BOOTSTRAP_OWNER_EMAIL && decoded.email_verified === true;
 
-  if (!userSnap.exists) {
+  if (!userDoc.exists) {
     if (isVerifiedBootstrapOwner) {
       return {
         uid: decoded.uid,
@@ -268,7 +270,7 @@ export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCa
     return null;
   }
 
-  const userData = userSnap.data() || {};
+  const userData = userDoc.data || {};
   if (isUserProfileInactive(userData)) {
     res.status(403).json({ error: 'Forbidden: User account is inactive, pending, or deleted.' });
     return null;

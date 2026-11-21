@@ -194,6 +194,9 @@ function AppContent() {
     loading,
     verifyingDeviceSession,
     deviceVerificationRequired,
+    deviceVerificationError,
+    retryDeviceVerification,
+    logout,
   } = useAuth();
   const [activeTheme, setActiveTheme] = useState(
     localStorage.getItem("appTheme") || "shikshantar_elite",
@@ -325,6 +328,50 @@ function AppContent() {
 
   if (isAuthenticated && deviceVerificationRequired) {
     return <DeviceVerificationGate />;
+  }
+
+  if (isAuthenticated && deviceVerificationError) {
+    return (
+      <div className="min-h-screen bg-[#06182C] bg-gradient-to-br from-[#041C2E] via-[#0A2540] to-[#0F172A] flex items-center justify-center px-4 py-10">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="bg-[#0A2540] px-6 py-4 border-b-4 border-red-500">
+            <h1 className="text-base font-extrabold text-white tracking-wide">
+              SHIKSHANTAR ACADEMY
+            </h1>
+            <p className="text-xs text-slate-300 font-medium">
+              Device Security Check Required
+            </p>
+          </div>
+          <div className="p-6 space-y-4">
+            <h2 className="text-lg font-bold text-slate-900">
+              Sign-in paused for account protection
+            </h2>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              We could not verify this device with the security server. For your protection, portal access is paused until verification succeeds.
+            </p>
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs font-medium text-red-800">
+              {deviceVerificationError}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={retryDeviceVerification}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-[#0A3D62] hover:bg-[#041C2E] text-white font-bold text-sm transition-colors cursor-pointer"
+              >
+                Retry Security Check
+              </button>
+              <button
+                type="button"
+                onClick={() => logout('device_verification_error')}
+                className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-colors cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

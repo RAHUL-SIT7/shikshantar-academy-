@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Edit2, Lock, FileText, CheckCircle2, ChevronRight, User, GraduationCap, MonitorSmartphone, Calendar, CreditCard, LayoutDashboard, Flag, AlertCircle, FileDown, Check, X, Bell, Eye, EyeOff } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Camera, Edit2, Lock, FileText, CheckCircle2, MonitorSmartphone, Calendar, Check, X, Eye, EyeOff } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useNavigate } from 'react-router-dom';
 import { formatRemitBillItems } from '../lib/remitBillUtils';
 import AdminProfileView from './AdminProfileView';
 import { useAuth } from '../contexts/AuthContext';
+import SecuritySessionsPanel, { SecuritySessionsSummary } from '../components/SecuritySessionsPanel';
+import { formatBSDateTime } from '../lib/nepaliDate';
 
 export default function Profile() {
   const { userRole } = useAuth();
@@ -18,9 +19,16 @@ export default function Profile() {
 }
 
 function StandardProfileView() {
+  const { userRole } = useAuth();
+  const isTeacher = userRole === 'teacher';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [successToast, setSuccessToast] = useState('');
+  const [sessionSummary, setSessionSummary] = useState<SecuritySessionsSummary | null>(null);
+  const [teacherSubject, setTeacherSubject] = useState('');
+  const [teacherDepartment, setTeacherDepartment] = useState('');
+  const [teacherEmployeeId, setTeacherEmployeeId] = useState('');
+  const [assignedClassLabel, setAssignedClassLabel] = useState('');
   
   // User data state
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -74,10 +82,13 @@ function StandardProfileView() {
   }, [studentId]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
+
+  const handleSessionsSummary = useCallback((summaryData: SecuritySessionsSummary) => {
+    setSessionSummary(summaryData);
+  }, []);
 
   useEffect(() => {
-    const fetchStudentData = async () => {
+    const fetchProfileData = async () => {
       if (auth.currentUser) {
         try {
           setEmail(auth.currentUser.email || '');
@@ -87,19 +98,25 @@ function StandardProfileView() {
             const data = docSnap.data();
             const childData = data.children?.[0] || {};
             
-            setFullName(data.fullName || data.name || childData.name || 'Aarav Sharma');
+            setFullName(data.fullName || data.name || childData.name || auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'User');
             setPhone(data.phone || childData.phone || '');
             setDob(data.dob || childData.dob || '');
             setAddress(data.address || childData.address || '');
-            setGender(data.gender || childData.gender || 'Male');
+            setGender(data.gender || childData.gender || 'Not Specified');
             setAvatarUrl(data.avatarUrl || '');
             
-            setStudentId(data.studentId || childData.studentId || 'S101');
-            setStudentClass(data.class || childData.studentClass || '10');
-            setSection(data.section || childData.section || 'A');
-            setRollNo(data.rollNo || childData.rollNumber || childData.rollNo || '05');
-            setGuardianName(data.guardianName || childData.fatherName || 'Ram Sharma');
-            setGuardianPhone(data.guardianPhone || childData.phone || '9841000001');
+            setStudentId(data.permanentStudentId || data.studentId || childData.studentId || '');
+            setStudentClass(data.class || childData.studentClass || '');
+            setSection(data.section || childData.section || '');
+            setRollNo(data.rollNo || data.rollNumber || childData.rollNumber || childData.rollNo || '');
+            setGuardianName(data.guardianName || data.fatherName || childData.fatherName || '');
+            setGuardianPhone(data.guardianPhone || childData.phone || '');
+
+            setTeacherSubject(Array.isArray(data.subjects) ? data.subjects.join(', ') : (data.subject || ''));
+            setTeacherDepartment(data.department || 'Academic Faculty');
+            setTeacherEmployeeId(data.employeeId || data.teacherId || '');
+            setAssignedClassLabel(data.assignedClass ? `Class ${data.assignedClass}${data.assignedSection ? ` (${data.assignedSection})` : ''}` : '');
+
             if (data.passwordUpdatedAt) {
               const d = new Date(data.passwordUpdatedAt);
               const diff = Math.floor((new Date().getTime() - d.getTime()) / (1000 * 3600 * 24));
@@ -114,7 +131,7 @@ function StandardProfileView() {
       }
       setLoading(false);
     };
-    fetchStudentData();
+    fetchProfileData();
   }, []);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -291,21 +308,53 @@ function StandardProfileView() {
             <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight mb-2">{fullName}</h1>
             
             <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-4">
-              <span className="bg-white/20 text-white text-xs font-bold px-3 py-1 rounded-full border border-white/30 backdrop-blur-sm">
-                Class {studentClass} | Roll No: {rollNo}
-              </span>
-              <span className="bg-indigo-700/50 text-indigo-100 text-xs font-bold px-3 py-1 rounded-full">
-                S101
-              </span>
+              {isTeacher ? (
+                <>
+                  <span className="bg-white/20 text-white text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full border border-white/30 backdrop-blur-sm">
+                    TEACHER
+                  </span>
+                  {assignedClassLabel && (
+                    <span className="bg-indigo-700/50 text-indigo-100 text-xs font-bold px-3 py-1 rounded-full">
+                      Class Teacher: {assignedClassLabel}
+                    </span>
+                  )}
+                  {teacherEmployeeId && (
+                    <span className="bg-indigo-700/50 text-indigo-100 text-xs font-bold px-3 py-1 rounded-full">
+                      ID: {teacherEmployeeId}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="bg-white/20 text-white text-xs font-bold px-3 py-1 rounded-full border border-white/30 backdrop-blur-sm">
+                    {studentClass ? `Class ${studentClass}` : 'Student'}{rollNo ? ` | Roll No: ${rollNo}` : ''}
+                  </span>
+                  {studentId && (
+                    <span className="bg-indigo-700/50 text-indigo-100 text-xs font-bold px-3 py-1 rounded-full">
+                      {studentId}
+                    </span>
+                  )}
+                </>
+              )}
               <span className="bg-indigo-700/50 text-indigo-100 text-xs font-bold px-3 py-1 rounded-full hidden sm:inline-flex">
                 Academic Year: 2083-2084 B.S.
               </span>
             </div>
 
             {/* Status row */}
-            <div className="flex flex-wrap justify-center md:justify-start gap-4 items-center text-xs font-bold text-white/90">
-               <div className="flex items-center gap-1.5">
-                 <span className="w-2 h-2 rounded-full bg-emerald-400 border border-emerald-200"></span> Active Session
+            <div className="flex flex-wrap justify-center md:justify-start gap-3 items-center text-xs font-bold text-white/90">
+               <div className="flex items-center gap-1.5 bg-black/15 px-3 py-1 rounded-full border border-white/15">
+                 <span className="w-2 h-2 rounded-full bg-emerald-400 border border-emerald-200"></span>
+                 {sessionSummary
+                   ? `${sessionSummary.totalActiveSessions} Active ${sessionSummary.totalActiveSessions === 1 ? 'Session' : 'Sessions'}`
+                   : 'Active Session'}
+               </div>
+               <div className="flex items-center gap-1.5 bg-black/15 px-3 py-1 rounded-full border border-white/15">
+                 <MonitorSmartphone className="w-3.5 h-3.5 opacity-80" />
+                 Last Login:{' '}
+                 {sessionSummary?.lastLoginAt
+                   ? formatBSDateTime(new Date(sessionSummary.lastLoginAt))
+                   : 'Loading...'}
                </div>
                <button 
                  type="button"
@@ -314,14 +363,11 @@ function StandardProfileView() {
                      (window as any).triggerSessionTimeoutWarning();
                    }
                  }}
-                 className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-black px-2 py-0.5 rounded border border-white/20 transition-all flex items-center gap-1 cursor-pointer"
+                 className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-black px-2.5 py-1 rounded-full border border-white/20 transition-all flex items-center gap-1 cursor-pointer"
                  title="Manually simulate and preview the session timeout warning modal (30-second countdown)"
                >
                  <span>⚡ Test Timeout Warning</span>
                </button>
-               <div className="flex items-center gap-1.5">
-                 <Calendar className="w-3.5 h-3.5 opacity-70" /> Member since: 1 Shrawan 2080 B.S.
-               </div>
             </div>
          </div>
       </div>
@@ -425,69 +471,95 @@ function StandardProfileView() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN - Academic Information Card */}
+        {/* RIGHT COLUMN - Academic / Faculty Information Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="p-5 border-b border-gray-100 flex items-center justify-between">
              <h2 className="text-[15px] font-bold text-gray-900 flex items-center gap-2">
-                🎓 Academic Details
+                {isTeacher ? '🏫 Faculty & Role Details' : '🎓 Academic Details'}
              </h2>
           </div>
           <div className="p-6 flex-1 flex flex-col h-full bg-[#F8F8F8]/50">
-            <div className="grid grid-cols-2 gap-y-5 gap-x-4 mb-auto">
-               <div>
-                 <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Student ID</p>
-                 <p className="text-sm font-bold text-gray-800 bg-white border border-gray-200 px-2.5 py-1.5 rounded inline-block">{studentId}</p>
-               </div>
-               <div>
-                 <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Class</p>
-                 <p className="text-sm font-bold text-gray-800">{studentClass}</p>
-               </div>
-               <div>
-                 <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Section</p>
-                 <p className="text-sm font-bold text-gray-800">{section}</p>
-               </div>
-               <div>
-                 <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Roll Number</p>
-                 <p className="text-sm font-bold text-gray-800">{rollNo}</p>
-               </div>
-               <div>
-                  <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Admission Date</p>
-                  <p className="text-sm font-bold text-gray-800">1 Shrawan 2080 B.S.</p>
-               </div>
-               <div>
-                 <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Board</p>
-                 <p className="text-sm font-bold text-gray-800">SEE (National)</p>
-               </div>
-            </div>
-
-            <div className="mt-6 pt-5 border-t border-gray-200">
-               <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Guardian Information</h3>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Guardian Name</p>
-                    <p className="text-sm font-bold text-gray-800">{guardianName}</p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Relation</p>
-                    <p className="text-sm font-bold text-gray-800">Father</p>
-                  </div>
+            {isTeacher ? (
+              <div className="grid grid-cols-2 gap-y-5 gap-x-4 mb-auto">
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Role</p>
+                  <p className="text-sm font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded inline-block">Teacher</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Employee ID</p>
+                  <p className="text-sm font-bold text-gray-800">{teacherEmployeeId || 'Assigned by Admin'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Department</p>
+                  <p className="text-sm font-bold text-gray-800">{teacherDepartment}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Assigned Class</p>
+                  <p className="text-sm font-bold text-gray-800">{assignedClassLabel || 'Subject Teacher'}</p>
+                </div>
+                {teacherSubject && (
                   <div className="col-span-full">
-                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Guardian Phone</p>
-                    <p className="text-sm font-bold text-gray-800">{guardianPhone}</p>
+                    <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Subjects</p>
+                    <p className="text-sm font-bold text-gray-800">{teacherSubject}</p>
                   </div>
-               </div>
-            </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-y-5 gap-x-4 mb-auto">
+                   <div>
+                     <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Student ID</p>
+                     <p className="text-sm font-bold text-gray-800 bg-white border border-gray-200 px-2.5 py-1.5 rounded inline-block">{studentId || '-'}</p>
+                   </div>
+                   <div>
+                     <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Class</p>
+                     <p className="text-sm font-bold text-gray-800">{studentClass || '-'}</p>
+                   </div>
+                   <div>
+                     <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Section</p>
+                     <p className="text-sm font-bold text-gray-800">{section || '-'}</p>
+                   </div>
+                   <div>
+                     <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Roll Number</p>
+                     <p className="text-sm font-bold text-gray-800">{rollNo || '-'}</p>
+                   </div>
+                   <div>
+                      <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Academic Year</p>
+                      <p className="text-sm font-bold text-gray-800">2083-2084 B.S.</p>
+                   </div>
+                   <div>
+                     <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Board</p>
+                     <p className="text-sm font-bold text-gray-800">CDC / NEB</p>
+                   </div>
+                </div>
+
+                <div className="mt-6 pt-5 border-t border-gray-200">
+                   <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Guardian Information</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Guardian Name</p>
+                        <p className="text-sm font-bold text-gray-800">{guardianName || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-bold text-gray-400 uppercase mb-0.5 flex items-center gap-1"><Lock className="w-3 h-3"/> Guardian Phone</p>
+                        <p className="text-sm font-bold text-gray-800">{guardianPhone || '-'}</p>
+                      </div>
+                   </div>
+                </div>
+              </>
+            )}
             
             <div className="mt-6 text-center">
                <p className="text-xs text-gray-400 font-medium">
-                 ⓘ Academic information is managed by school administration
+                 ⓘ {isTeacher ? 'Faculty assignment is managed by school administration' : 'Academic information is managed by school administration'}
                </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 4 - FEE & BILL STATEMENT */}
+      {/* SECTION 4 - FEE & BILL STATEMENT (Student Only) */}
+      {!isTeacher && (
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
         <div className="p-5 border-b border-gray-100 flex items-center justify-between">
            <h2 className="text-[15px] font-bold text-gray-900 flex items-center gap-2">
@@ -569,8 +641,9 @@ function StandardProfileView() {
            )}
         </div>
       </div>
+      )}
 
-      {/* SECTION 5 - SECURITY CARD (Student) */}
+      {/* SECTION 5 - SECURITY CARD */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
         <div className="p-5 border-b border-gray-100 flex items-center gap-2">
            <span className="text-lg">🔐</span>
@@ -660,6 +733,11 @@ function StandardProfileView() {
              </form>
            )}
         </div>
+      </div>
+
+      {/* SECTION 6 - ACTIVE SESSIONS, LOGIN HISTORY & TRUSTED BROWSERS */}
+      <div className="mb-6">
+        <SecuritySessionsPanel onSummaryLoaded={handleSessionsSummary} />
       </div>
 
     </div>
