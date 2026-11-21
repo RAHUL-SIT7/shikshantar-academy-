@@ -174,7 +174,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.48,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -185,7 +185,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.48,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -196,7 +196,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.48,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -207,7 +207,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.48,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -219,7 +219,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.55,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -231,7 +231,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         duration: 1.5,
         times: [0, 0.2, 0.4, 0.7, 0.85, 1.0],
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -243,7 +243,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         duration: 1.5,
         times: [0, 0.2, 0.4, 0.7, 0.8, 0.9, 1.0],
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -254,7 +254,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         duration: 1.5,
         times: [0, 0.2, 0.4, 0.7, 0.85, 1.0],
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -265,7 +265,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         duration: 1.5,
         times: [0, 0.2, 0.4, 0.7, 0.85, 1.0],
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -276,7 +276,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 1.4,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -287,7 +287,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 1.2,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -298,7 +298,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 1.4,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -311,7 +311,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 2.2,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -324,7 +324,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.24,
-        ease: "easeInOut"
+        ease: "easeInOut" as const
       }
     }
   };
@@ -336,7 +336,7 @@ export default function AdmissionIntro({ onComplete }: AdmissionIntroProps) {
       transition: {
         repeat: Infinity,
         duration: 0.4,
-        ease: "linear"
+        ease: "linear" as const
       }
     }
   };

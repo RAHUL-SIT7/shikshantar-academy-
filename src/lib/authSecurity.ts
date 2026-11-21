@@ -27,47 +27,44 @@ export async function getCurrentAdminProfile(): Promise<AdminSecurityProfile | n
   const currentUser = auth.currentUser;
   if (!currentUser) return null;
 
-  let displayName = currentUser.displayName || '';
-  let email = currentUser.email || '';
-  let role = 'admin';
-
   try {
     const userDocRef = doc(db, 'users', currentUser.uid);
     const userSnap = await getDoc(userDocRef);
-    if (userSnap.exists()) {
-      const data = userSnap.data();
-      if (data.fullName && data.fullName.trim() && data.fullName !== 'User') {
-        displayName = data.fullName.trim();
-      }
-      if (data.role) {
-        role = data.role;
-      }
-      if (data.email) {
-        email = data.email;
-      }
+    if (!userSnap.exists()) {
+      return null;
     }
+
+    const data = userSnap.data();
+    const status = String(data.status || '').trim().toLowerCase();
+    if (
+      data.deleted === true ||
+      data.active === false ||
+      ['deleted', 'deletion_pending', 'auth_deleted_pending_finalization', 'inactive', 'suspended', 'rejected', 'blocked', 'pending'].includes(status)
+    ) {
+      return null;
+    }
+
+    const role = String(data.role || '').trim().toLowerCase();
+    if (!role) {
+      return null;
+    }
+
+    const email = String(data.email || currentUser.email || '').trim();
+    const rawName = (data.fullName && String(data.fullName).trim() !== 'User') ? String(data.fullName).trim() : (currentUser.displayName || '');
+    const displayName = rawName || (email ? email.split('@')[0] : 'User');
+    const isSuperAdmin = role === 'admin' && String(data.adminTier || 'secondary').toLowerCase() === 'primary';
+
+    return {
+      uid: currentUser.uid,
+      email,
+      displayName,
+      role,
+      isSuperAdmin
+    };
   } catch (err) {
-    console.warn('Could not fetch user document for security profile:', err);
+    console.warn('Could not verify authoritative security profile:', err);
+    return null;
   }
-
-  // Fallbacks
-  if (!displayName || displayName === 'User') {
-    if (email) {
-      displayName = email.split('@')[0];
-    } else {
-      displayName = 'Administrator';
-    }
-  }
-
-  const isSuperAdmin = role === 'admin';
-
-  return {
-    uid: currentUser.uid,
-    email: email || 'admin@shikshantar.edu.np',
-    displayName,
-    role,
-    isSuperAdmin
-  };
 }
 
 /**

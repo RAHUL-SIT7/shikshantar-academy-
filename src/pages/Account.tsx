@@ -183,6 +183,8 @@ export default function Account() {
               name: freshData.fullName || freshData.name
             }));
           }
+        }, (err) => {
+          console.warn('Account: userDocRef subscription warning:', err?.message);
         });
 
         // 2. Listen to settings/fee_structure
@@ -208,6 +210,8 @@ export default function Account() {
             structure.computerFee = Number(String(structure.computer || '0').replace(/[^0-9.]/g, ''));
             setFeeStructure(structure);
           }
+        }, (err) => {
+          console.warn('Account: fee_structure subscription warning:', err?.message);
         });
 
         // 3. Setup real-time queries for fees, transactions, remitBills, student_advances
@@ -254,12 +258,16 @@ export default function Account() {
         unsubFees1 = onSnapshot(qFees1, (snap) => {
           feesList1 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           updateState();
+        }, (err) => {
+          console.warn('Account: qFees1 subscription warning:', err?.message);
         });
 
         if (qFees2) {
           unsubFees2 = onSnapshot(qFees2, (snap) => {
             feesList2 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             updateState();
+          }, (err) => {
+            console.warn('Account: qFees2 subscription warning:', err?.message);
           });
         }
 
@@ -278,36 +286,48 @@ export default function Account() {
         unsubTx1 = onSnapshot(qTx1, (snap) => {
           txList1 = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(isRecognizedActiveRevenue);
           updateState();
+        }, (err) => {
+          console.warn('Account: qTx1 subscription warning:', err?.message);
         });
 
         if (qTx2) {
           unsubTx2 = onSnapshot(qTx2, (snap) => {
             txList2 = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(isRecognizedActiveRevenue);
             updateState();
+          }, (err) => {
+            console.warn('Account: qTx2 subscription warning:', err?.message);
           });
         }
 
         unsubBills1 = onSnapshot(qBills1, (snap) => {
           billsList1 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           updateState();
+        }, (err) => {
+          console.warn('Account: qBills1 subscription warning:', err?.message);
         });
 
         if (qBills2) {
           unsubBills2 = onSnapshot(qBills2, (snap) => {
             billsList2 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             updateState();
+          }, (err) => {
+            console.warn('Account: qBills2 subscription warning:', err?.message);
           });
         }
 
         unsubAdv1 = onSnapshot(qAdv1, (snap) => {
           advList1 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           updateState();
+        }, (err) => {
+          console.warn('Account: qAdv1 subscription warning:', err?.message);
         });
 
         if (qAdv2) {
           unsubAdv2 = onSnapshot(qAdv2, (snap) => {
             advList2 = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             updateState();
+          }, (err) => {
+            console.warn('Account: qAdv2 subscription warning:', err?.message);
           });
         }
 

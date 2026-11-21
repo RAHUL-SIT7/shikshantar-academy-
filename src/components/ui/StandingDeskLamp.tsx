@@ -151,8 +151,8 @@ export default function StandingDeskLamp({
         <g 
           className="cursor-pointer transition-transform duration-300 hover:scale-[1.03] origin-[265px_105px]" 
           onClick={onToggle}
-          title="Click to toggle study lamp"
         >
+          <title>Click to toggle study lamp</title>
           {/* Socket Mount */}
           <path d="M 260 105 L 280 122 L 272 130 L 252 113 Z" fill="url(#brassJoints)" />
 

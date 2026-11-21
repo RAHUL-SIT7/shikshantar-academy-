@@ -25,8 +25,9 @@ interface FinancialAuditRepairModalProps {
   onClose: () => void;
   student: any | null;
   allStudents?: any[];
-  operatorName: string;
-  onSuccess: () => void;
+  operatorName?: string;
+  onSuccess?: () => void;
+  onReconciliationComplete?: () => void;
 }
 
 export const FinancialAuditRepairModal: React.FC<FinancialAuditRepairModalProps> = ({
@@ -34,9 +35,14 @@ export const FinancialAuditRepairModal: React.FC<FinancialAuditRepairModalProps>
   onClose,
   student,
   allStudents = [],
-  operatorName,
-  onSuccess
+  operatorName = 'System Admin',
+  onSuccess,
+  onReconciliationComplete
 }) => {
+  const notifyComplete = () => {
+    onSuccess?.();
+    onReconciliationComplete?.();
+  };
   const [activeTab, setActiveTab] = useState<'single' | 'batch'>(student ? 'single' : 'batch');
   const [loading, setLoading] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -92,9 +98,26 @@ export const FinancialAuditRepairModal: React.FC<FinancialAuditRepairModalProps>
     setLoading(true);
     setActionMessage(null);
     try {
-      const studentIds = allStudents.map(s => s.id || s.studentId).filter(Boolean);
-      const res = await auditAllStudentsFinancials(db, studentIds);
-      setBatchResults(res);
+      const normalizedStudents = allStudents
+        .map(s => ({ ...s, id: s.id || s.studentId }))
+        .filter(s => Boolean(s.id));
+      const res = await auditAllStudentsFinancials(db, normalizedStudents);
+      setBatchResults({
+        totalAudited: res.totalStudentsScanned,
+        healthyCount: res.healthyCount,
+        discrepancyCount: res.flaggedCount,
+        problematicStudents: res.flaggedStudents.map(fs => ({
+          studentId: fs.studentId,
+          studentName: fs.studentName,
+          studentClass: fs.studentClass,
+          discrepancyCount: fs.discrepancies.length,
+          discrepancies: fs.discrepancies.map(d => ({
+            type: d.type,
+            title: d.title,
+            details: d.details
+          }))
+        }))
+      });
     } catch (err: any) {
       console.error('Failed batch audit:', err);
       setActionMessage({
@@ -122,7 +145,7 @@ export const FinancialAuditRepairModal: React.FC<FinancialAuditRepairModalProps>
         });
         // Re-run audit to confirm health
         await runSingleAudit(sId);
-        onSuccess();
+        notifyComplete();
       } else {
         setActionMessage({
           type: 'error',
@@ -490,7 +513,7 @@ export const FinancialAuditRepairModal: React.FC<FinancialAuditRepairModalProps>
                                 try {
                                   await repairStudentFinancialRecords(db, p.studentId, operatorName);
                                   await runBatchAudit();
-                                  onSuccess();
+                                  notifyComplete();
                                 } catch (e: any) {
                                   setActionMessage({ type: 'error', text: e.message || 'Repair failed.' });
                                 } finally {

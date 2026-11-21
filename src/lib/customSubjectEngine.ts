@@ -139,29 +139,33 @@ export async function checkSubjectUsage(
   let exams = 0;
 
   try {
-    // 1. Check Teacher Assignments in users collection
-    const teachersSnap = await getDocs(
-      query(collection(db, 'users'), where('role', '==', 'teacher'))
-    );
-    teachersSnap.forEach(d => {
-      const uData = d.data();
-      // Check structured teachingAssignments
-      if (Array.isArray(uData.teachingAssignments)) {
-        uData.teachingAssignments.forEach((assign: any) => {
-          if (normalizeSubjectName(assign.subject) === normName) {
-            teacherAssignments++;
-          }
-        });
-      }
-      // Check legacy assignedSubjects array
-      if (Array.isArray(uData.assignedSubjects)) {
-        uData.assignedSubjects.forEach((subj: string) => {
-          if (normalizeSubjectName(subj) === normName) {
-            teacherAssignments++;
-          }
-        });
-      }
-    });
+    // 1. Check Teacher Assignments in users collection (Admin-accessible)
+    try {
+      const teachersSnap = await getDocs(
+        query(collection(db, 'users'), where('role', '==', 'teacher'))
+      );
+      teachersSnap.forEach(d => {
+        const uData = d.data();
+        // Check structured teachingAssignments
+        if (Array.isArray(uData.teachingAssignments)) {
+          uData.teachingAssignments.forEach((assign: any) => {
+            if (normalizeSubjectName(assign.subject) === normName) {
+              teacherAssignments++;
+            }
+          });
+        }
+        // Check legacy assignedSubjects array
+        if (Array.isArray(uData.assignedSubjects)) {
+          uData.assignedSubjects.forEach((subj: string) => {
+            if (normalizeSubjectName(subj) === normName) {
+              teacherAssignments++;
+            }
+          });
+        }
+      });
+    } catch (teacherErr) {
+      console.warn('Skipping teacher assignment check (requires Admin read permission):', teacherErr);
+    }
 
     // 2. Check Results collection
     const resultsSnap = await getDocs(collection(db, 'results'));

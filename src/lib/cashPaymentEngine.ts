@@ -266,6 +266,7 @@ export const calculatePaymentBreakdown = (
 
 export interface CashPaymentExecutionParams {
   idempotencyKey?: string;
+  paymentGroupId?: string;
   receiptNo: string;
   student: {
     id: string;
@@ -285,9 +286,9 @@ export interface CashPaymentExecutionParams {
     fees?: any[];
     [key: string]: any;
   };
-  cashTendered?: number;
-  cashCollection?: number; // alias
-  amountApplied?: number;
+  cashTendered?: number | string;
+  cashCollection?: number | string; // alias
+  amountApplied?: number | string;
   changeReturned?: number;
   netPayable: number;
   baseAmount: number;

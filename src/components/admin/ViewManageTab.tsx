@@ -2,8 +2,8 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, Edit2, Trash2, X, Save, BellRing, CheckCircle2, Download, FileArchive, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { StudentResult } from '../../data/resultsState';
 import { doc, writeBatch, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { recordBatchAuditLog } from '../../lib/auditLogger';
+import { db, auth } from '../../firebase';
+import { recordAuditLog } from '../../lib/auditLogger';
 import { canPublishClassResult } from '../../lib/resultPreparationEngine';
 import jsPDF from 'jspdf';
 import { toCanvas } from 'html-to-image';
@@ -233,8 +233,10 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
              }, { merge: true });
          }
 
-         // Bind immutable audit log write into the same batch transaction
-         await recordBatchAuditLog(batch, {
+         await batch.commit();
+
+         // Record authoritative audit log via trusted server endpoint
+         await recordAuditLog({
              category: 'academic',
              actionType: 'MARK_MODIFIED',
              targetType: 'student_result',
@@ -263,9 +265,7 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
              reason: editReason.trim(),
              result: 'SUCCESS',
              operationId: `AUDIT_EDIT_${summaryDocId}_${Date.now()}`
-         });
-         
-         await batch.commit();
+         }).catch(err => console.warn('Audit log write warning:', err));
 
          setStatus({type: 'success', message: 'Record and audit log saved successfully.'}); // triggers reload
          setEditingRecord(null);
@@ -456,8 +456,8 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
          return;
      }
 
-     if (userRole === 'teacher' && filterClass && !canPublishClassResult(userRole, teacherProfile, filterClass)) {
-         setStatus({type: 'error', message: 'Publishing results is restricted to Administrators and the primary Class Teacher for this class.'});
+     if (!isAdmin) {
+         setStatus({type: 'error', message: 'Publishing results is restricted to Administrators only.'});
          return;
      }
 
@@ -473,61 +473,54 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
 
   const handlePublishResults = async () => {
      if (baseData.length === 0) return;
-     
+     if (!isAdmin) {
+         setStatus({ type: 'error', message: 'Publishing results is restricted to Administrators only.' });
+         return;
+     }
+
      setPublishConfirmModal({...publishConfirmModal, show: false});
      setIsPublishing(true);
      try {
-         // find the unique classes from baseData
-         const classesToPublish = filterClass ? [filterClass] : Array.from(new Set(baseData.map(r => String(r.class))));
-         
-         let batch = writeBatch(db);
-         for (const c of classesToPublish) {
-             const examId = `${filterExam.replace(/\s+/g, '_')}_${c}`;
-             
-             // Calculate stats for this specific class
-             const classStudents = baseData.filter(r => String(r.class) === String(c));
-             const highestMarks: Record<string, number> = {};
-             const sumMarks: Record<string, number> = {};
-             const countMarks: Record<string, number> = {};
-
-             classStudents.forEach(std => {
-                if (!std.subjects) return;
-                Object.entries(std.subjects).map(([sub, rawMarks]) => {
-                    const marks: any = rawMarks;
-                    const obtained = marks.obtained === "AB" ? 0 : Number(marks.obtained) || 0;
-                    
-                    if (!highestMarks[sub] || highestMarks[sub] < obtained) {
-                        highestMarks[sub] = obtained;
-                    }
-                    if (!sumMarks[sub]) { sumMarks[sub] = 0; countMarks[sub] = 0; }
-                    sumMarks[sub] += obtained;
-                    countMarks[sub] += 1;
-                });
-             });
-
-             const classAverages: Record<string, number> = {};
-             Object.keys(sumMarks).forEach(sub => {
-                classAverages[sub] = countMarks[sub] > 0 ? sumMarks[sub] / countMarks[sub] : 0;
-             });
-
-             batch.update(doc(db, 'exams', examId), { 
-                 published: true,
-                 highestMarks: highestMarks,
-                 classAverages: classAverages
-             });
-
-             // Also save their respective ranks
-             classStudents.forEach(std => {
-                 batch.update(doc(db, 'resultSummary', `${examId}_${std.studentId}`), {
-                     rank: std.rank || 0,
-                     published: true
-                 });
-             });
+         const idToken = await auth.currentUser?.getIdToken();
+         if (!idToken) {
+             setStatus({ type: 'error', message: 'Authentication required. Please sign in again.' });
+             setIsPublishing(false);
+             return;
          }
 
-         // Send a notification to guardians
+         const classesToPublish = filterClass ? [filterClass] : Array.from(new Set(baseData.map(r => String(r.class))));
+         const noticesBatch = writeBatch(db);
+
+         for (const c of classesToPublish) {
+             const classStudents = baseData.filter(r => String(r.class) === String(c));
+             const examId = classStudents[0]?.examId || `${filterExam.replace(/\s+/g, '_')}_${c}`;
+             const section = classStudents[0]?.section || 'All';
+             const academicYear = classStudents[0]?.academicYear || '';
+
+             const res = await fetch('/api/results/publish', {
+                 method: 'POST',
+                 headers: {
+                     'Content-Type': 'application/json',
+                     Authorization: `Bearer ${idToken}`
+                 },
+                 body: JSON.stringify({
+                     examId,
+                     targetClass: c,
+                     targetSection: section,
+                     targetAcademicYear: academicYear,
+                     summaryRecords: classStudents
+                 })
+             });
+
+             const respJson = await res.json().catch(() => ({}));
+             if (!res.ok || !respJson.success) {
+                 throw new Error(respJson.error || `Failed to publish results for Class ${c}`);
+             }
+         }
+
+         // Send a notification notice to guardians
          const noticeRef = doc(collection(db, 'notices'));
-         batch.set(noticeRef, {
+         noticesBatch.set(noticeRef, {
              title: `Results Published: ${filterExam}`,
              message: `The results for ${filterExam} have been published for classes: ${classesToPublish.join(', ')}. Students and guardians can now view the results and download report cards from the Result section.`,
              date: new Date().toISOString().split('T')[0],
@@ -537,11 +530,10 @@ export function ViewManageTab({ EXAM_TYPES, allClasses, data, setStatus, userRol
              status: 'Published',
              timestamp: new Date().toISOString()
          });
-
-         await batch.commit();
+         await noticesBatch.commit();
 
          setPublishSuccess(true);
-         setStatus({type: 'success', message: `${filterExam} results published! Notification sent to guardians.`});
+         setStatus({type: 'success', message: `${filterExam} results published via trusted server! Notification notice posted.`});
          setTimeout(() => setPublishSuccess(false), 3000);
      } catch (error: any) {
          setStatus({type: 'error', message: 'Failed to publish: ' + error.message});

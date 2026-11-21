@@ -37,21 +37,11 @@ export default function StudentLedgerDetailTab({
 
     useEffect(() => {
         if (initialStudentId) {
-            const targetStudent = students.find(s => 
-                s.id === initialStudentId || 
-                s.studentId === initialStudentId || 
-                (s.permanentStudentId && s.permanentStudentId === initialStudentId) ||
-                (s.emisNumber && s.emisNumber === initialStudentId) ||
-                (s.studentEmis && s.studentEmis === initialStudentId)
-            );
-            if (targetStudent) {
-                setSelectedStudentId(targetStudent.id);
-                if (targetStudent.class) {
-                    setSelectedClass((prev) => (prev && prev !== targetStudent.class ? '' : prev));
-                    setSearchTerm('');
-                }
-            } else {
-                setSelectedStudentId(initialStudentId);
+            setSelectedStudentId(initialStudentId);
+            const targetStudent = students.find(s => s.id === initialStudentId);
+            if (targetStudent && targetStudent.class) {
+                setSelectedClass((prev) => (prev && prev !== targetStudent.class ? '' : prev));
+                setSearchTerm('');
             }
         }
     }, [initialStudentId, students]);
@@ -69,10 +59,8 @@ export default function StudentLedgerDetailTab({
             const matchClass = selectedClass ? s.class === selectedClass : true;
             const matchSearch = searchTerm ? 
                 s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                String(s.rollNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                String(s.studentId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                String(s.permanentStudentId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                String(s.emisNumber || s.studentEmis || '').toLowerCase().includes(searchTerm.toLowerCase())
+                String(s.rollNumber || '').includes(searchTerm) ||
+                String(s.studentId || '').toLowerCase().includes(searchTerm.toLowerCase())
                 : true;
             return matchClass && matchSearch;
         }).sort((a, b) => Number(a.rollNumber || 0) - Number(b.rollNumber || 0));
@@ -83,13 +71,7 @@ export default function StudentLedgerDetailTab({
         if (!selectedStudentId) {
             return filteredStudents.length > 0 ? filteredStudents[0] : null;
         }
-        return students.find(s => 
-            s.id === selectedStudentId || 
-            s.studentId === selectedStudentId || 
-            (s.permanentStudentId && s.permanentStudentId === selectedStudentId) ||
-            (s.emisNumber && s.emisNumber === selectedStudentId) ||
-            (s.studentEmis && s.studentEmis === selectedStudentId)
-        ) || (filteredStudents.length > 0 ? filteredStudents[0] : null);
+        return students.find(s => s.id === selectedStudentId) || (filteredStudents.length > 0 ? filteredStudents[0] : null);
     }, [students, selectedStudentId, filteredStudents]);
 
     // Extract complete transaction and partial payment history for selected student
@@ -296,6 +278,18 @@ export default function StudentLedgerDetailTab({
                         isDummy: false,
                         remarks: remarks || ''
                     });
+                } else if (cat.base > 0) {
+                    itemsWithStatus.push({
+                        id: `${normM}_${cat.key}_base`,
+                        name: cat.name,
+                        amount: cat.base,
+                        paidAmount: 0,
+                        dueAmount: cat.base,
+                        status: 'due',
+                        receiptNo: '-',
+                        isDummy: false,
+                        remarks: ''
+                    });
                 }
             });
 
@@ -324,19 +318,17 @@ export default function StudentLedgerDetailTab({
                 });
             });
 
-            const isBilled = itemsWithStatus.length > 0;
             const activeItems = itemsWithStatus.filter(it => it.amount > 0);
             const totalBilled = activeItems.reduce((acc, it) => acc + it.amount, 0);
             const totalPaid = activeItems.reduce((acc, it) => acc + it.paidAmount, 0);
             const totalDue = Math.max(0, totalBilled - totalPaid);
 
             // Strict Status Logic: ALL active items must be paid with 0 due to be FULLY PAID
-            const allPaid = isBilled && activeItems.length > 0 && activeItems.every(it => it.status === 'paid' || it.dueAmount === 0);
-            const anyPaid = isBilled && activeItems.some(it => it.paidAmount > 0 || it.status === 'paid' || it.status === 'partial');
+            const allPaid = activeItems.length > 0 && activeItems.every(it => it.status === 'paid' || it.dueAmount === 0);
+            const anyPaid = activeItems.some(it => it.paidAmount > 0 || it.status === 'paid' || it.status === 'partial');
 
             const isFullyPaid = allPaid;
             const isPartial = !allPaid && anyPaid;
-            const isUnbilled = !isBilled || totalBilled === 0;
 
             return {
                 month: monthName,
@@ -344,8 +336,6 @@ export default function StudentLedgerDetailTab({
                 totalBilled,
                 totalPaid,
                 totalDue,
-                isBilled,
-                isUnbilled,
                 isFullyPaid,
                 isPartial,
                 items: itemsWithStatus
@@ -1151,7 +1141,7 @@ export default function StudentLedgerDetailTab({
                                             className={`bg-white rounded-2xl border p-4.5 space-y-3.5 hover:shadow-xs transition-all flex flex-col justify-between ${
                                                 row.isFullyPaid 
                                                     ? 'border-emerald-200 bg-emerald-50/10' 
-                                                    : (row.isPartial ? 'border-amber-300 bg-amber-50/10' : row.isUnbilled ? 'border-slate-200 bg-slate-50/30' : 'border-rose-200 bg-rose-50/10')
+                                                    : (row.isPartial ? 'border-amber-300 bg-amber-50/10' : 'border-gray-200')
                                             }`}
                                         >
                                             <div className="flex justify-between items-start">
@@ -1167,10 +1157,6 @@ export default function StudentLedgerDetailTab({
                                                     <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
                                                         PARTIAL PAYMENT
                                                     </span>
-                                                ) : row.isUnbilled ? (
-                                                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
-                                                        UNBILLED
-                                                    </span>
                                                 ) : (
                                                     <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200/50">
                                                         UNPAID DUE
@@ -1180,24 +1166,18 @@ export default function StudentLedgerDetailTab({
 
                                             {/* List of Fee Items for this Month */}
                                             <div className="bg-slate-50 rounded-xl p-3 divide-y divide-gray-100 text-xs font-bold text-gray-700">
-                                                {row.items.filter(item => item.amount > 0).length === 0 ? (
-                                                    <p className="text-[11px] text-slate-400 font-medium italic text-center py-2">
-                                                        No bill generated for this month
-                                                    </p>
-                                                ) : (
-                                                    row.items.filter(item => item.amount > 0).map((item, itemIdx) => (
-                                                        <div key={item.id || `${row.month}_${item.name}_${itemIdx}`} className="py-2 flex justify-between items-center first:pt-0 last:pb-0">
-                                                            <div>
-                                                                <span className="block text-[11px] text-gray-800 leading-none">{item.name}</span>
-                                                                <span className="text-[9px] text-gray-400 font-mono font-normal">RCP: {item.receiptNo}</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-slate-700 font-bold font-mono">NRs. {item.amount.toLocaleString()}</span>
-                                                                <span className={`w-2 h-2 rounded-full ${item.status === 'paid' ? 'bg-emerald-500' : (item.status === 'partial' ? 'bg-amber-500' : 'bg-red-500')}`} title={item.status}></span>
-                                                            </div>
+                                                {row.items.filter(item => item.amount > 0).map((item, itemIdx) => (
+                                                    <div key={item.id || `${row.month}_${item.name}_${itemIdx}`} className="py-2 flex justify-between items-center first:pt-0 last:pb-0">
+                                                        <div>
+                                                            <span className="block text-[11px] text-gray-800 leading-none">{item.name}</span>
+                                                            <span className="text-[9px] text-gray-400 font-mono font-normal">RCP: {item.receiptNo}</span>
                                                         </div>
-                                                    ))
-                                                )}
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-slate-700 font-bold font-mono">NRs. {item.amount.toLocaleString()}</span>
+                                                            <span className={`w-2 h-2 rounded-full ${item.status === 'paid' ? 'bg-emerald-500' : (item.status === 'partial' ? 'bg-amber-500' : 'bg-red-500')}`} title={item.status}></span>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
 
                                             <div className="pt-2 border-t border-dashed border-gray-200 flex justify-between items-center">
@@ -1207,7 +1187,7 @@ export default function StudentLedgerDetailTab({
                                                             <span className="text-slate-400 text-[10px] font-medium block">Paid</span>
                                                             <span className="text-emerald-700 font-black font-mono">NRs. {row.totalPaid.toLocaleString()}</span>
                                                         </div>
-                                                        {row.totalDue > 0 && !row.isUnbilled && (
+                                                        {row.totalDue > 0 && (
                                                             <div>
                                                                 <span className="text-rose-400 text-[10px] font-medium block">Due</span>
                                                                 <span className="text-rose-600 font-black font-mono">NRs. {row.totalDue.toLocaleString()}</span>

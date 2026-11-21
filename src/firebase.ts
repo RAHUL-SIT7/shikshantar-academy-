@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider, ReCaptchaV3Provider } from 'firebase/app-check';
 import { 
   initializeAuth, 
   browserLocalPersistence, 
@@ -12,10 +13,13 @@ import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfigImport from '../firebase-applet-config.json';
 
-const isNodeEnv = typeof process !== 'undefined' && Boolean(process.env);
-const emulatorFirestoreHost = isNodeEnv ? process.env.FIRESTORE_EMULATOR_HOST : undefined;
-const emulatorAuthHost = isNodeEnv ? process.env.FIREBASE_AUTH_EMULATOR_HOST : undefined;
-const emulatorProject = isNodeEnv ? process.env.GCLOUD_PROJECT : undefined;
+const isBrowser = typeof window !== 'undefined';
+const isLocalhost = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const isNodeEnv = !isBrowser && typeof process !== 'undefined' && Boolean(process.env);
+
+const emulatorFirestoreHost = (isNodeEnv || isLocalhost) ? (typeof process !== 'undefined' ? process.env?.FIRESTORE_EMULATOR_HOST : undefined) : undefined;
+const emulatorAuthHost = (isNodeEnv || isLocalhost) ? (typeof process !== 'undefined' ? process.env?.FIREBASE_AUTH_EMULATOR_HOST : undefined) : undefined;
+const emulatorProject = isNodeEnv && typeof process !== 'undefined' ? process.env?.GCLOUD_PROJECT : undefined;
 
 const isEmulator = Boolean(emulatorFirestoreHost || emulatorAuthHost);
 const effectiveProjectId = isEmulator ? (emulatorProject || 'demo-shikshantar-test') : firebaseConfigImport.projectId;
@@ -33,6 +37,27 @@ export const firebaseConfig = {
 };
 
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+if (isBrowser && !isEmulator) {
+  const clientEnv = (import.meta as any).env || {};
+  const enterpriseKey = (clientEnv.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || '').trim();
+  const appCheckKey = (clientEnv.VITE_APP_CHECK_SITE_KEY || '').trim();
+  try {
+    if (enterpriseKey) {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaEnterpriseProvider(enterpriseKey),
+        isTokenAutoRefreshEnabled: true
+      });
+    } else if (appCheckKey) {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider(appCheckKey),
+        isTokenAutoRefreshEnabled: true
+      });
+    }
+  } catch (err) {
+    console.warn('Firebase App Check initialization skipped:', err);
+  }
+}
 
 export const auth = typeof window !== 'undefined' 
   ? initializeAuth(app, {

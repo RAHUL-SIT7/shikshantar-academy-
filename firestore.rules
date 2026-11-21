@@ -3,198 +3,258 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ==========================================
-    // SECURITY HELPER FUNCTIONS
+    // SECURITY HELPER FUNCTIONS (FAIL-CLOSED)
     // ==========================================
 
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
     function hasUserDoc() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      return isSignedIn() && exists(userDocPath());
+    }
+
+    function getUserData() {
+      return get(userDocPath()).data;
+    }
+
+    function isUserDocActive(u) {
+      return (!('deleted' in u) || u.deleted != true) &&
+        (!('active' in u) || u.active != false) &&
+        (!('status' in u) || !(u.status in [
+          'deleted', 'DELETED',
+          'AUTH_DELETED_PENDING_FINALIZATION', 'DELETION_PENDING',
+          'inactive', 'INACTIVE',
+          'suspended', 'SUSPENDED',
+          'blocked', 'BLOCKED',
+          'rejected', 'REJECTED',
+          'pending', 'PENDING',
+          'archived', 'ARCHIVED'
+        ]));
     }
 
     function isActiveUserDoc() {
-      return hasUserDoc() && 
-        (!('deleted' in getUserData()) || getUserData().deleted != true) &&
-        (!('status' in getUserData()) || (
-          getUserData().status != 'DELETED' && 
-          getUserData().status != 'AUTH_DELETED_PENDING_FINALIZATION' && 
-          getUserData().status != 'DELETION_PENDING'
-        ));
+      return hasUserDoc() && isUserDocActive(getUserData());
+    }
+
+    function isBootstrapOwner() {
+      return isSignedIn() &&
+        request.auth.token != null &&
+        request.auth.token.email == 'rahulsah4534@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    function isAdminData(u) {
+      return isUserDocActive(u) &&
+        ('role' in u) &&
+        u.role in ['admin', 'ADMIN', 'Admin'];
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        (hasUserDoc() && isActiveUserDoc() && (
-          getUserData().role == 'admin' || 
-          getUserData().role == 'ADMIN' || 
-          getUserData().role == 'Admin'
-        )) ||
-        (!hasUserDoc() && (
-          request.auth.token.role == 'admin' ||
-          request.auth.token.role == 'ADMIN'
-        )) ||
-        (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com')
-      );
+      return isBootstrapOwner() || (hasUserDoc() && isAdminData(getUserData()));
+    }
+
+    function isPrimaryAdminData(u) {
+      return isAdminData(u) &&
+        ('adminTier' in u) &&
+        u.adminTier in ['primary', 'PRIMARY'];
     }
 
     function isPrimaryAdmin() {
-      return isAdmin() && (
-        (hasUserDoc() && (
-          getUserData().adminTier == 'primary' || 
-          getUserData().adminTier == 'PRIMARY' ||
-          (!('adminTier' in getUserData()) && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com'))
-        )) ||
-        (!hasUserDoc() && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com'))
-      );
+      return isBootstrapOwner() || (hasUserDoc() && isPrimaryAdminData(getUserData()));
+    }
+
+    function isTeacherData(u) {
+      return isUserDocActive(u) &&
+        ('role' in u) &&
+        u.role in ['teacher', 'TEACHER', 'Teacher', 'class_teacher', 'CLASS_TEACHER'];
     }
 
     function isTeacher() {
-      return isSignedIn() && (
-        (hasUserDoc() && isActiveUserDoc() && (
-          getUserData().role == 'teacher' || 
-          getUserData().role == 'TEACHER' || 
-          getUserData().role == 'Teacher'
-        )) ||
-        (!hasUserDoc() && (
-          request.auth.token.role == 'teacher' ||
-          request.auth.token.role == 'TEACHER'
-        ))
-      );
+      return hasUserDoc() && isTeacherData(getUserData());
+    }
+
+    function isStudentData(u) {
+      return isUserDocActive(u) &&
+        ('role' in u) &&
+        u.role in ['student', 'STUDENT', 'Student'];
     }
 
     function isStudent() {
-      return isSignedIn() && (
-        (hasUserDoc() && isActiveUserDoc() && (
-          getUserData().role == 'student' || 
-          getUserData().role == 'STUDENT' || 
-          getUserData().role == 'Student'
-        )) ||
-        (!hasUserDoc() && (
-          request.auth.token.role == 'student' ||
-          request.auth.token.role == 'STUDENT'
-        ))
-      );
+      return hasUserDoc() && isStudentData(getUserData());
     }
 
     function isUserOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isStudentOwner(studentId) {
-      return isSignedIn() && isActiveUserDoc() && (
-        request.auth.uid == studentId ||
-        (resource != null && (
-          resource.data.studentId == request.auth.uid ||
-          resource.data.studentUid == request.auth.uid ||
-          resource.data.userId == request.auth.uid
-        )) ||
-        (hasUserDoc() && (
-          getUserData().studentId == studentId ||
-          ('permanentStudentId' in getUserData() && getUserData().permanentStudentId == studentId) ||
-          ('admissionNumber' in getUserData() && getUserData().admissionNumber == studentId) ||
-          ('admissionNo' in getUserData() && getUserData().admissionNo == studentId) ||
-          ('emisNumber' in getUserData() && getUserData().emisNumber == studentId) ||
-          ('studentEmis' in getUserData() && getUserData().studentEmis == studentId)
-        ))
+    function isStudentOwner(studentUid) {
+      return isSignedIn() && request.auth.uid == studentUid;
+    }
+
+    function normalizeClass(cls) {
+      return cls is string
+        ? (cls.size() > 6 && cls.lower().matches('^class\\s+.*') ? cls.substring(6).trim() : cls.trim())
+        : '';
+    }
+
+    function matchesClass(cls1, cls2) {
+      return cls1 is string && cls2 is string && normalizeClass(cls1) == normalizeClass(cls2);
+    }
+
+    function extractRecordYear(data) {
+      return ('academicYear' in data && data.academicYear is string && data.academicYear != '')
+        ? data.academicYear
+        : (('academicYearId' in data && data.academicYearId is string && data.academicYearId != '')
+            ? data.academicYearId
+            : (('bsYear' in data && data.bsYear is int) ? string(data.bsYear) : ''));
+    }
+
+    function isAuthorizedClassTeacherData(u, data) {
+      let recYear = data != null ? extractRecordYear(data) : '';
+      let recSec = (data != null && ('section' in data) && data.section is string && data.section != '') ? data.section : 'A';
+      return data != null &&
+        ('class' in data) && data.class is string &&
+        ('primaryClassTeacher' in u) && u.primaryClassTeacher is string && u.primaryClassTeacher != '' &&
+        matchesClass(u.primaryClassTeacher, data.class) &&
+        ('primaryClassTeacherYear' in u) && u.primaryClassTeacherYear is string && u.primaryClassTeacherYear != '' &&
+        recYear != '' && (u.primaryClassTeacherYear == recYear || u.primaryClassTeacherYear.matches('^' + recYear + '.*')) &&
+        ('primaryClassTeacherSection' in u) && u.primaryClassTeacherSection is string && u.primaryClassTeacherSection != '' && (
+          u.primaryClassTeacherSection == 'All' || u.primaryClassTeacherSection == recSec
+        );
+    }
+
+    function checkClassTeacher(data) {
+      let u = getUserData();
+      return isTeacherData(u) && isAuthorizedClassTeacherData(u, data);
+    }
+
+    function isAuthorizedClassTeacher(data) {
+      return hasUserDoc() && checkClassTeacher(data);
+    }
+
+    function isAuthorizedSubjectTeacherData(u, data) {
+      let normClass = (data != null && ('class' in data) && data.class is string) ? normalizeClass(data.class) : '';
+      let compactClass = normClass.replace('\\s+', '');
+      let normSec = (data != null && ('section' in data) && data.section is string && data.section != '') ? data.section : 'A';
+      let recYear = data != null ? extractRecordYear(data) : '';
+      let subjKey = (data != null && ('subjectKey' in data) && data.subjectKey is string) ? data.subjectKey : '';
+      let exactKey = normClass + '_' + subjKey + '_' + normSec + '_' + recYear;
+      let allSecKey = normClass + '_' + subjKey + '_All_' + recYear;
+      let compactExactKey = compactClass + '_' + subjKey + '_' + normSec + '_' + recYear;
+      let compactAllSecKey = compactClass + '_' + subjKey + '_All_' + recYear;
+      return data != null &&
+        subjKey != '' &&
+        normClass != '' &&
+        recYear != '' &&
+        ('assignmentKeys' in u) && u.assignmentKeys is list &&
+        u.assignmentKeys.hasAny([exactKey, allSecKey, compactExactKey, compactAllSecKey]);
+    }
+
+    function checkTeacherForClass(data) {
+      let u = getUserData();
+      return isTeacherData(u) && (
+        isAuthorizedClassTeacherData(u, data) || isAuthorizedSubjectTeacherData(u, data)
       );
     }
 
-    function isValidAuditActor() {
-      let data = request.resource.data;
-      let userData = getUserData();
+    function isAuthorizedTeacherForClass(data) {
+      return hasUserDoc() && checkTeacherForClass(data);
+    }
+
+    function isValidStandardSubjectMapping(key, displaySubject) {
+      return (key == 'Mathematics' && displaySubject in ['Mathematics', 'Math']) ||
+             (key == 'Science' && displaySubject == 'Science') ||
+             (key == 'English' && displaySubject == 'English') ||
+             (key == 'Nepali' && displaySubject == 'Nepali') ||
+             (key == 'SocialStudies' && displaySubject in ['Social Studies', 'Social', 'SocialStudies']) ||
+             (key == 'Computer' && displaySubject == 'Computer') ||
+             (key == 'HPE' && displaySubject in ['HPE', 'Health, Physical & Environmental Education']) ||
+             (key == 'Opt.Math' && displaySubject in ['Opt. Math', 'Optional Mathematics', 'Opt Math', 'Opt.Math']) ||
+             (key == 'MoralScience' && displaySubject in ['Moral Science', 'Moral']) ||
+             (key == 'GK' && displaySubject in ['GK', 'General Knowledge']) ||
+             (key == 'Drawing' && displaySubject == 'Drawing') ||
+             (key == 'Rhymes' && displaySubject == 'Rhymes');
+    }
+
+    function isValidSubjectMapping(data) {
       return (
-        (!('adminUid' in data) || data.adminUid == request.auth.uid) &&
-        (!('actorUid' in data) || data.actorUid == request.auth.uid) &&
-        (!('creatorUid' in data) || data.creatorUid == request.auth.uid) &&
-        (('adminUid' in data) || ('actorUid' in data) || ('creatorUid' in data)) &&
-        (!('actorRole' in data) || data.actorRole == userData.role || (!hasUserDoc() && data.actorRole == 'admin')) &&
-        (!('adminTier' in data) || data.adminTier == userData.adminTier || (userData.adminTier == null && data.adminTier == 'primary'))
+        (isValidStandardSubjectMapping(data.subjectKey, data.subject) &&
+         (!('customSubjectId' in data) || data.customSubjectId == null || data.customSubjectId == '')) ||
+        (('customSubjectId' in data) && data.customSubjectId != '' &&
+         exists(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)) &&
+         get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.status == 'ACTIVE' &&
+         get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.name == data.subject &&
+         (get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.targetClass == 'All' ||
+          matchesClass(get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.targetClass, data.class)) &&
+         data.thFull == get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.thFullMarks &&
+         data.prFull == get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.prFullMarks &&
+         data.thPass == get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.thPassMarks &&
+         data.prPass == get(/databases/$(database)/documents/custom_subjects/$(data.customSubjectId)).data.prPassMarks)
       );
     }
 
-    function isValidAuditTarget() {
-      let data = request.resource.data;
-      let actionType = data.actionType;
-      let targetId = data.targetId;
+    function isValidMarksComponent(marks, fullMarks) {
+      return marks == null ||
+        (marks is number && marks >= 0 && marks <= fullMarks) ||
+        (marks is string && marks == 'AB');
+    }
+
+    function isCompletePublishedMarksComponent(marks, fullMarks) {
+      return fullMarks == 0
+        ? (marks == null || marks == 0)
+        : ((marks is number && marks >= 0 && marks <= fullMarks) || (marks is string && marks == 'AB'));
+    }
+
+    function isValidResultPayload(data) {
       return (
-        // A. Financial Payment: Target transaction MUST be newly created in this write batch/transaction
-        (actionType in ['PAYMENT_ENTRY', 'FEE_PAYMENT'] && (
-          (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
-          ('transactionId' in data && data.transactionId != '' && !exists(/databases/$(database)/documents/transactions/$(data.transactionId)) && existsAfter(/databases/$(database)/documents/transactions/$(data.transactionId)))
-        )) ||
-        // B. Financial Refund: Target transaction status MUST change to REFUNDED in this transaction OR new refund record created
-        (actionType in ['REFUND', 'PAYMENT_REFUND'] && (
-          (exists(/databases/$(database)/documents/transactions/$(targetId)) && get(/databases/$(database)/documents/transactions/$(targetId)).data.status != 'REFUNDED' && getAfter(/databases/$(database)/documents/transactions/$(targetId)).data.status == 'REFUNDED') ||
-          ('refundRecordId' in data && data.refundRecordId != '' && !exists(/databases/$(database)/documents/refund_records/$(data.refundRecordId)) && existsAfter(/databases/$(database)/documents/refund_records/$(data.refundRecordId)))
-        )) ||
-        // C. Payment Undo / Cancellation: Target transaction status MUST change to CANCELLED in this transaction
-        (actionType in ['PAYMENT_UNDONE'] && (
-          exists(/databases/$(database)/documents/transactions/$(targetId)) &&
-          get(/databases/$(database)/documents/transactions/$(targetId)).data.status != 'CANCELLED' &&
-          getAfter(/databases/$(database)/documents/transactions/$(targetId)).data.status == 'CANCELLED'
-        )) ||
-        // D. Bill Generated: Target remit bill MUST be newly created in this transaction
-        (actionType in ['BILL_GENERATED'] && (
-          !exists(/databases/$(database)/documents/remitBills/$(targetId)) &&
-          existsAfter(/databases/$(database)/documents/remitBills/$(targetId))
-        )) ||
-        // E. Bill Voided: Target remit bill status MUST change to void in this transaction
-        (actionType in ['BILL_VOIDED'] && (
-          exists(/databases/$(database)/documents/remitBills/$(targetId)) &&
-          get(/databases/$(database)/documents/remitBills/$(targetId)).data.status != 'void' &&
-          getAfter(/databases/$(database)/documents/remitBills/$(targetId)).data.status == 'void'
-        )) ||
-        // F. User Governance Mutations: Target user document MUST be modified in this transaction
-        (actionType == 'ROLE_CHANGED' && (
-          exists(/databases/$(database)/documents/users/$(targetId)) &&
-          existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
-          get(/databases/$(database)/documents/users/$(targetId)).data.role != getAfter(/databases/$(database)/documents/users/$(targetId)).data.role
-        )) ||
-        (actionType == 'ADMIN_TIER_CHANGED' && (
-          exists(/databases/$(database)/documents/users/$(targetId)) &&
-          existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
-          get(/databases/$(database)/documents/users/$(targetId)).data.adminTier != getAfter(/databases/$(database)/documents/users/$(targetId)).data.adminTier
-        )) ||
-        (actionType == 'USER_PROFILE_UPDATED' && (
-          exists(/databases/$(database)/documents/users/$(targetId)) &&
-          existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
-          get(/databases/$(database)/documents/users/$(targetId)).data != getAfter(/databases/$(database)/documents/users/$(targetId)).data
-        )) ||
-        // G. User Deletion Lifecycle & Tombstone State Transitions
-        (actionType in ['USER_DELETED', 'USER_DELETION_REQUESTED', 'USER_AUTH_DELETE_FAILED', 'USER_DELETION_FINALIZED'] && (
-          // Soft-deleted tombstone or deletion state mutation
-          (exists(/databases/$(database)/documents/users/$(targetId)) &&
-           existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
-           get(/databases/$(database)/documents/users/$(targetId)).data != getAfter(/databases/$(database)/documents/users/$(targetId)).data) ||
-          // Physical deletion transition
-          (exists(/databases/$(database)/documents/users/$(targetId)) &&
-           !existsAfter(/databases/$(database)/documents/users/$(targetId)))
-        )) ||
-        // H. Cash Ledger Mutations
-        (actionType in ['TRANSACTION_DELETED'] && (
-          exists(/databases/$(database)/documents/cash_ledger/$(targetId)) &&
-          !existsAfter(/databases/$(database)/documents/cash_ledger/$(targetId))
-        )) ||
-        (actionType in ['REMARKS_MODIFIED', 'AMOUNT_MODIFIED'] && (
-          (exists(/databases/$(database)/documents/cash_ledger/$(targetId)) && existsAfter(/databases/$(database)/documents/cash_ledger/$(targetId)) && get(/databases/$(database)/documents/cash_ledger/$(targetId)).data != getAfter(/databases/$(database)/documents/cash_ledger/$(targetId)).data) ||
-          (exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId)) && get(/databases/$(database)/documents/transactions/$(targetId)).data != getAfter(/databases/$(database)/documents/transactions/$(targetId)).data)
-        )) ||
-        (actionType in ['MANUAL_OVERRIDE'] && (
-          ('transactionId' in data && data.transactionId != '' && !exists(/databases/$(database)/documents/transactions/$(data.transactionId)) && existsAfter(/databases/$(database)/documents/transactions/$(data.transactionId))) ||
-          (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
-          (exists(/databases/$(database)/documents/studentFees/$(targetId)) && get(/databases/$(database)/documents/studentFees/$(targetId)).data != getAfter(/databases/$(database)/documents/studentFees/$(targetId)).data)
-        )) ||
-        // I. Permitted Financial Maintenance & Billing Operations
-        (actionType in ['LEDGER_RECONCILIATION_REPAIR', 'TEST_TRANSACTION_PURGED', 'EXCESS_APPROVED_ADVANCE', 'EXCESS_APPROVED_RETURN', 'FAMILY_PAYMENT_COLLECTED', 'FAMILY_STATEMENT_GENERATED', 'BILL_REISSUED', 'PAYMENT_ALLOCATED', 'PAYMENT_REVERSED', 'ADVANCE_CREATED', 'ADVANCE_APPLIED', 'REFUND_CREATED']) ||
-        // J. Academic Examination, Mark, Custom Subject & Promotion Audit Operations
-        (actionType in ['MARK_MODIFIED', 'RESULT_EDITED', 'MARK_ENTRY', 'EXAM_PUBLISHED', 'RESULTS_SAVED', 'PREPARATION_INITIALIZED', 'CORRECTION_REQUESTED', 'RESULT_REVIEWED', 'NOTIFICATION_FAILURE', 'SUBJECT_CREATED', 'SUBJECT_EDITED', 'SUBJECT_ARCHIVED', 'SUBJECT_RESTORED', 'SUBJECT_DELETED', 'PROMOTION_PREPARED', 'STUDENT_PROMOTED', 'STUDENT_RETAINED', 'STUDENT_TRANSFERRED', 'STUDENT_GRADUATED', 'STUDENT_MARKED_INACTIVE', 'ENROLLMENT_CREATED'])
+        data.thFull is number && data.thFull >= 0 &&
+        data.prFull is number && data.prFull >= 0 &&
+        data.fullMarks == data.thFull + data.prFull &&
+        data.thPass is number && data.thPass >= 0 && data.thPass <= data.thFull &&
+        data.prPass is number && data.prPass >= 0 && data.prPass <= data.prFull &&
+        isValidMarksComponent(data.thMarks, data.thFull) &&
+        isValidMarksComponent(data.prMarks, data.prFull) &&
+        (data.published != true || (
+          isCompletePublishedMarksComponent(data.thMarks, data.thFull) &&
+          isCompletePublishedMarksComponent(data.prMarks, data.prFull)
+        )) &&
+        data.studentUid is string && data.studentUid != '' &&
+        data.examId is string && data.examId != '' &&
+        data.subjectKey is string && data.subjectKey != '' &&
+        data.academicYear is string && data.academicYear != '' &&
+        data.class is string && data.class != '' &&
+        data.section is string && data.section != ''
       );
+    }
+
+    function isParentExamPublished(examId) {
+      return exists(/databases/$(database)/documents/exams/$(examId)) &&
+        get(/databases/$(database)/documents/exams/$(examId)).data.published == true &&
+        get(/databases/$(database)/documents/exams/$(examId)).data.status == 'PUBLISHED';
+    }
+
+    function isParentExamDraftOrReview(examId) {
+      return exists(/databases/$(database)/documents/exams/$(examId)) &&
+        get(/databases/$(database)/documents/exams/$(examId)).data.published == false &&
+        get(/databases/$(database)/documents/exams/$(examId)).data.status in ['NOT STARTED', 'IN PROGRESS', 'DRAFT', 'READY FOR REVIEW', 'READY_FOR_REVIEW'];
+    }
+
+    function isParentExamApprovedForPublish(examId) {
+      return exists(/databases/$(database)/documents/exams/$(examId)) &&
+        get(/databases/$(database)/documents/exams/$(examId)).data.published == false &&
+        get(/databases/$(database)/documents/exams/$(examId)).data.status == 'APPROVED';
+    }
+
+    function matchesParentExamMetadata(data) {
+      let p = get(/databases/$(database)/documents/exams/$(data.examId)).data;
+      return matchesClass(data.class, p.class) &&
+        data.section == p.section &&
+        data.academicYear == p.academicYear;
     }
 
     // ==========================================
@@ -202,59 +262,89 @@ service cloud.firestore {
     // ==========================================
 
     match /users/{userId} {
-      // Hardened: Teachers can only read their own user profile or admin profiles, NOT blanket read all profiles
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if isUserOwner(userId) || isAdmin();
+
       allow create: if isSignedIn() && (
-        (request.auth.uid == userId && (
-          !('role' in request.resource.data) || request.resource.data.role in ['student', 'guest']
-        ) && !('adminTier' in request.resource.data)) ||
-        (isAdmin() && (
+        (
+          request.auth.uid == userId &&
+          (!('role' in request.resource.data) || request.resource.data.role in ['student', 'guest']) &&
+          ('status' in request.resource.data) && request.resource.data.status == 'pending' &&
+          ('active' in request.resource.data) && request.resource.data.active == false &&
+          (!('deleted' in request.resource.data) || request.resource.data.deleted == false) &&
+          !('adminTier' in request.resource.data) &&
+          !('activeSessions' in request.resource.data) &&
+          !('primaryClassTeacher' in request.resource.data) &&
+          !('primaryClassTeacherYear' in request.resource.data) &&
+          !('primaryClassTeacherSection' in request.resource.data) &&
+          !('assignmentKeys' in request.resource.data) &&
+          !('teachingAssignments' in request.resource.data) &&
+          !('advanceBalance' in request.resource.data) &&
+          !('previousYearDue' in request.resource.data) &&
+          !('monthlyFee' in request.resource.data) &&
+          !('fees' in request.resource.data) &&
+          !('scholarship' in request.resource.data) &&
+          !('scholarshipStatus' in request.resource.data) &&
+          !('scholarshipAmount' in request.resource.data)
+        ) ||
+        (
+          isAdmin() &&
           (!('role' in request.resource.data) || request.resource.data.role != 'admin' || isPrimaryAdmin()) &&
           (!('adminTier' in request.resource.data) || isPrimaryAdmin() || request.resource.data.adminTier == 'secondary')
-        ))
+        )
       );
+
       allow update: if (
         isPrimaryAdmin() ||
-        (isAdmin() &&
-          // 2° Admin cannot change adminTier
+        (
+          isAdmin() &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['adminTier']) &&
-          // 2° Admin cannot promote user to admin
-          (resource.data.role == 'admin' || request.resource.data.role != 'admin') &&
-          // 2° Admin cannot alter own role or tier
-          (userId != request.auth.uid || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'adminTier']))
+          resource.data.role != 'admin' &&
+          request.resource.data.role != 'admin' &&
+          userId != request.auth.uid
         ) ||
-        (isUserOwner(userId) &&
+        (
+          isUserOwner(userId) &&
+          isActiveUserDoc() &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'role', 'adminTier', 'status', 'active',
-            'advanceBalance', 'previousYearDue', 'monthlyFee', 'fees', 'scholarship', 'scholarshipStatus'
+            'role', 'adminTier', 'status', 'active', 'deleted', 'activeSessions',
+            'assignmentKeys', 'teachingAssignments',
+            'primaryClassTeacher', 'primaryClassTeacherYear', 'primaryClassTeacherSection',
+            'advanceBalance', 'previousYearDue', 'monthlyFee', 'fees',
+            'scholarship', 'scholarshipStatus', 'scholarshipAmount'
           ])
         )
       );
+
       allow delete: if isPrimaryAdmin() || (isAdmin() && resource.data.role != 'admin');
     }
 
     match /students/{studentId} {
-      allow read: if isSignedIn() && (isStudentOwner(studentId) || isTeacher() || isAdmin());
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        (isActiveUserDoc() && isStudentOwner(studentId)) ||
+        (resource != null && isAuthorizedTeacherForClass(resource.data))
+      );
       allow write: if isAdmin();
     }
 
     // ==========================================
-    // PUBLIC FORMS & SUBMISSIONS
+    // PUBLIC FORMS & SUBMISSIONS (SERVER-ROUTED ONLY)
     // ==========================================
 
     match /admissions/{admissionId} {
-      allow create: if true;
+      allow create: if false;
       allow read, update, delete: if isAdmin();
     }
 
     match /contact_enquiries/{enquiryId} {
-      allow create: if true;
+      allow create: if false;
       allow read, update, delete: if isAdmin();
     }
 
     match /alumni_submissions/{alumniId} {
-      allow create: if true;
-      allow read, update, delete: if isAdmin();
+      allow create: if false;
+      allow read: if (resource != null && resource.data.status == 'approved') || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // ==========================================
@@ -272,11 +362,33 @@ service cloud.firestore {
     }
 
     match /settings/{docId} {
+      allow read: if (
+        docId in [
+          "contact_us",
+          "home_content",
+          "fee_structure",
+          "official_registered_docs",
+          "global",
+          "admissionFormConfig",
+          "calendar_meta"
+        ] ||
+        docId.matches('^calendar_.*') ||
+        (docId == "result_template" && isActiveUserDoc()) ||
+        isAdmin()
+      );
+      allow write: if isAdmin();
+    }
+
+    match /template_versions/{versionId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /site_content/{docId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    match /site_content/{docId} {
+    match /academic_years/{yearId} {
       allow read: if true;
       allow write: if isAdmin();
     }
@@ -286,154 +398,290 @@ service cloud.firestore {
     // ==========================================
 
     match /exams/{examId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() || (
-        isTeacher() && (
-          // Subject teachers can only update unpublished draft status/notes
-          (!('published' in request.resource.data) || request.resource.data.published == false || 
-           // Only the Class Teacher of that class or Admin can set published == true
-           (hasUserDoc() && (
-             getUserData().primaryClassTeacher == request.resource.data.class ||
-             getUserData().class == request.resource.data.class ||
-             getUserData().primaryClassTeacher == ('Class ' + request.resource.data.class) ||
-             getUserData().class == ('Class ' + request.resource.data.class)
-           ))
+      allow read: if isSignedIn() && isActiveUserDoc() && (
+        isAdmin() ||
+        isTeacher() ||
+        (isStudent() && resource != null && resource.data.published == true && resource.data.status == 'PUBLISHED')
+      );
+      allow create: if (isAdmin() || (isTeacher() && isAuthorizedClassTeacher(request.resource.data))) &&
+        request.resource.data.status in ['NOT STARTED', 'IN PROGRESS', 'DRAFT'] &&
+        request.resource.data.published == false &&
+        (!('workflowMode' in request.resource.data) || request.resource.data.workflowMode in ['STANDALONE', 'CONNECTED']);
+
+      allow update: if (
+        resource.data.status != 'PUBLISHED' && resource.data.published != true &&
+        request.resource.data.id == resource.data.id &&
+        matchesClass(request.resource.data.class, resource.data.class) &&
+        request.resource.data.section == resource.data.section &&
+        request.resource.data.academicYear == resource.data.academicYear &&
+        (!('workflowMode' in resource.data) || request.resource.data.workflowMode == resource.data.workflowMode) &&
+        (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt) &&
+        (!('createdByUid' in resource.data) || request.resource.data.createdByUid == resource.data.createdByUid) &&
+        (!('createdByName' in resource.data) || request.resource.data.createdByName == resource.data.createdByName) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'published', 'subjectStatus', 'correctionsRequested', 'notes', 'updatedAt', 'updatedBy', 'updatedByUid', 'approvedAt', 'approvedBy', 'approvedByUid'
+        ]) &&
+        (
+          (
+            resource.data.status in ['NOT STARTED', 'IN PROGRESS', 'DRAFT'] &&
+            request.resource.data.status in ['IN PROGRESS', 'DRAFT', 'READY FOR REVIEW', 'READY_FOR_REVIEW'] &&
+            request.resource.data.published == false &&
+            (isAdmin() || isAuthorizedTeacherForClass(request.resource.data))
+          ) ||
+          (
+            resource.data.status in ['READY FOR REVIEW', 'READY_FOR_REVIEW'] &&
+            request.resource.data.status in ['DRAFT', 'APPROVED'] &&
+            request.resource.data.published == false &&
+            isAdmin()
+          ) ||
+          (
+            resource.data.status == 'APPROVED' &&
+            request.resource.data.status == 'PUBLISHED' &&
+            request.resource.data.published == true &&
+            isAdmin()
+          ) ||
+          (
+            resource.data.status == 'APPROVED' &&
+            request.resource.data.status == 'DRAFT' &&
+            request.resource.data.published == false &&
+            isAdmin()
           )
         )
       );
+      allow delete: if isAdmin() && resource.data.status != 'PUBLISHED';
     }
 
     match /custom_subjects/{subjectId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher());
+      allow read: if isSignedIn() && isActiveUserDoc();
       allow write: if isAdmin();
     }
 
+    match /student_subject_versions/{versionId} {
+      allow read: if isSignedIn() && (isAdmin() || isTeacher());
+      allow write: if false;
+    }
+
     match /results/{resultId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher() || (resource != null && resource.data.published == true && isStudentOwner(resource.data.studentId)));
-      allow create, update: if isAdmin() || isTeacher();
-      allow delete: if isAdmin();
+      allow read: if isSignedIn() && isActiveUserDoc() && (
+        isAdmin() ||
+        (resource != null && isAuthorizedTeacherForClass(resource.data)) ||
+        (
+          resource != null &&
+          resource.data.published == true &&
+          isParentExamPublished(resource.data.examId) &&
+          isStudentOwner(resource.data.studentUid)
+        )
+      );
+      allow create: if (
+        resultId == request.resource.data.examId + '_' + request.resource.data.studentUid + '_' + request.resource.data.subjectKey &&
+        exists(/databases/$(database)/documents/exams/$(request.resource.data.examId)) &&
+        matchesParentExamMetadata(request.resource.data) &&
+        isValidSubjectMapping(request.resource.data) &&
+        isValidResultPayload(request.resource.data) &&
+        (
+          (request.resource.data.published == false && isParentExamDraftOrReview(request.resource.data.examId) && (isAdmin() || isAuthorizedTeacherForClass(request.resource.data))) ||
+          (request.resource.data.published == true && isParentExamApprovedForPublish(request.resource.data.examId) && isAdmin())
+        )
+      );
+      allow update: if (
+        resource.data.published != true &&
+        request.resource.data.examId == resource.data.examId &&
+        request.resource.data.studentUid == resource.data.studentUid &&
+        request.resource.data.subjectKey == resource.data.subjectKey &&
+        request.resource.data.thFull == resource.data.thFull &&
+        request.resource.data.prFull == resource.data.prFull &&
+        request.resource.data.thPass == resource.data.thPass &&
+        request.resource.data.prPass == resource.data.prPass &&
+        request.resource.data.fullMarks == resource.data.fullMarks &&
+        matchesClass(request.resource.data.class, resource.data.class) &&
+        request.resource.data.section == resource.data.section &&
+        request.resource.data.academicYear == resource.data.academicYear &&
+        isValidSubjectMapping(request.resource.data) &&
+        isValidResultPayload(request.resource.data) &&
+        (
+          (request.resource.data.published == false && isParentExamDraftOrReview(request.resource.data.examId) && (isAdmin() || isAuthorizedTeacherForClass(request.resource.data))) ||
+          (request.resource.data.published == true && isParentExamApprovedForPublish(request.resource.data.examId) && isAdmin())
+        )
+      );
+      allow delete: if isAdmin() && resource.data.published != true;
     }
 
     match /resultSummary/{summaryId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher() || (resource != null && resource.data.published == true && isStudentOwner(resource.data.studentId)));
-      allow create, update: if isAdmin() || (
-        isTeacher() && (
-          // Subject teachers can only update unpublished draft summary
-          (!('published' in request.resource.data) || request.resource.data.published == false ||
-           // Only the Class Teacher of that class or Admin can publish class result
-           (hasUserDoc() && (
-             getUserData().primaryClassTeacher == request.resource.data.class ||
-             getUserData().class == request.resource.data.class ||
-             getUserData().primaryClassTeacher == ('Class ' + request.resource.data.class) ||
-             getUserData().class == ('Class ' + request.resource.data.class)
-           ))
-          )
+      allow read: if isSignedIn() && isActiveUserDoc() && (
+        isAdmin() ||
+        (resource != null && isAuthorizedTeacherForClass(resource.data)) ||
+        (
+          resource != null &&
+          resource.data.published == true &&
+          isParentExamPublished(resource.data.examId) &&
+          isStudentOwner(resource.data.studentUid)
         )
       );
-      allow delete: if isAdmin();
+      allow create: if (
+        summaryId == request.resource.data.examId + '_' + request.resource.data.studentUid &&
+        exists(/databases/$(database)/documents/exams/$(request.resource.data.examId)) &&
+        matchesParentExamMetadata(request.resource.data) &&
+        request.resource.data.studentUid is string && request.resource.data.studentUid != '' &&
+        request.resource.data.totalMarks is number && request.resource.data.totalMarks >= 0 &&
+        request.resource.data.percentage is number && request.resource.data.percentage >= 0 && request.resource.data.percentage <= 100 &&
+        (request.resource.data.gpa == null || (request.resource.data.gpa is number && request.resource.data.gpa >= 0 && request.resource.data.gpa <= 4.0)) &&
+        (
+          (request.resource.data.published == false && isParentExamDraftOrReview(request.resource.data.examId) && (isAdmin() || isAuthorizedClassTeacher(request.resource.data))) ||
+          (request.resource.data.published == true && isParentExamApprovedForPublish(request.resource.data.examId) && isAdmin())
+        )
+      );
+      allow update: if (
+        resource.data.published != true &&
+        summaryId == request.resource.data.examId + '_' + request.resource.data.studentUid &&
+        request.resource.data.examId == resource.data.examId &&
+        request.resource.data.studentUid == resource.data.studentUid &&
+        matchesClass(request.resource.data.class, resource.data.class) &&
+        request.resource.data.section == resource.data.section &&
+        request.resource.data.academicYear == resource.data.academicYear &&
+        request.resource.data.totalMarks is number && request.resource.data.totalMarks >= 0 &&
+        request.resource.data.percentage is number && request.resource.data.percentage >= 0 && request.resource.data.percentage <= 100 &&
+        (request.resource.data.gpa == null || (request.resource.data.gpa is number && request.resource.data.gpa >= 0 && request.resource.data.gpa <= 4.0)) &&
+        (
+          (request.resource.data.published == false && isParentExamDraftOrReview(request.resource.data.examId) && (isAdmin() || isAuthorizedClassTeacher(request.resource.data))) ||
+          (request.resource.data.published == true && isParentExamApprovedForPublish(request.resource.data.examId) && isAdmin())
+        )
+      );
+      allow delete: if isAdmin() && resource.data.published != true;
     }
 
-    match /results_secure/{studentId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(studentId));
-      allow create, update: if isAdmin() || isTeacher();
-      allow delete: if isAdmin() || isTeacher();
+    match /results_secure/{studentUid} {
+      allow read: if isSignedIn() && isActiveUserDoc() && (
+        isAdmin() ||
+        (resource != null && isAuthorizedClassTeacher(resource.data)) ||
+        isStudentOwner(studentUid)
+      );
+      allow create, update, delete: if isAdmin();
 
       match /records/{recordId} {
-        allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(studentId));
-        allow create, update: if isAdmin() || isTeacher();
-        allow delete: if isAdmin() || isTeacher();
+        allow read: if isSignedIn() && isActiveUserDoc() && (
+          isAdmin() ||
+          (resource != null && isAuthorizedTeacherForClass(resource.data)) ||
+          (
+            resource != null &&
+            resource.data.published == true &&
+            isParentExamPublished(resource.data.examId) &&
+            isStudentOwner(studentUid)
+          )
+        );
+        allow create: if (
+          recordId == request.resource.data.examId + '_' + studentUid + '_' + request.resource.data.subjectKey &&
+          request.resource.data.studentUid == studentUid &&
+          exists(/databases/$(database)/documents/exams/$(request.resource.data.examId)) &&
+          matchesParentExamMetadata(request.resource.data) &&
+          isValidSubjectMapping(request.resource.data) &&
+          isValidResultPayload(request.resource.data) &&
+          (
+            (request.resource.data.published == false && isParentExamDraftOrReview(request.resource.data.examId) && (isAdmin() || isAuthorizedTeacherForClass(request.resource.data))) ||
+            (request.resource.data.published == true && isParentExamApprovedForPublish(request.resource.data.examId) && isAdmin())
+          )
+        );
+        allow update: if (
+          resource.data.published != true &&
+          recordId == request.resource.data.examId + '_' + studentUid + '_' + request.resource.data.subjectKey &&
+          request.resource.data.studentUid == studentUid &&
+          request.resource.data.examId == resource.data.examId &&
+          request.resource.data.subjectKey == resource.data.subjectKey &&
+          request.resource.data.thFull == resource.data.thFull &&
+          request.resource.data.prFull == resource.data.prFull &&
+          request.resource.data.thPass == resource.data.thPass &&
+          request.resource.data.prPass == resource.data.prPass &&
+          request.resource.data.fullMarks == resource.data.fullMarks &&
+          matchesClass(request.resource.data.class, resource.data.class) &&
+          request.resource.data.section == resource.data.section &&
+          request.resource.data.academicYear == resource.data.academicYear &&
+          isValidSubjectMapping(request.resource.data) &&
+          isValidResultPayload(request.resource.data) &&
+          (
+            (request.resource.data.published == false && isParentExamDraftOrReview(request.resource.data.examId) && (isAdmin() || isAuthorizedTeacherForClass(request.resource.data))) ||
+            (request.resource.data.published == true && isParentExamApprovedForPublish(request.resource.data.examId) && isAdmin())
+          )
+        );
+        allow delete: if isAdmin() && resource.data.published != true;
       }
     }
 
     match /student_enrollments/{enrollmentId} {
-      allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(resource.data.studentId) || (resource != null && resource.data.studentUid == request.auth.uid));
+      allow read: if isSignedIn() && isActiveUserDoc() && (
+        isAdmin() ||
+        (resource != null && (isStudentOwner(resource.data.studentId) || isStudentOwner(resource.data.studentUid))) ||
+        (resource != null && isAuthorizedTeacherForClass(resource.data))
+      );
       allow write: if isAdmin();
     }
 
     match /userCalendars/{userId} {
-      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read, write: if isAdmin() || (isActiveUserDoc() && isUserOwner(userId));
 
-      match /{subpath=**} {
-        allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      match /events/{eventId} {
+        allow read, write: if isAdmin() || (isActiveUserDoc() && isUserOwner(userId));
+      }
+
+      match /notes/{noteId} {
+        allow read, write: if isAdmin() || (isActiveUserDoc() && isUserOwner(userId));
       }
     }
 
-    // ==========================================
-    // USER SESSIONS & LOGIN SECURITY
-    // Strict isolation: Each user can ONLY read and write their OWN sessions
-    // ==========================================
-
     match /user_sessions/{sessionId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.userUid == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userUid == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userUid == request.auth.uid && request.resource.data.userUid == request.auth.uid;
-      allow delete: if false; // Append-only audit preservation; never delete session history
+      allow read: if isSignedIn() && (resource == null || resource.data.userUid == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
     }
 
-    // ==========================================
-    // FINANCIAL RECORDS & CASH LEDGER
-    // Strict isolation: Zero teacher access, Student read-own only, Admin write
-    // ==========================================
-
     match /remitBills/{billId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
       allow write: if isAdmin();
     }
 
     match /billItems/{itemId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
       allow write: if isAdmin();
     }
 
     match /studentFees/{feeId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
       allow write: if isAdmin();
     }
 
     match /transactions/{txId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
       allow write: if isAdmin();
     }
 
     match /cash_ledger/{entryId} {
-      // Institutional physical cash ledger: Restricted exclusively to administrators
       allow read, write: if isAdmin();
     }
 
     match /student_advances/{advanceId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
       allow write: if isAdmin();
     }
 
     match /refund_records/{refundId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
       allow write: if isAdmin();
     }
 
     match /excess_payment_requests/{reqId} {
-      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && isStudentOwner(resource.data.studentId));
-      allow create: if isAdmin() || isStudent();
+      allow read: if isAdmin() || (isStudent() && resource != null && isStudentOwner(resource.data.studentId));
+      allow create: if isAdmin() || (isStudent() && request.resource.data.studentId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     match /ledger_audit_logs/{logId} {
-      // Immutable append-only audit trail: zero update or deletion
-      // Actor identity and target operation are strictly verified against authoritative state transition
       allow read: if isAdmin();
-      allow create: if isAdmin() && isValidAuditActor() && isValidAuditTarget();
-      allow update, delete: if false;
+      allow create, update, delete: if false;
     }
 
     match /audit_logs/{logId} {
-      // Immutable append-only audit trail: zero update or deletion
-      // Actor identity and target operation are strictly verified against authoritative state transition
       allow read: if isAdmin();
-      allow create: if isAdmin() && isValidAuditActor() && isValidAuditTarget();
-      allow update, delete: if false;
+      allow create, update, delete: if false;
     }
 
     match /document_sequences/{sequenceId} {
-      // Atomic sequential receipt & bill numbering locks
       allow read, write: if isAdmin();
     }
 
@@ -457,10 +705,6 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    // ==========================================
-    // STAFF & TEACHER SALARIES
-    // ==========================================
-
     match /salary_structures/{structureId} {
       allow read, write: if isAdmin();
     }
@@ -472,13 +716,34 @@ service cloud.firestore {
 
     match /salary_requests/{requestId} {
       allow read: if isAdmin() || (isTeacher() && resource != null && resource.data.teacherId == request.auth.uid);
-      allow create: if isTeacher() || isAdmin();
+      allow create: if isAdmin() || (isTeacher() && request.resource.data.teacherId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     // ==========================================
-    // DEFAULT CLOSED FALLBACK
+    // PRIVATE NOTIFICATIONS COLLECTION
     // ==========================================
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && isActiveUserDoc() && (
+        resource.data.recipientUid == request.auth.uid || isAdmin()
+      );
+      allow create: if false;
+      allow update: if isSignedIn() && isActiveUserDoc() && (
+        resource.data.recipientUid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']) &&
+        request.resource.data.read is bool &&
+        (!('readAt' in request.resource.data) || request.resource.data.readAt is string) &&
+        request.resource.data.recipientUid == resource.data.recipientUid &&
+        request.resource.data.recipientRole == resource.data.recipientRole &&
+        request.resource.data.type == resource.data.type &&
+        request.resource.data.title == resource.data.title &&
+        request.resource.data.message == resource.data.message &&
+        request.resource.data.link == resource.data.link &&
+        request.resource.data.eventId == resource.data.eventId
+      );
+      allow delete: if false;
+    }
 
     match /{document=**} {
       allow read, write: if false;

@@ -13,6 +13,13 @@ if (typeof window !== 'undefined') {
     firestore: firestoreModule,
     authModule: authModule
   };
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Ignore service worker registration errors in unsupported contexts
+      });
+    });
+  }
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 const faderVariants = {
   hidden: { opacity: 0, scale: 0.95 },
-  show: { opacity: 1, scale: 1, transition: { type: "spring", stiffness: 300, damping: 25 } },
+  show: { opacity: 1, scale: 1, transition: { type: "spring" as const, stiffness: 300, damping: 25 } },
   exit: { opacity: 0, scale: 0.95, transition: { duration: 0.15 } }
 };
 
@@ -22,6 +22,7 @@ const staggerContainer = {
 import { db, auth, storage } from '../firebase';
 import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
+import { useAuth } from '../contexts/AuthContext';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import principalImg from '../assets/gallery/principal_pappu_jha.jpg';
 import teachersGroupImg from '../assets/gallery/teacher_team.jpg';
@@ -961,8 +962,8 @@ export default function Gallery() {
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   
-  const userRole = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const isAdmin = auth.currentUser ? userRole === 'admin' : false;
+  const { userRole, isAuthenticated } = useAuth();
+  const isAdmin = isAuthenticated && userRole === 'admin';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTaskRef = useRef<any>(null);
@@ -1978,7 +1979,7 @@ export default function Gallery() {
                     sizes="(max-width: 600px) 100vw, (max-width: 1200px) 80vw, 100vw"
                     alt="Expanded Archive Photo" 
                     className="max-w-[92vw] max-h-[85vh] object-contain rounded-2xl drop-shadow-2xl pointer-events-auto block mx-auto border border-white/5"
-                    referrerPolicy="referrer"
+                    referrerPolicy="origin-when-cross-origin"
                     onClick={() => setExpandedImage(null)}
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;

@@ -14,6 +14,7 @@ import DOMPurify from 'isomorphic-dompurify';
 import { NepaliDatePicker } from 'nepali-datepicker-reactjs';
 import 'nepali-datepicker-reactjs/dist/index.css';
 import { useNotices } from '../contexts/NoticeContext';
+import { useAuth } from '../contexts/AuthContext';
 import { safeDispatchEvent } from '../lib/safeEvents';
 
 const CLASSES = ['Play Group', 'Nursery', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map(c => `Class ${c}`);
@@ -21,9 +22,10 @@ const TARGET_OPTIONS = ['All', 'Admin Only', 'Students Only', 'Teachers Only', '
 
 export default function NoticeBoard() {
   const { triggerNoticePopup } = useNotices();
-  const role = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const studentClass = localStorage.getItem('studentClass') || '';
-  const currentUserId = auth.currentUser?.uid || 'guest';
+  const { isAuthenticated, userRole, userProfile, user } = useAuth();
+  const role = isAuthenticated ? userRole : 'guest';
+  const studentClass = userProfile?.class || userProfile?.studentClass || '';
+  const currentUserId = user?.uid || 'guest';
 
   const [allNotices, setAllNotices] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,7 +116,7 @@ export default function NoticeBoard() {
         
         if (n.targets?.includes('All')) return true;
 
-        if (role === 'teacher' || role === 'Teacher') {
+        if (role === 'teacher') {
            return n.targets?.includes('Teachers Only');
         } else if (role === 'student') {
            return n.targets?.includes('Students Only') || n.targets?.includes('Student') || (studentClass ? (n.targets?.includes(`Class ${studentClass}`) || n.targets?.includes(studentClass)) : false);

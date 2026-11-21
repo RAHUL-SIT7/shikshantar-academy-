@@ -115,13 +115,45 @@ export function IndividualStudentResultTab({
     return Array.from(years).sort().reverse();
   }, [studentDirectory, data]);
 
-  // 1. Fetch Students Directory from Firestore users collection
+  // 1. Fetch Students Directory (Admin uses users snapshot; Teachers use authorized roster/results without blanket users query)
   useEffect(() => {
     let unsubUsers: any;
+    let isCancelled = false;
+
+    const buildFromResults = (baseList: StudentDirectoryItem[]) => {
+      const merged = [...baseList];
+      data.forEach(r => {
+        if (r.studentId && !merged.some(s => s.permanentStudentId === r.studentId || s.id === r.studentUid)) {
+          merged.push({
+            id: r.studentUid || r.studentId,
+            permanentStudentId: r.permanentStudentId || r.studentId,
+            studentId: r.studentId,
+            fullName: r.studentName || 'Student',
+            emisNumber: r.studentEmis || '',
+            studentEmis: r.studentEmis || '',
+            class: r.class || '',
+            section: r.section || 'A',
+            rollNumber: r.rollNo || '',
+            rollNo: r.rollNo || '',
+            classAssignedYear: r.academicYear || '',
+            academicYear: r.academicYear || ''
+          });
+        }
+      });
+      return merged;
+    };
+
+    if (!isAdmin) {
+      setDirectoryLoading(false);
+      setStudentDirectory(buildFromResults([]));
+      return () => {};
+    }
+
     try {
       setDirectoryLoading(true);
       const q = query(collection(db, 'users'), where('role', '==', 'student'));
       unsubUsers = onSnapshot(q, (snap) => {
+        if (isCancelled) return;
         const list: StudentDirectoryItem[] = [];
         snap.forEach(docSnap => {
           const d = docSnap.data();
@@ -143,30 +175,11 @@ export function IndividualStudentResultTab({
           }
         });
 
-        // Also cross-reference any students present in published results who might not be in users table
-        data.forEach(r => {
-          if (r.studentId && !list.some(s => s.permanentStudentId === r.studentId || s.id === r.studentUid)) {
-            list.push({
-              id: r.studentUid || r.studentId,
-              permanentStudentId: r.permanentStudentId || r.studentId,
-              studentId: r.studentId,
-              fullName: r.studentName || 'Student',
-              emisNumber: r.studentEmis || '',
-              studentEmis: r.studentEmis || '',
-              class: r.class || '',
-              section: r.section || 'A',
-              rollNumber: r.rollNo || '',
-              rollNo: r.rollNo || '',
-              classAssignedYear: r.academicYear || '',
-              academicYear: r.academicYear || ''
-            });
-          }
-        });
-
-        setStudentDirectory(list);
+        setStudentDirectory(buildFromResults(list));
         setDirectoryLoading(false);
       }, (err) => {
         console.warn('Student directory snapshot error:', err);
+        setStudentDirectory(buildFromResults([]));
         setDirectoryLoading(false);
       });
     } catch (e) {
@@ -175,9 +188,10 @@ export function IndividualStudentResultTab({
     }
 
     return () => {
+      isCancelled = true;
       if (unsubUsers) unsubUsers();
     };
-  }, [data]);
+  }, [data, isAdmin]);
 
   // 2. Automatically select student when URL contains studentId (e.g. from User Management -> Result button)
   useEffect(() => {

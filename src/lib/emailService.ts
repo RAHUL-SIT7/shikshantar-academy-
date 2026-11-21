@@ -1,12 +1,9 @@
-import emailjs from '@emailjs/browser';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { auth } from '../firebase';
 
 /**
- * EmailJS Configuration & Dispatcher Service for Shikshantar Academy
- * 
- * Supports sending emails to admin/principal (e.g. info@shikshantar.edu.np, academyshikshantar@gmail.com)
- * when visitors submit Quick Web Enquiries or Admission Forms.
+ * Server-Delegated Email & Notification Dispatcher Service for Shikshantar Academy
+ * All email credentials (SMTP / EmailJS) are strictly held server-side.
+ * No VITE_EMAILJS_* or VITE_SMTP_* secrets are stored or read in client code.
  */
 
 export interface EmailJSConfig {
@@ -16,35 +13,6 @@ export interface EmailJSConfig {
   toEmail?: string;
 }
 
-export const getEmailJSConfig = (): EmailJSConfig => {
-  const env = (import.meta as any).env || {};
-  return {
-    serviceId: env.VITE_EMAILJS_SERVICE_ID || 'service_aggvbh8',
-    templateId: env.VITE_EMAILJS_TEMPLATE_ID || 'template_4aoqz6f',
-    publicKey: env.VITE_EMAILJS_PUBLIC_KEY || 'Z6jGixgTs2V12zdq3D-vo',
-    toEmail: env.VITE_ADMIN_EMAIL || 'academyshikshantar@gmail.com',
-  };
-};
-
-export async function fetchEmailJSConfig(): Promise<EmailJSConfig> {
-  const baseConfig = getEmailJSConfig();
-  try {
-    const docSnap = await getDoc(doc(db, 'settings', 'emailjs'));
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      return {
-        serviceId: data.serviceId || baseConfig.serviceId || 'service_aggvbh8',
-        templateId: data.templateId || baseConfig.templateId || 'template_4aoqz6f',
-        publicKey: data.publicKey || baseConfig.publicKey || 'Z6jGixgTs2V12zdq3D-vo',
-        toEmail: data.toEmail || baseConfig.toEmail || 'academyshikshantar@gmail.com',
-      };
-    }
-  } catch (e) {
-    console.warn('Could not read emailjs config from Firestore, falling back to env:', e);
-  }
-  return baseConfig;
-}
-
 export interface SendEmailResult {
   success: boolean;
   isConfigured: boolean;
@@ -52,59 +20,69 @@ export interface SendEmailResult {
   response?: any;
 }
 
+export const getEmailJSConfig = (): EmailJSConfig => {
+  return {
+    toEmail: 'academyshikshantar@gmail.com',
+  };
+};
+
+export async function fetchEmailJSConfig(): Promise<EmailJSConfig> {
+  return getEmailJSConfig();
+}
+
 /**
- * Send an email notification using EmailJS
+ * Dispatch an email notification strictly through the server API
  */
 export async function sendEmailNotification(
   templateParams: Record<string, any>,
   customConfig?: Partial<EmailJSConfig>
 ): Promise<SendEmailResult> {
-  const fetchedConfig = await fetchEmailJSConfig();
-  const config = { ...fetchedConfig, ...customConfig };
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (auth.currentUser) {
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        headers['Authorization'] = `Bearer ${idToken}`;
+      } catch {}
+    }
 
-  // Check if EmailJS keys are provided
-  if (!config.serviceId || !config.templateId || !config.publicKey) {
-    console.warn(
-      'EmailJS is missing Template ID or Public Key (serviceId: ' + (config.serviceId || 'missing') + ')'
-    );
+    const res = await fetch('/api/public/dispatch-email', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        templateParams,
+        toEmail: customConfig?.toEmail || templateParams.to_email || 'academyshikshantar@gmail.com',
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        isConfigured: Boolean(data.isConfigured ?? true),
+        message: data.error || data.message || 'Failed to dispatch email notification via server.',
+      };
+    }
+
+    return {
+      success: Boolean(data.success),
+      isConfigured: Boolean(data.isConfigured ?? true),
+      message: data.message || 'Notification processed by server.',
+      response: data,
+    };
+  } catch (error: any) {
     return {
       success: false,
       isConfigured: false,
-      message: 'EmailJS Template ID or Public Key is not configured yet.',
-    };
-  }
-
-  try {
-    const response = await emailjs.send(
-      config.serviceId,
-      config.templateId,
-      {
-        to_email: config.toEmail || 'academyshikshantar@gmail.com',
-        site_name: 'Shikshantar Academy',
-        ...templateParams,
-      },
-      config.publicKey
-    );
-
-    console.log('EmailJS Notification Sent Successfully:', response.status, response.text);
-    return {
-      success: true,
-      isConfigured: true,
-      message: 'Email sent successfully via EmailJS!',
-      response,
-    };
-  } catch (error: any) {
-    console.error('EmailJS Send Error:', error);
-    return {
-      success: false,
-      isConfigured: true,
-      message: error?.text || error?.message || 'Failed to send email via EmailJS.',
+      message: error?.message || 'Network error while dispatching notification.',
     };
   }
 }
 
 /**
- * Trigger EmailJS for New Admission Form Submissions
+ * Trigger Server Email Notification for New Admission Form Submissions
  */
 export async function sendAdmissionEmail(formData: Record<string, any>, trackingId: string) {
   const studentName = formData.studentName || formData.fullName || 'New Applicant';
@@ -124,6 +102,7 @@ export async function sendAdmissionEmail(formData: Record<string, any>, tracking
 - Tracking ID: #${trackingId}`;
 
   const templateParams = {
+    type: 'ADMISSION',
     subject: `[New Admission] Application from ${studentName} (${grade}) - #${trackingId}`,
     title: `New Admission Application from ${studentName}`,
     name: studentName,
@@ -139,14 +118,13 @@ export async function sendAdmissionEmail(formData: Record<string, any>, tracking
     address: address,
     tracking_id: trackingId,
     submission_time: new Date().toLocaleString(),
-    details_summary: JSON.stringify(formData, null, 2),
   };
 
   return await sendEmailNotification(templateParams);
 }
 
 /**
- * Trigger EmailJS for Quick Web Enquiries / Contact Forms
+ * Trigger Server Email Notification for Quick Web Enquiries / Contact Forms
  */
 export async function sendEnquiryEmail(enquiryData: {
   name: string;
@@ -159,6 +137,7 @@ export async function sendEnquiryEmail(enquiryData: {
   const gradeValue = enquiryData.grade || 'General Enquiry';
   const userEmail = enquiryData.email || 'N/A';
   const templateParams = {
+    type: 'ENQUIRY',
     subject: `[Web Enquiry] ${enquiryData.subject || 'New Quick Enquiry from ' + enquiryData.name}`,
     title: `Web Enquiry from ${enquiryData.name}`,
     name: enquiryData.name,
@@ -177,7 +156,7 @@ export async function sendEnquiryEmail(enquiryData: {
 }
 
 /**
- * Trigger EmailJS for Alumni Form Submissions
+ * Trigger Server Email Notification for Alumni Form Submissions
  */
 export async function sendAlumniEmail(alumniData: {
   name: string;
@@ -201,6 +180,7 @@ Sector Category: ${alumniData.category || 'General'}
 Reflection / Message: ${alumniData.quote || 'N/A'}`;
 
   const templateParams = {
+    type: 'ALUMNI',
     subject: `[Alumni Record] New Success Story Submission from ${alumniData.name}`,
     title: `Alumni Story Submission from ${alumniData.name}`,
     name: alumniData.name,
@@ -218,3 +198,55 @@ Reflection / Message: ${alumniData.quote || 'N/A'}`;
   return await sendEmailNotification(templateParams);
 }
 
+/**
+ * Trigger Server Email Notification for Guardian Result Publication
+ */
+export async function sendGuardianResultPublicationEmail(params: {
+  studentName: string;
+  studentId: string;
+  guardianName: string;
+  guardianEmail: string;
+  className: string;
+  section: string;
+  examName: string;
+  academicYear: string;
+}): Promise<SendEmailResult> {
+  if (!params.guardianEmail || !params.guardianEmail.includes('@')) {
+    return {
+      success: false,
+      isConfigured: true,
+      message: `No registered guardian email found for ${params.studentName} (${params.studentId}). Delivery failure recorded safely.`
+    };
+  }
+
+  const messageText = `Dear ${params.guardianName || 'Parent / Guardian'},
+
+The official academic results for ${params.studentName} (Class ${params.className} Sec ${params.section}, ID: ${params.studentId}) for ${params.examName} (${params.academicYear} BS) have been published.
+
+You can view the full grade sheet and performance summary securely by logging into the Shikshantar Academy Portal.
+
+Best regards,
+Academic Administration
+Shikshantar Academy, Bastipur, Siraha, Nepal`;
+
+  const templateParams = {
+    type: 'GUARDIAN_RESULT',
+    subject: `[Official Result Published] ${params.examName} Result for ${params.studentName}`,
+    title: `Result Published - ${params.examName}`,
+    name: params.guardianName || 'Parent / Guardian',
+    from_name: 'Shikshantar Academy Administration',
+    from_email: 'academyshikshantar@gmail.com',
+    to_email: params.guardianEmail,
+    email: params.guardianEmail,
+    student_name: params.studentName,
+    student_id: params.studentId,
+    exam_name: params.examName,
+    class_name: params.className,
+    section: params.section,
+    academic_year: params.academicYear,
+    message: messageText,
+    submission_time: new Date().toLocaleString()
+  };
+
+  return await sendEmailNotification(templateParams, { toEmail: params.guardianEmail });
+}

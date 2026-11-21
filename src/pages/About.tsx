@@ -5,7 +5,7 @@ import {
   Compass, Lightbulb, Users, Calendar
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { auth } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'motion/react';
 import principalImg from '../assets/images/regenerated_image_1780334392921.jpg';
 const logoImageSrc = "/logo.png";
@@ -30,7 +30,7 @@ const itemVariants = {
     opacity: 1, 
     y: 0, 
     transition: { 
-      type: "spring", 
+      type: "spring" as const, 
       stiffness: 140, 
       damping: 18 
     } 
@@ -44,7 +44,7 @@ const cardHoverProps = {
     boxShadow: "0 20px 40px rgba(0, 0, 0, 0.04), 0 8px 16px rgba(0, 0, 0, 0.03)"
   },
   whileTap: { scale: 0.995 },
-  transition: { type: "spring", stiffness: 300, damping: 20 }
+  transition: { type: "spring" as const, stiffness: 300, damping: 20 }
 };
 
 export default function About() {
@@ -62,8 +62,8 @@ export default function About() {
   const [isEditing, setIsEditing] = useState(false);
   const [tempContent, setTempContent] = useState(defaultContent);
 
-  const userRole = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const isAdmin = auth.currentUser ? userRole === 'admin' : false;
+  const { isAuthenticated, userRole } = useAuth();
+  const isAdmin = isAuthenticated && userRole === 'admin';
 
   useEffect(() => {
     const loadData = () => {

@@ -9,11 +9,10 @@ import {
   Loader2, 
   ShieldAlert 
 } from 'lucide-react';
-import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
+import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { doc, updateDoc, collection, query, where, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { formatBSDate } from '../../lib/nepaliDate';
 import { releaseBillUniquenessLocks } from '../../lib/atomicBillingTransactionEngine';
-import { getAuthoritativeActor } from '../../lib/auditLogger';
 
 interface VoidRemitBillModalProps {
   bill: any | null;
@@ -104,72 +103,6 @@ export default function VoidRemitBillModal({
           });
         });
       }
-
-      // 5. Atomic Audit Log Creation (in the same batch)
-      const opId = `OP_VOID_${bill.id}`;
-      const auditRef = doc(db, 'audit_logs', opId);
-      const ledgerAuditRef = doc(db, 'ledger_audit_logs', opId);
-
-      // Security & Authority: Fail closed if authoritative actor cannot be resolved from Firestore
-      const authoritativeActor = await getAuthoritativeActor();
-
-      const actorName = authoritativeActor.actorName || operatorName || 'Authorized Accountant';
-
-      const beforeState = {
-        billId: bill.id,
-        billNo: bill.billNo,
-        status: bill.status || 'pending',
-        totalAmount: Number(bill.totalAmount || 0),
-        paidAmount: Number(bill.paidAmount || 0),
-        dueAmount: Number(bill.dueAmount || bill.totalAmount || 0)
-      };
-
-      const afterState = {
-        billId: bill.id,
-        billNo: bill.billNo,
-        status: 'void',
-        voidReason: fullVoidReason,
-        voidedBy: actorName
-      };
-
-      const auditPayload = {
-        id: opId,
-        auditLogId: opId,
-        operationId: opId,
-        correlationId: opId,
-        category: 'financial',
-        action: 'BILL_VOIDED',
-        actionType: 'BILL_VOIDED',
-        targetType: 'remit_bill',
-        targetId: bill.id,
-        receipt: bill.billNo || 'N/A',
-        receiptNo: bill.billNo || 'N/A',
-        studentId: bill.studentId || '',
-        studentUid: bill.studentId || '',
-        studentName: bill.studentName || 'Student',
-        studentClass: bill.class || '-',
-        academicYear: bill.academicYear || '',
-        beforeState: beforeState,
-        afterState: afterState,
-        previousValue: `Bill #${bill.billNo} | Status: ${bill.status || 'pending'} | Total: NRs. ${Number(bill.totalAmount || 0).toLocaleString()}`,
-        newValue: `Bill #${bill.billNo} VOIDED | Reason: ${fullVoidReason} | Voided By: ${actorName}`,
-        reason: fullVoidReason,
-        result: 'SUCCESS',
-        actorUid: authoritativeActor.actorUid,
-        adminUid: authoritativeActor.adminUid,
-        actorName: actorName,
-        adminName: actorName,
-        actorRole: authoritativeActor.actorRole || 'admin',
-        adminTier: authoritativeActor.adminTier || 'primary',
-        date: bsDate,
-        dateBS: bsDate,
-        timestampStr: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
-        timestamp: serverTimestamp(),
-        createdAt: serverTimestamp()
-      };
-
-      batch.set(auditRef, auditPayload);
-      batch.set(ledgerAuditRef, auditPayload);
 
       await batch.commit();
 

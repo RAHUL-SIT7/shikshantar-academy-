@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs, updateDoc, writeBatch } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 import { Edit2, Save, X, Plus, Trash2, Search, Award, User as UserIcon, Users, CreditCard, FileText, Printer, Tv, PlusCircle, CheckCircle2, AlertCircle, Database, Calendar, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
 import FeeStructureWallChartModal from '../components/fee_management/FeeStructureWallChartModal';
 import ScholarshipTab from '../components/fee_management/ScholarshipTab';
@@ -206,7 +207,8 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const isAdmin = !isGlobalView && Boolean(auth.currentUser) && localStorage.getItem('userRole') === 'admin';
+  const { isAuthenticated, userRole } = useAuth();
+  const isAdmin = !isGlobalView && isAuthenticated && userRole === 'admin';
 
   const mobileScrollContainerRef = React.useRef<HTMLDivElement>(null);
   const isScrollingProgrammatically = React.useRef(false);
@@ -418,9 +420,12 @@ const FeeStructure = ({ isGlobalView = false }: { isGlobalView?: boolean }) => {
           }
         ];
         setOfficialDocs(defaultDocs);
-        // Save initial default listed codes to DB so it persists
-        setDoc(doc(db, 'settings', 'official_registered_docs'), { documents: defaultDocs }).catch(console.warn);
+        if (isAdmin) {
+          setDoc(doc(db, 'settings', 'official_registered_docs'), { documents: defaultDocs }).catch(console.warn);
+        }
       }
+    }, (err) => {
+      console.warn('FeeStructure: official_registered_docs subscription warning:', err?.message);
     });
 
     // 2. Ticking Real time Clock for TV Display

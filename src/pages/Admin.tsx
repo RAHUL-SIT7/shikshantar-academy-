@@ -1,15 +1,13 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { auth, db, handleFirestoreError, OperationType } from "../firebase";
-import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   query,
   getDocs,
   onSnapshot,
-  getDoc,
-  doc,
 } from "firebase/firestore";
+import { useAuth } from "../contexts/AuthContext";
 import {
   BookOpen,
   User,
@@ -21,7 +19,6 @@ import {
   Search,
   Settings,
   Loader2,
-  Upload,
   CheckCircle,
   TrendingUp,
   DollarSign,
@@ -29,6 +26,10 @@ import {
   ShieldCheck,
   GraduationCap,
   BookMarked,
+  Layout,
+  ArrowRight,
+  Sparkles,
+  Calendar,
 } from "lucide-react";
 import {
   BarChart,
@@ -43,7 +44,6 @@ import {
   Legend,
 } from "recharts";
 
-import { UploadTab } from "../components/admin/UploadTab";
 import { ManualEntryTab } from "../components/admin/ManualEntryTab";
 import { ViewManageTab } from "../components/admin/ViewManageTab";
 import { IndividualStudentResultTab } from "../components/admin/IndividualStudentResultTab";
@@ -52,14 +52,18 @@ import { EnquiriesTab } from "../components/admin/EnquiriesTab";
 import { AuditLogsTab } from "../components/admin/AuditLogsTab";
 import { CustomSubjectsTab } from "../components/admin/CustomSubjectsTab";
 import { AcademicPromotionTab } from "../components/admin/AcademicPromotionTab";
+import { ResultTemplateDesigner } from "../components/admin/ResultTemplateDesigner";
+import { AcademicYearManagementTab } from "../components/admin/AcademicYearManagementTab";
 
 import { StudentResult } from "../data/resultsState";
+import { SharedExamSetup, SharedExamSetupContext } from "../components/admin/SharedExamSetup";
+import { WorkflowExitConfirmModal } from "../components/admin/WorkflowExitConfirmModal";
 
 const EXAM_TYPES = [
   "First Terminal Examination",
   "Second Terminal Examination",
   "Third Terminal Examination",
-  "Final Examination",
+  "Final Terminal Examination",
 ];
 const DEFAULT_CLASSES = [
   "Play Group",
@@ -90,33 +94,156 @@ const SUBJECTS = [
 
 export default function Admin() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => {
-    return searchParams.get("tab") || "manual";
+    const t = searchParams.get("tab");
+    return (t && t !== "upload") ? t : "hub";
   });
 
   // Listen to search params changes
   useEffect(() => {
     const tabParam = searchParams.get("tab");
     if (tabParam) {
-      setActiveTab(tabParam);
+      setActiveTab(tabParam === "upload" ? "hub" : tabParam);
     }
   }, [searchParams]);
 
   const [data, setData] = useState<StudentResult[]>([]);
   const [status, setStatus] = useState<{
-    type: "success" | "error";
+    type: "success" | "error" | "info";
     message: string;
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Role & Teacher restrictions
-  const [userRole, setUserRole] = useState<"admin" | "teacher" | "student">(
-    "admin",
-  );
+  // Role & Teacher restrictions from authoritative AuthContext
+  const { user, userRole, userProfile, isAuthenticated, loading: authLoading } = useAuth();
   const [teacherProfile, setTeacherProfile] = useState<any>(null);
   const [isTeacherSetupDone, setIsTeacherSetupDone] = useState(false);
   const [assignedClasses, setAssignedClasses] = useState<string[]>([]);
   const [assignedSubjects, setAssignedSubjects] = useState<string[]>([]);
+  const [sharedExamContext, setSharedExamContext] = useState<any>(null);
+  const [showSharedSetup, setShowSharedSetup] = useState(false);
+  const [sharedSetupDirty, setSharedSetupDirty] = useState(false);
+  const [manualEntryMode, setManualEntryMode] = useState<string | null>(null);
+
+  // Unified Result Workflow Exit Protection State
+  const [workflowGuard, setWorkflowGuard] = useState<{
+    isActive: boolean;
+    isDirty: boolean;
+    workflowName: string;
+    contextSummary?: string;
+    canSaveDraft?: boolean;
+    saveDraft?: () => Promise<boolean>;
+  } | null>(null);
+  const [pendingExitNav, setPendingExitNav] = useState<{
+    targetDestination: string;
+    workflowName: string;
+    contextSummary?: string;
+    hasUnsavedChanges: boolean;
+    canSaveDraft: boolean;
+    saveDraft?: () => Promise<boolean>;
+    execute: () => void;
+  } | null>(null);
+  const [isSavingBeforeExit, setIsSavingBeforeExit] = useState(false);
+
+  const handleWorkflowGuardChange = useCallback((guard: typeof workflowGuard) => {
+    setWorkflowGuard(guard);
+  }, []);
+
+  const isInsideResultWorkflow = activeTab === "prep" || activeTab === "manual";
+
+  const evaluateWorkflowExitState = useCallback(() => {
+    if (!isInsideResultWorkflow) return null;
+    if (activeTab === "manual") {
+      return {
+        shouldConfirm: true,
+        workflowName: workflowGuard?.workflowName || "Standalone Direct Manual Entry",
+        contextSummary: workflowGuard?.contextSummary,
+        hasUnsavedChanges: Boolean(workflowGuard?.isDirty),
+        canSaveDraft: Boolean(workflowGuard?.canSaveDraft && workflowGuard?.saveDraft),
+        saveDraft: workflowGuard?.saveDraft,
+      };
+    }
+    // activeTab === "prep" (Connected Examination Management)
+    const hasUnsaved = Boolean(workflowGuard?.isDirty || (showSharedSetup && sharedSetupDirty));
+    const contextParts: string[] = [];
+    if (showSharedSetup) contextParts.push("New Examination Setup Wizard");
+    if (workflowGuard?.contextSummary) contextParts.push(workflowGuard.contextSummary);
+    return {
+      shouldConfirm: true,
+      workflowName: workflowGuard?.workflowName || "Connected Examination Management",
+      contextSummary: contextParts.join(" • ") || "Examination Preparation Workspace",
+      hasUnsavedChanges: hasUnsaved,
+      canSaveDraft: false,
+      saveDraft: undefined,
+    };
+  }, [isInsideResultWorkflow, activeTab, workflowGuard, showSharedSetup, sharedSetupDirty]);
+
+  const requestGuardedAction = useCallback(
+    (targetDestination: string, execute: () => void) => {
+      const state = evaluateWorkflowExitState();
+      if (state?.shouldConfirm) {
+        setPendingExitNav({
+          targetDestination,
+          workflowName: state.workflowName,
+          contextSummary: state.contextSummary,
+          hasUnsavedChanges: state.hasUnsavedChanges,
+          canSaveDraft: state.canSaveDraft,
+          saveDraft: state.saveDraft,
+          execute,
+        });
+      } else {
+        execute();
+      }
+    },
+    [evaluateWorkflowExitState]
+  );
+
+  const handleRequestTabSwitch = useCallback(
+    (nextTab: string, tabLabel: string) => {
+      if (nextTab === activeTab) return;
+      requestGuardedAction(tabLabel, () => {
+        if (nextTab !== "prep") {
+          setShowSharedSetup(false);
+          setSharedSetupDirty(false);
+        }
+        setWorkflowGuard(null);
+        setActiveTab(nextTab);
+      });
+    },
+    [activeTab, requestGuardedAction]
+  );
+
+  // Register global portal sidebar guard while inside an active Result Workflow
+  const requestGuardedActionRef = useRef(requestGuardedAction);
+  useEffect(() => {
+    requestGuardedActionRef.current = requestGuardedAction;
+  }, [requestGuardedAction]);
+
+  useEffect(() => {
+    if (!isInsideResultWorkflow) {
+      if ((window as any).__shikshantarNavigationGuard) {
+        delete (window as any).__shikshantarNavigationGuard;
+      }
+      return;
+    }
+    const guardFn = (targetHref: string, targetLabel?: string) => {
+      requestGuardedActionRef.current(targetLabel || targetHref, () => {
+        delete (window as any).__shikshantarNavigationGuard;
+        setShowSharedSetup(false);
+        setSharedSetupDirty(false);
+        setWorkflowGuard(null);
+        navigate(targetHref);
+      });
+      return false;
+    };
+    (window as any).__shikshantarNavigationGuard = guardFn;
+    return () => {
+      if ((window as any).__shikshantarNavigationGuard === guardFn) {
+        delete (window as any).__shikshantarNavigationGuard;
+      }
+    };
+  }, [isInsideResultWorkflow, navigate]);
 
   const dynamicExamTypes = useMemo(() => {
     const types = new Set(EXAM_TYPES);
@@ -246,63 +373,46 @@ export default function Admin() {
       }
     };
 
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      if (unsubExams) unsubExams();
-      if (unsubSummary) unsubSummary();
-      if (unsubResults) unsubResults();
+    if (authLoading) return;
 
-      if (user) {
-        const storedRole = localStorage.getItem("userRole") || "admin";
-        setUserRole(storedRole as any);
+    if (!isAuthenticated || !user || (userRole !== "admin" && userRole !== "teacher")) {
+      setData([]);
+      setTeacherProfile(null);
+      setAssignedClasses([]);
+      setAssignedSubjects([]);
+      setIsTeacherSetupDone(false);
+      setLoading(false);
+      return;
+    }
 
-        if (storedRole === "teacher") {
-          // Fetch assigned classes & subjects from Firestore
-          try {
-            const uDoc = await getDoc(doc(db, "users", user.uid));
-            if (uDoc.exists()) {
-              const uData = uDoc.data();
-              setTeacherProfile(uData);
-              
-              // Load assigned classes (fallback to .class if assignedClasses array is empty)
-              const classes = uData.assignedClasses && Array.isArray(uData.assignedClasses) && uData.assignedClasses.length > 0
-                ? uData.assignedClasses 
-                : (uData.class ? [uData.class] : []);
-              setAssignedClasses(classes);
-              
-              // Load assigned subjects (fallback to teacherSubjects from localStorage if empty)
-              const subjects = uData.assignedSubjects && Array.isArray(uData.assignedSubjects) && uData.assignedSubjects.length > 0
-                ? uData.assignedSubjects 
-                : JSON.parse(localStorage.getItem("teacherSubjects") || "[]");
-              setAssignedSubjects(subjects);
-              
-              setIsTeacherSetupDone(true);
-            } else {
-              setIsTeacherSetupDone(true);
-            }
-          } catch (e) {
-            console.error("Failed to fetch teacher profile:", e);
-            setIsTeacherSetupDone(true);
-          }
-        } else {
-          setIsTeacherSetupDone(true);
-        }
+    if (userRole === "teacher") {
+      if (userProfile) {
+        setTeacherProfile(userProfile);
+        const classes =
+          userProfile.assignedClasses && Array.isArray(userProfile.assignedClasses) && userProfile.assignedClasses.length > 0
+            ? userProfile.assignedClasses
+            : (userProfile.class ? [userProfile.class] : []);
+        setAssignedClasses(classes);
 
-        subscribeToResults();
-      } else {
-        if (unsubExams) unsubExams();
-        if (unsubSummary) unsubSummary();
-        if (unsubResults) unsubResults();
-        setLoading(false);
+        const subjects =
+          userProfile.assignedSubjects && Array.isArray(userProfile.assignedSubjects) && userProfile.assignedSubjects.length > 0
+            ? userProfile.assignedSubjects
+            : [];
+        setAssignedSubjects(subjects);
       }
-    });
+      setIsTeacherSetupDone(true);
+    } else {
+      setIsTeacherSetupDone(true);
+    }
+
+    subscribeToResults();
 
     return () => {
-      unsubAuth();
       if (unsubExams) unsubExams();
       if (unsubSummary) unsubSummary();
       if (unsubResults) unsubResults();
     };
-  }, []);
+  }, [user, userRole, userProfile, isAuthenticated, authLoading]);
 
   useEffect(() => {
     if (status) {
@@ -398,41 +508,29 @@ export default function Admin() {
 
 
 
-      {/* Tabs Header */}
+      {/* Clean Non-Redundant Navigation Bar */}
       <div className="flex overflow-x-auto bg-white rounded-xl border border-gray-200 p-2 gap-2 shadow-sm font-bold scrollbar-hide">
         <button
-          onClick={() => setActiveTab("prep")}
-          className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "prep" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          onClick={() => handleRequestTabSwitch("hub", "Result Workflows")}
+          className={`flex-shrink-0 px-5 py-2.5 rounded-lg flex items-center gap-2 text-sm transition-colors ${activeTab === "hub" || activeTab === "prep" || activeTab === "manual" ? "bg-[var(--primary)] text-white shadow-sm" : "bg-transparent text-gray-600 hover:bg-gray-100"}`}
         >
-          <GraduationCap className="w-4 h-4" /> Result Preparation
+          <GraduationCap className="w-4 h-4" /> Result Workflows
         </button>
         <button
-          onClick={() => setActiveTab("manual")}
-          className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "manual" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          onClick={() => handleRequestTabSwitch("history", "Published Results & Reports")}
+          className={`flex-shrink-0 px-5 py-2.5 rounded-lg flex items-center gap-2 text-sm transition-colors ${activeTab === "history" ? "bg-[var(--primary)] text-white shadow-sm" : "bg-transparent text-gray-600 hover:bg-gray-100"}`}
         >
-          <Edit2 className="w-4 h-4" /> Manual Entry
+          <BookOpen className="w-4 h-4" /> Published Results &amp; Reports
         </button>
         <button
-          onClick={() => setActiveTab("upload")}
-          className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "upload" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
-        >
-          <Upload className="w-4 h-4" /> Excel Upload
-        </button>
-        <button
-          onClick={() => setActiveTab("history")}
-          className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "history" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
-        >
-          <BookOpen className="w-4 h-4" /> Published Results & Reports
-        </button>
-        <button
-          onClick={() => setActiveTab("student_result")}
+          onClick={() => handleRequestTabSwitch("student_result", "Individual Student Result")}
           className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "student_result" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
         >
           <User className="w-4 h-4" /> Individual Student Result
         </button>
         {userRole === "admin" && (
           <button
-            onClick={() => setActiveTab("enquiries")}
+            onClick={() => handleRequestTabSwitch("enquiries", "Web Enquiries")}
             className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "enquiries" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
           >
             <Inbox className="w-4 h-4" /> Web Enquiries
@@ -440,7 +538,7 @@ export default function Admin() {
         )}
         {userRole === "admin" && (
           <button
-            onClick={() => setActiveTab("audit_logs")}
+            onClick={() => handleRequestTabSwitch("audit_logs", "Audit Logs")}
             className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "audit_logs" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
           >
             <ShieldCheck className="w-4 h-4" /> Audit Logs
@@ -448,7 +546,7 @@ export default function Admin() {
         )}
         {userRole === "admin" && (
           <button
-            onClick={() => setActiveTab("custom_subjects")}
+            onClick={() => handleRequestTabSwitch("custom_subjects", "Custom Subjects")}
             className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "custom_subjects" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
           >
             <BookMarked className="w-4 h-4" /> Custom Subjects
@@ -456,10 +554,26 @@ export default function Admin() {
         )}
         {userRole === "admin" && (
           <button
-            onClick={() => setActiveTab("promotion")}
+            onClick={() => handleRequestTabSwitch("promotion", "Academic Promotion")}
             className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "promotion" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
           >
             <GraduationCap className="w-4 h-4" /> Academic Promotion
+          </button>
+        )}
+        {userRole === "admin" && (
+          <button
+            onClick={() => handleRequestTabSwitch("template_designer", "Template Designer")}
+            className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "template_designer" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          >
+            <Layout className="w-4 h-4" /> Template Designer
+          </button>
+        )}
+        {userRole === "admin" && (
+          <button
+            onClick={() => handleRequestTabSwitch("academic_years", "Academic Years")}
+            className={`flex-shrink-0 px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${activeTab === "academic_years" ? "bg-[var(--primary)] text-white shadow-md" : "bg-transparent text-gray-600 hover:opacity-90"}`}
+          >
+            <Calendar className="w-4 h-4" /> Academic Years
           </button>
         )}
       </div>
@@ -473,42 +587,165 @@ export default function Admin() {
           </div>
         ) : (
           <>
-            {activeTab === "prep" && (
-              <ResultPreparationTab
-                EXAM_TYPES={EXAM_TYPES}
-                allClasses={DEFAULT_CLASSES}
-                data={data}
-                setStatus={setStatus}
-                userRole={userRole}
-                assignedClasses={assignedClasses}
-                assignedSubjects={assignedSubjects}
-                teacherProfile={teacherProfile}
-              />
+            {activeTab === "hub" && (
+              <div className="max-w-4xl mx-auto py-6 space-y-6">
+                <div className="text-center space-y-1.5">
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Choose Result Management Workflow
+                  </h2>
+                  <p className="text-sm text-slate-600">
+                    Select one of two strictly separated workflows for Shikshantar Academy (Play Group – Grade 10, Nepal CDC / NEB 35% Standard).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("prep")}
+                    className="text-left group rounded-2xl p-6 border-2 border-slate-200 hover:border-indigo-600 bg-white hover:bg-indigo-50/30 transition-all shadow-xs flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-100 text-indigo-800">
+                          Connected Workflow
+                        </span>
+                        <GraduationCap className="w-6 h-6 text-indigo-600" />
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900">
+                        Examination Management
+                      </h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Guided 4-step exam setup, independent TH/PR configuration, Subject Teacher scoped entry &amp; submission, Admin subject review / correction requests, explicit exam approval, and official publication.
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 group-hover:translate-x-0.5 transition-transform">
+                      Open Connected Examination Management <ArrowRight className="w-4 h-4" />
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("manual")}
+                    className="text-left group rounded-2xl p-6 border-2 border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/30 transition-all shadow-xs flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800">
+                          Standalone Workflow
+                        </span>
+                        <Edit2 className="w-6 h-6 text-emerald-600" />
+                      </div>
+                      <h3 className="text-lg font-black text-slate-900">
+                        Direct Manual Entry
+                      </h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Independent direct spreadsheet for Admin or Class Teacher. Auto-loads base &amp; approved custom subjects without Shared Setup, supports Save Draft, Submit, Admin Approve, and Publish.
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 group-hover:translate-x-0.5 transition-transform">
+                      Open Standalone Direct Manual Entry <ArrowRight className="w-4 h-4" />
+                    </span>
+                  </button>
+                </div>
+              </div>
             )}
-            {activeTab === "upload" && (
-              <UploadTab
-                EXAM_TYPES={EXAM_TYPES}
-                allClasses={DEFAULT_CLASSES}
-                data={data}
-                setStatus={setStatus}
-                userRole={userRole}
-                assignedClasses={assignedClasses}
-                assignedSubjects={assignedSubjects}
-                teacherProfile={teacherProfile}
-              />
+            {activeTab === "prep" && (
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      requestGuardedAction("Result Workflows", () => {
+                        setShowSharedSetup(false);
+                        setSharedSetupDirty(false);
+                        setWorkflowGuard(null);
+                        setActiveTab("hub");
+                      })
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 border border-slate-200 transition-colors"
+                  >
+                    &larr; Back to Workflows
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-slate-500 hidden sm:inline">
+                      Connected Examination Management
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (showSharedSetup && sharedSetupDirty) {
+                          setPendingExitNav({
+                            targetDestination: "Examinations & Progress Monitoring",
+                            workflowName: "New Examination Setup Wizard",
+                            contextSummary: "Unsaved 4-step examination setup configuration",
+                            hasUnsavedChanges: true,
+                            canSaveDraft: false,
+                            execute: () => {
+                              setShowSharedSetup(false);
+                              setSharedSetupDirty(false);
+                            },
+                          });
+                        } else {
+                          setShowSharedSetup((prev) => !prev);
+                        }
+                      }}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors border ${
+                        showSharedSetup
+                          ? "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
+                          : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 shadow-xs"
+                      }`}
+                    >
+                      {showSharedSetup ? "Close New Exam Setup" : "+ Initialize New Exam"}
+                    </button>
+                  </div>
+                </div>
+                {showSharedSetup && (
+                  <SharedExamSetup
+                    allClasses={DEFAULT_CLASSES}
+                    userRole={userRole as "admin" | "teacher" | "student"}
+                    initialContext={sharedExamContext}
+                    onContextChange={(ctx: SharedExamSetupContext) => setSharedExamContext(ctx)}
+                    onDirtyChange={setSharedSetupDirty}
+                  />
+                )}
+                <ResultPreparationTab
+                  EXAM_TYPES={EXAM_TYPES}
+                  allClasses={DEFAULT_CLASSES}
+                  data={data}
+                  setStatus={setStatus}
+                  userRole={userRole as "admin" | "teacher" | "student"}
+                  assignedClasses={assignedClasses}
+                  assignedSubjects={assignedSubjects}
+                  teacherProfile={teacherProfile}
+                  initialContext={sharedExamContext}
+                  onOpenNewSetup={() => setShowSharedSetup(true)}
+                  onExamOpened={() => {
+                    setShowSharedSetup(false);
+                    setSharedSetupDirty(false);
+                  }}
+                  onWorkflowGuardChange={handleWorkflowGuardChange}
+                />
+              </div>
             )}
             {activeTab === "manual" && (
-              <ManualEntryTab
-                EXAM_TYPES={EXAM_TYPES}
-                allClasses={DEFAULT_CLASSES}
-                allSubjects={SUBJECTS}
-                data={data}
-                setStatus={setStatus}
-                userRole={userRole}
-                assignedClasses={assignedClasses}
-                assignedSubjects={assignedSubjects}
-                teacherProfile={teacherProfile}
-              />
+              <div className="space-y-6">
+                <ManualEntryTab
+                  EXAM_TYPES={EXAM_TYPES}
+                  allClasses={DEFAULT_CLASSES}
+                  allSubjects={SUBJECTS}
+                  data={data}
+                  setStatus={setStatus}
+                  userRole={userRole}
+                  assignedClasses={assignedClasses}
+                  assignedSubjects={assignedSubjects}
+                  teacherProfile={teacherProfile}
+                  onBackToPrep={() => {
+                    setWorkflowGuard(null);
+                    setActiveTab("hub");
+                  }}
+                  onWorkflowGuardChange={handleWorkflowGuardChange}
+                />
+              </div>
             )}
             {activeTab === "history" && (
               <ViewManageTab
@@ -547,9 +784,51 @@ export default function Admin() {
                 userRole={userRole}
               />
             )}
+            {activeTab === "template_designer" && userRole === "admin" && (
+              <ResultTemplateDesigner
+                setStatus={setStatus}
+                userRole={userRole}
+              />
+            )}
+            {activeTab === "academic_years" && userRole === "admin" && (
+              <AcademicYearManagementTab
+                setStatus={setStatus}
+                userRole={userRole}
+              />
+            )}
           </>
         )}
       </div>
+      {/* Result Workflow Exit Confirmation Modal */}
+      <WorkflowExitConfirmModal
+        isOpen={Boolean(pendingExitNav)}
+        workflowName={pendingExitNav?.workflowName || "Result Management Workflow"}
+        contextSummary={pendingExitNav?.contextSummary}
+        targetDestination={pendingExitNav?.targetDestination}
+        hasUnsavedChanges={Boolean(pendingExitNav?.hasUnsavedChanges)}
+        canSaveDraft={Boolean(pendingExitNav?.canSaveDraft && pendingExitNav?.saveDraft)}
+        isSavingDraft={isSavingBeforeExit}
+        onStay={() => setPendingExitNav(null)}
+        onSaveAndLeave={async () => {
+          const pending = pendingExitNav;
+          if (!pending?.saveDraft) return;
+          setIsSavingBeforeExit(true);
+          try {
+            const ok = await pending.saveDraft();
+            if (ok) {
+              setPendingExitNav(null);
+              pending.execute();
+            }
+          } finally {
+            setIsSavingBeforeExit(false);
+          }
+        }}
+        onConfirmExit={() => {
+          const pending = pendingExitNav;
+          setPendingExitNav(null);
+          pending?.execute();
+        }}
+      />
     </div>
   );
 }

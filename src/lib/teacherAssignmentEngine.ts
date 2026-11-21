@@ -46,6 +46,104 @@ export const STANDARD_SUBJECTS = [
   'Rhymes'
 ];
 
+/**
+ * Authoritative Canonical Subject Key Mapping (12 Standard Subjects)
+ * 'Opt. Math' strictly maps to canonical key 'Opt.Math' (dot retained)
+ */
+export const CANONICAL_SUBJECT_KEY_MAP: Record<string, string> = {
+  'mathematics': 'Mathematics',
+  'math': 'Mathematics',
+  'science': 'Science',
+  'english': 'English',
+  'nepali': 'Nepali',
+  'social studies': 'SocialStudies',
+  'social': 'SocialStudies',
+  'computer': 'Computer',
+  'hpe': 'HPE',
+  'opt. math': 'Opt.Math',
+  'opt math': 'Opt.Math',
+  'opt.math': 'Opt.Math',
+  'moral science': 'MoralScience',
+  'gk': 'GK',
+  'general knowledge': 'GK',
+  'drawing': 'Drawing',
+  'rhymes': 'Rhymes'
+};
+
+/**
+ * Returns the canonical subject key for a subject string.
+ * Strictly limited to the standard subject allowlist.
+ * Unknown subjects return empty string '' (no custom-subject fallback).
+ */
+export function getCanonicalSubjectKey(subject: string): string {
+  if (!subject || typeof subject !== 'string') return '';
+  const trimmed = subject.trim();
+  const lower = trimmed.toLowerCase();
+  if (CANONICAL_SUBJECT_KEY_MAP[lower]) {
+    return CANONICAL_SUBJECT_KEY_MAP[lower];
+  }
+  return '';
+}
+
+/**
+ * Generates an authoritative 4-dimensional assignment key:
+ * format: `${class}_${subjectKey}_${section}_${academicYear}`
+ * Returns empty string if any of the 4 dimensions are invalid/empty.
+ */
+export function generateAssignmentKey(
+  targetClass: string,
+  targetSubject: string,
+  targetSection: string = 'All',
+  targetAcademicYear: string
+): string {
+  const normClass = normalizeClass(targetClass || '').replace(/\s+/g, '');
+  const subjKey = getCanonicalSubjectKey(targetSubject || '');
+  const normSection = (targetSection && targetSection.trim()) ? targetSection.trim() : 'All';
+  const cleanSection = normSection.toLowerCase() === 'all' ? 'All' : normSection.toUpperCase();
+  const cleanYear = (targetAcademicYear || '').trim();
+
+  if (!normClass || !subjKey || !cleanSection || !cleanYear) {
+    return '';
+  }
+
+  return `${normClass}_${subjKey}_${cleanSection}_${cleanYear}`;
+}
+
+/**
+ * Derives pre-indexed authorization tokens from a teacher's teachingAssignments array.
+ * If section is 'All', generates both the '_All_' token and tokens for known active sections ('A', 'B', 'C').
+ * Fails closed (skips) for invalid or incomplete assignments.
+ */
+export function deriveTeacherAssignmentKeys(
+  assignments: TeachingAssignment[] = []
+): string[] {
+  const keys = new Set<string>();
+  if (!Array.isArray(assignments)) return [];
+
+  for (const a of assignments) {
+    if (!a || !a.class || !a.subject) continue;
+    const normClass = normalizeClass(a.class).replace(/\s+/g, '');
+    const subjKey = getCanonicalSubjectKey(a.subject);
+    const sec = (a.section && a.section.trim()) ? a.section.trim() : 'All';
+    const cleanSection = sec.toLowerCase() === 'all' ? 'All' : sec.toUpperCase();
+    const cleanYear = (a.academicYear || '').trim();
+
+    if (!normClass || !subjKey || !cleanYear) continue;
+
+    // Specific section token or All token
+    keys.add(`${normClass}_${subjKey}_${cleanSection}_${cleanYear}`);
+
+    // If section is All, expand to include common sections
+    if (cleanSection === 'All') {
+      keys.add(`${normClass}_${subjKey}_A_${cleanYear}`);
+      keys.add(`${normClass}_${subjKey}_B_${cleanYear}`);
+      keys.add(`${normClass}_${subjKey}_C_${cleanYear}`);
+    }
+  }
+
+  return Array.from(keys);
+}
+
 export const CLASS_SUBJECT_MAP: Record<string, string[]> = {
   'Play Group': ['English', 'Nepali', 'Mathematics', 'Drawing', 'Rhymes'],
   'PG': ['English', 'Nepali', 'Mathematics', 'Drawing', 'Rhymes'],
@@ -356,4 +454,92 @@ export function hasMatchingAssignment(
   targetAcademicYear?: string
 ): boolean {
   return assignments.some(a => matchesTeachingContext(a, targetClass, targetSubject, targetSection, targetAcademicYear));
+}
+/**
+ * Resolves the assigned subject teacher for each configured subject
+ * using exact class, subject, section and academic-year matching.
+ */
+export function resolveSubjectTeachersForClass(
+  targetClass: string,
+  subjects: string[],
+  teachers: any[],
+  targetSection: string = 'All',
+  targetAcademicYear: string = ''
+): Record<string, {
+  status: 'ASSIGNED' | 'UNASSIGNED';
+  teacherName?: string;
+}> {
+
+  const resolutions: Record<string, {
+    status: 'ASSIGNED' | 'UNASSIGNED';
+    teacherName?: string;
+  }> = {};
+
+  if (!Array.isArray(subjects)) {
+    return resolutions;
+  }
+
+  const teacherList = Array.isArray(teachers) ? teachers : [];
+
+  for (const subject of subjects) {
+
+    const matchingTeachers = teacherList.filter((teacher: any) => {
+
+      if (!teacher || !Array.isArray(teacher.teachingAssignments)) {
+        return false;
+      }
+
+      return teacher.teachingAssignments.some((assignment: any) => {
+
+        if (!assignment) return false;
+
+        const normalizedAssignment: TeachingAssignment = {
+          class: assignment.class || assignment.className || '',
+          subject: assignment.subject || assignment.subjectName || '',
+          section: assignment.section || 'All',
+          academicYear: assignment.academicYear || ''
+        };
+
+        return matchesTeachingContext(
+          normalizedAssignment,
+          targetClass,
+          subject,
+          targetSection,
+          targetAcademicYear
+        );
+
+      });
+
+    });
+
+    if (matchingTeachers.length === 0) {
+
+      resolutions[subject] = {
+        status: 'UNASSIGNED'
+      };
+
+      continue;
+    }
+
+    const teacherNames = Array.from(
+      new Set(
+        matchingTeachers.map((teacher: any) =>
+          teacher.name ||
+          teacher.fullName ||
+          teacher.displayName ||
+          teacher.email ||
+          teacher.id ||
+          'Unknown Teacher'
+        )
+      )
+    );
+
+    resolutions[subject] = {
+      status: 'ASSIGNED',
+      teacherName: teacherNames.join(', ')
+    };
+
+  }
+
+  return resolutions;
 }

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CreditCard, Wallet, TrendingUp, AlertTriangle, Users, BookOpen, Clock, LogOut, GraduationCap, ArrowDownRight, ArrowUpRight } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { formatBSDate, formatBSDateYMD } from '../lib/nepaliDate';
+import { useAuth } from '../contexts/AuthContext';
 
 import SimpleStudentLedgerTab from '../components/fee_management/SimpleStudentLedgerTab';
 import FeeStructure from './FeeStructure';
@@ -22,7 +22,7 @@ export default function AccountAdmin() {
   });
   const [ledgerFilterStatus, setLedgerFilterStatus] = useState('All');
   const [historySearchTerm, setHistorySearchTerm] = useState('');
-  const [userRole, setUserRole] = useState('admin');
+  const { user, userRole, isAuthenticated, loading: authLoading } = useAuth();
   const [targetStudentId, setTargetStudentId] = useState<string | undefined>(() => {
     return searchParams.get('studentId') || undefined;
   });
@@ -64,8 +64,7 @@ export default function AccountAdmin() {
   const fetchFeeData = () => { /* No-op, updates automatically */ };
 
   useEffect(() => {
-     const role = localStorage.getItem('userRole') || 'teacher';
-     setUserRole(role);
+     if (authLoading) return;
 
      let unsubSettings: any;
      let unsubStudents: any;
@@ -74,14 +73,7 @@ export default function AccountAdmin() {
      let unsubCash: any;
      let unsubRemitBills: any;
 
-     const unsubAuth = onAuthStateChanged(auth, (user) => {
-         if (unsubSettings) unsubSettings();
-         if (unsubStudents) unsubStudents();
-         if (unsubTx) unsubTx();
-         if (unsubFees) unsubFees();
-         if (unsubCash) unsubCash();
-         if (unsubRemitBills) unsubRemitBills();
-         if (user) {
+     if (isAuthenticated && user && userRole === 'admin') {
              setLoading(true);
              
              let currentStructs: any[] = [];
@@ -264,19 +256,16 @@ export default function AccountAdmin() {
                  currentRemitBills = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                  updateData();
              }, (err) => { console.error('Error fetching remitBills:', err); });
-         } else {
+     } else {
+             setStudentsData([]);
+             setTransactionsData([]);
+             setCashEntriesData([]);
+             setFeeStructures([]);
+             setRemitBillsData([]);
              setLoading(false);
-             if (unsubSettings) unsubSettings();
-             if (unsubStudents) unsubStudents();
-             if (unsubTx) unsubTx();
-             if (unsubFees) unsubFees();
-             if (unsubCash) unsubCash();
-             if (unsubRemitBills) unsubRemitBills();
-         }
-     });
+     }
 
      return () => {
-         unsubAuth();
          if (unsubSettings) unsubSettings();
          if (unsubStudents) unsubStudents();
          if (unsubTx) unsubTx();
@@ -284,7 +273,7 @@ export default function AccountAdmin() {
          if (unsubCash) unsubCash();
          if (unsubRemitBills) unsubRemitBills();
      };
-  }, []);
+  }, [user, userRole, isAuthenticated, authLoading]);
 
   const ALL_TABS = [
      { id: 'fee_structure', label: 'Fee Structure & Scholarships', roles: ['admin'] },

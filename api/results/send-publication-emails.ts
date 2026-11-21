@@ -1,18 +1,17 @@
 import nodemailer from 'nodemailer';
-
-const firebaseConfig = {
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || "project-4b410c97-a152-49e7-940",
-  apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || "AIzaSyAGMCbz3zfJMrpgTruOH314BsNuSpyNPB4",
-  firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || "ai-studio-2507c181-4e37-4730-b71a-25b639c27e22"
-};
+import {
+  applyCorsAndSecurityHeaders,
+  verifyVercelCaller,
+  getVercelAdminDb,
+  getSmtpTransportConfig,
+  resolveResultNotificationRecipientEmail
+} from '../_lib/auth';
 
 export default async function handler(req: any, res: any) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  applyCorsAndSecurityHeaders(req, res, 'POST, OPTIONS');
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
   }
 
   if (req.method !== 'POST') {
@@ -20,26 +19,10 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const authHeader = req.headers.authorization || '';
-    if (!authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing or malformed Authorization header' });
-    }
-
-    const token = authHeader.split('Bearer ')[1]?.trim();
-    if (!token) {
-      return res.status(401).json({ error: 'Empty token' });
-    }
-
-    // Verify token with Firebase REST API
-    const verifyUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`;
-    const verifyRes = await fetch(verifyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken: token })
-    });
-
-    if (!verifyRes.ok) {
-      return res.status(401).json({ error: 'Invalid or expired auth token' });
+    const caller = await verifyVercelCaller(req, res);
+    if (!caller) return;
+    if (caller.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Administrative privileges required.' });
     }
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
@@ -49,86 +32,128 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Missing required parameters (examId, examType, className, students array).' });
     }
 
-    const smtpUser = process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.VITE_SMTP_EMAIL || 'security.shikshantar.edu.np@gmail.com';
-    const smtpPass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS || process.env.VITE_SMTP_PASSWORD;
-    const hasRealSmtp = Boolean(smtpUser && smtpPass && smtpUser !== 'school@gmail.com');
+    const db = getVercelAdminDb();
+    const examSnap = await db.collection('exams').doc(String(examId)).get();
+    if (!examSnap.exists) {
+      return res.status(404).json({ error: 'Examination record not found.' });
+    }
+    const examData = examSnap.data() || {};
+    if (examData.published !== true && examData.status !== 'PUBLISHED') {
+      return res.status(400).json({ error: 'Publication notifications can only be sent after the examination is officially published.' });
+    }
 
-    let transporter: any = null;
-    if (hasRealSmtp) {
-      transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: smtpUser, pass: smtpPass }
+    const smtpConfig = getSmtpTransportConfig();
+
+    if (!smtpConfig.configured || !smtpConfig.transportOptions) {
+      return res.status(503).json({
+        success: false,
+        error: 'Email delivery service (SMTP) is not configured on the server.',
+        code: 'SMTP_NOT_CONFIGURED'
       });
     }
 
+    const transporter = nodemailer.createTransport(smtpConfig.transportOptions as any);
+
     let sentCount = 0;
     let skippedCount = 0;
+    let failedCount = 0;
     const resultsSummary: any[] = [];
 
     for (const std of students) {
-      const studentEmail = (std.email || '').trim();
-      const studentName = std.name || 'Student';
-      const studentIdentifier = std.studentId || std.studentUid || studentEmail;
+      const studentName = String(std?.name || std?.studentName || 'Student').trim();
+      const guardianName = String(std?.guardianName || 'Parent / Guardian').trim();
+      const studentUid = String(std?.studentUid || '').trim();
+      const studentIdentifier = String(std?.studentId || studentUid || '').trim();
 
-      if (!studentEmail || !studentEmail.includes('@')) {
+      let mergedEmailLookup: Record<string, any> = {
+        guardianEmail: std?.guardianEmail || '',
+        parentEmail: std?.parentEmail || '',
+        fatherEmail: std?.fatherEmail || '',
+        motherEmail: std?.motherEmail || '',
+        registeredEmail: std?.registeredEmail || '',
+        email: std?.email || ''
+      };
+
+      let resolved = resolveResultNotificationRecipientEmail(mergedEmailLookup);
+      if (!resolved.email && studentUid) {
+        try {
+          const userSnap = await db.collection('users').doc(studentUid).get();
+          if (userSnap.exists) {
+            mergedEmailLookup = { ...(userSnap.data() || {}), ...mergedEmailLookup };
+            resolved = resolveResultNotificationRecipientEmail(mergedEmailLookup);
+          }
+        } catch (_) {}
+      }
+
+      const targetEmail = resolved.email;
+      const recipientSource = resolved.source;
+
+      if (!targetEmail) {
         skippedCount++;
-        resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'SKIPPED_NO_EMAIL' });
+        resultsSummary.push({ studentId: studentIdentifier, email: '', status: 'SKIPPED_NO_RECIPIENT_EMAIL' });
         continue;
       }
 
-      const subject = `Result Published — Shikshantar Academy (${examType})`;
-      const htmlBody = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-          <div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 20px;">
-            <h2 style="color: #1e3a8a; margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">SHIKSHANTAR ACADEMY</h2>
-            <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Bastipur, Karjanha-05, Siraha, Nepal</p>
-          </div>
+      const idempotencyKey = `${examId}_${studentIdentifier || targetEmail}_${targetEmail}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const uidDispatchKey = studentUid
+        ? `${examId}_${studentUid}_${targetEmail}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+        : '';
+      const dispatchDoc = await db.collection('publication_email_dispatches').doc(idempotencyKey).get();
+      const uidDispatchDoc = (uidDispatchKey && uidDispatchKey !== idempotencyKey)
+        ? await db.collection('publication_email_dispatches').doc(uidDispatchKey).get()
+        : null;
+      if (dispatchDoc.exists || uidDispatchDoc?.exists) {
+        skippedCount++;
+        resultsSummary.push({ studentId: studentIdentifier, email: targetEmail, source: recipientSource, status: 'SKIPPED_ALREADY_SENT' });
+        continue;
+      }
 
-          <p style="font-size: 15px; color: #1e293b; line-height: 1.6;">Dear <strong>${studentName}</strong>,</p>
-          <p style="font-size: 14px; color: #334155; line-height: 1.6;">Your <strong>${examType}</strong> result for <strong>Class ${className}</strong> has been officially published by Shikshantar Academy.</p>
-
-          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 20px 0;">
-            <p style="margin: 0 0 6px 0; font-size: 13px; color: #475569;"><strong>Academic Session:</strong> ${academicYear || 'Current Session'}</p>
-            <p style="margin: 0; font-size: 13px; color: #475569;"><strong>Class / Level:</strong> Class ${className}</p>
-          </div>
-
-          <p style="font-size: 14px; color: #334155; line-height: 1.6;">You can now log in to the Shikshantar Academy online portal to view your complete mark breakdown and download your official report card.</p>
-
-          <div style="margin: 28px 0; text-align: center;">
-            <a href="https://www.shikshantaracademy.edu.np/results" style="background: #2563eb; color: #ffffff; padding: 12px 28px; font-weight: 700; font-size: 14px; text-decoration: none; border-radius: 8px; display: inline-block;">View Official Result</a>
-          </div>
-
-          <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 28px; color: #64748b; font-size: 12px; line-height: 1.5;">
-            <p style="margin: 0;">Regards,<br><strong>Examination Committee</strong><br>Shikshantar Academy<br>Email: academyshikshantar@gmail.com</p>
-          </div>
-        </div>
-      `;
+      const portalLink = `${process.env.APP_URL || 'https://shikshantaracademy.edu.np'}/result`;
+      const greetingName = recipientSource === 'student' ? studentName : guardianName;
+      const subject = `Academic Result Published: ${studentName} — Shikshantar Academy`;
+      const htmlBody = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;"><div style="text-align:center;border-bottom:2px solid #3b82f6;padding-bottom:16px;margin-bottom:20px;"><h2 style="color:#1e3a8a;margin:0;font-size:22px;font-weight:800;">SHIKSHANTAR ACADEMY</h2><p style="color:#64748b;font-size:13px;margin:4px 0 0 0;">Bastipur, Karjanha-05, Siraha, Nepal</p></div><p style="font-size:15px;color:#1e293b;">Dear <strong>${greetingName}</strong>,</p><p style="font-size:14px;color:#334155;">The official <strong>${examType}</strong> academic results for <strong>${studentName}</strong> (Class ${className}, Session ${academicYear || 'Current Session'}) have been officially published.</p><div style="margin:28px 0;text-align:center;"><a href="${portalLink}" style="background:#1e40af;color:#ffffff;padding:12px 28px;font-weight:700;font-size:14px;text-decoration:none;border-radius:8px;display:inline-block;">View Official Result</a></div></div>`;
 
       try {
-        if (hasRealSmtp && transporter) {
-          await transporter.sendMail({
-            from: `"Shikshantar Academy Examination" <${smtpUser}>`,
-            to: studentEmail,
-            replyTo: 'academyshikshantar@gmail.com',
-            subject,
-            html: htmlBody
-          });
-          sentCount++;
-          resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'DELIVERED' });
-        } else {
-          sentCount++;
-          resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'SIMULATED' });
+        await transporter.sendMail({
+          from: `"Shikshantar Academy Results" <${smtpConfig.fromResults}>`,
+          to: targetEmail,
+          replyTo: smtpConfig.fromResults,
+          subject,
+          html: htmlBody
+        });
+        sentCount++;
+        resultsSummary.push({ studentId: studentIdentifier, email: targetEmail, source: recipientSource, status: 'DELIVERED' });
+        const dispatchPayload = {
+          examId,
+          studentUid: studentUid || '',
+          studentIdentifier,
+          recipientEmail: targetEmail,
+          recipientSource,
+          guardianEmail: recipientSource === 'guardian' ? targetEmail : (mergedEmailLookup.guardianEmail || ''),
+          guardianName,
+          studentName,
+          className,
+          academicYear: academicYear || '',
+          dispatchedByUid: caller.uid,
+          sentAt: new Date().toISOString()
+        };
+        await db.collection('publication_email_dispatches').doc(idempotencyKey).set(dispatchPayload);
+        if (uidDispatchKey && uidDispatchKey !== idempotencyKey) {
+          await db.collection('publication_email_dispatches').doc(uidDispatchKey).set(dispatchPayload);
         }
       } catch (sendErr: any) {
-        resultsSummary.push({ studentId: studentIdentifier, email: studentEmail, status: 'FAILED', error: sendErr.message });
+        failedCount++;
+        resultsSummary.push({ studentId: studentIdentifier, email: targetEmail, status: 'FAILED', error: sendErr.message });
       }
     }
 
     return res.status(200).json({
       success: true,
-      sentCount,
+      examId,
+      totalSent: sentCount,
       skippedCount,
-      summary: resultsSummary
+      failedCount,
+      results: resultsSummary
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Internal server error' });

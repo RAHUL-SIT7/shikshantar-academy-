@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { formatBSDate, getBSYearMonthDate } from '../lib/nepaliDate';
-import { Menu, X, Home, Building, Image, Calendar, User, FileText, LogOut, LogIn, Info, Settings, Upload, CreditCard, Shield, Bell, Megaphone, Check, Users, MapPin, Phone, HelpCircle, GraduationCap, Award, Wallet, Sun, Moon, ChevronUp, Facebook, Globe, Mail, SmilePlus, LayoutDashboard } from 'lucide-react';
+import { Menu, X, Home, Building, Image, Calendar, User, FileText, LogOut, LogIn, Info, Settings, Upload, CreditCard, Shield, Bell, Megaphone, Check, Users, MapPin, Phone, HelpCircle, GraduationCap, Award, Wallet, Sun, Moon, ChevronUp, Facebook, Globe, Mail, SmilePlus, LayoutDashboard, CheckCheck, AlertCircle, Clock, ExternalLink } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { useNotices } from '../contexts/NoticeContext';
-import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, where, updateDoc, doc, getDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { useAuth } from '../contexts/AuthContext';
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, onSnapshot, query, orderBy, where, updateDoc, doc, getDoc, writeBatch, arrayUnion } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import WhatsAppWidget from './WhatsAppWidget';
 import CalculatorWidget from './CalculatorWidget';
@@ -37,15 +38,36 @@ interface Notice {
   isAdmission?: boolean;
 }
 
-export default function Layout({ 
-  isAuthenticated, 
-  setIsAuthenticated, 
-  userRole 
-}: { 
-  isAuthenticated: boolean, 
-  setIsAuthenticated: (val: boolean) => void,
-  userRole: string
+export interface PrivateNotification {
+  id: string;
+  recipientUid: string;
+  recipientRole?: string;
+  type: string;
+  title: string;
+  message: string;
+  link?: string;
+  read: boolean;
+  createdAt?: any;
+  readAt?: string;
+  academicYearId?: string;
+  examId?: string;
+  classId?: string;
+  sectionId?: string;
+  subjectKey?: string;
+  eventId?: string;
+  metadata?: any;
+}
+
+export default function Layout({
+  isAuthenticated,
+  setIsAuthenticated: _setIsAuthenticated,
+  userRole
+}: {
+  isAuthenticated: boolean;
+  setIsAuthenticated?: (val: boolean) => void;
+  userRole: string;
 }) {
+  const { logout } = useAuth();
   const [themeMode, setThemeMode] = useState<string>(() => localStorage.getItem('themeMode') || 'light');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebarCollapsed') === 'true');
   
@@ -148,7 +170,73 @@ export default function Layout({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isBellOpen, setIsBellOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [activeBellTab, setActiveBellTab] = useState<'personal' | 'notices'>('personal');
+  const [privateNotifications, setPrivateNotifications] = useState<PrivateNotification[]>([]);
+  const [loadingPrivateNotifs, setLoadingPrivateNotifs] = useState(false);
+  const [privateNotifsError, setPrivateNotifsError] = useState<string | null>(null);
+  const [liveToastNotif, setLiveToastNotif] = useState<PrivateNotification | null>(null);
+  const [notifPermission, setNotifPermission] = useState<'default' | 'granted' | 'denied' | 'unsupported'>(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+    return Notification.permission;
+  });
+  const seenPrivateNotifIdsRef = React.useRef<Set<string>>(new Set());
+  const initialPrivateNotifLoadedRef = React.useRef<boolean>(false);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const dispatchAppNotification = React.useCallback((item: PrivateNotification) => {
+    if (typeof window === 'undefined') return;
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setLiveToastNotif(item);
+    toastTimerRef.current = setTimeout(() => {
+      setLiveToastNotif(null);
+    }, 8500);
+
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const notifTitle = item.title || 'Shikshantar Academy Notification';
+    const notifOptions: NotificationOptions = {
+      body: item.message || 'Open portal to view details.',
+      icon: '/logo.png',
+      badge: '/logo.png',
+      tag: item.id,
+      data: { link: item.link || '/admin?tab=prep' }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready
+        .then((registration) => {
+          if (registration && typeof registration.showNotification === 'function') {
+            return registration.showNotification(notifTitle, notifOptions);
+          }
+          new Notification(notifTitle, notifOptions);
+          return undefined;
+        })
+        .catch(() => {
+          try {
+            new Notification(notifTitle, notifOptions);
+          } catch (_) {}
+        });
+    } else {
+      try {
+        new Notification(notifTitle, notifOptions);
+      } catch (_) {}
+    }
+  }, []);
+
+  const requestAppNotificationPermission = React.useCallback(async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotifPermission('unsupported');
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      setNotifPermission(result);
+    } catch {
+      setNotifPermission(Notification.permission);
+    }
+  }, []);
 
   const {
     notices: recentNotices,
@@ -383,11 +471,13 @@ export default function Layout({
     let unsubAdmissions = () => {};
     let unsubEnquiries = () => {};
     let unsubAlumni = () => {};
+    let unsubNotifications = () => {};
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       unsubAdmissions();
       unsubEnquiries();
       unsubAlumni();
+      unsubNotifications();
       
       if (user) {
          try {
@@ -406,11 +496,94 @@ export default function Layout({
              }
            }).catch(e => console.warn(e));
          } catch (e) { console.warn(e); }
+
+         // Real-time private notifications listener strictly scoped to authenticated recipient UID
+         seenPrivateNotifIdsRef.current = new Set();
+         initialPrivateNotifLoadedRef.current = false;
+         setLoadingPrivateNotifs(true);
+         setPrivateNotifsError(null);
+         const qNotifs = query(
+           collection(db, 'notifications'),
+           where('recipientUid', '==', user.uid)
+         );
+         unsubNotifications = onSnapshot(
+           qNotifs,
+           (snap) => {
+             const items: PrivateNotification[] = snap.docs.map((docSnap) => {
+               const d = docSnap.data();
+               return {
+                 id: docSnap.id,
+                 recipientUid: d.recipientUid,
+                 recipientRole: d.recipientRole,
+                 type: d.type || 'NOTIFICATION',
+                 title: d.title || 'Notification',
+                 message: d.message || '',
+                 link: d.link || '',
+                 read: d.read === true,
+                 createdAt: d.createdAt,
+                 readAt: d.readAt,
+                 academicYearId: d.academicYearId,
+                 examId: d.examId,
+                 classId: d.classId,
+                 sectionId: d.sectionId,
+                 subjectKey: d.subjectKey,
+                 eventId: d.eventId,
+                 metadata: d.metadata
+               };
+             });
+
+             // Sort client-side by createdAt descending (supports Firestore Timestamp, ISO strings, numbers)
+             items.sort((a, b) => {
+               const getMs = (val: any) => {
+                 if (!val) return 0;
+                 if (typeof val === 'number') return val;
+                 if (typeof val === 'string') {
+                   const parsed = new Date(val).getTime();
+                   return isNaN(parsed) ? 0 : parsed;
+                 }
+                 if (typeof val.toMillis === 'function') return val.toMillis();
+                 if (typeof val.toDate === 'function') return val.toDate().getTime();
+                 if (typeof val.seconds === 'number') return val.seconds * 1000;
+                 return 0;
+               };
+               return getMs(b.createdAt) - getMs(a.createdAt);
+             });
+
+             if (!initialPrivateNotifLoadedRef.current) {
+               items.forEach((item) => seenPrivateNotifIdsRef.current.add(item.id));
+               initialPrivateNotifLoadedRef.current = true;
+             } else {
+               const newlyArrived = items.filter(
+                 (item) => !item.read && !seenPrivateNotifIdsRef.current.has(item.id)
+               );
+               items.forEach((item) => seenPrivateNotifIdsRef.current.add(item.id));
+               if (newlyArrived.length > 0) {
+                 dispatchAppNotification(newlyArrived[0]);
+               }
+             }
+
+             setPrivateNotifications(items);
+             setLoadingPrivateNotifs(false);
+             setPrivateNotifsError(null);
+           },
+           (err: any) => {
+             console.warn('[NOTIFICATIONS] Listener error:', err);
+             setPrivateNotifsError('Unable to load private notifications');
+             setLoadingPrivateNotifs(false);
+           }
+         );
       } else {
          setAvatarUrl(null);
          setUserName(null);
          setStudentClassState('');
          localStorage.removeItem('studentClass');
+         seenPrivateNotifIdsRef.current = new Set();
+         initialPrivateNotifLoadedRef.current = false;
+         setLiveToastNotif(null);
+         setPrivateNotifications([]);
+         setLoadingPrivateNotifs(false);
+         setPrivateNotifsError(null);
+         setActiveBellTab('notices');
       }
 
       const isAdmin = user && role === 'admin';
@@ -450,6 +623,7 @@ export default function Layout({
       unsubAdmissions(); 
       unsubEnquiries();
       unsubAlumni();
+      unsubNotifications();
       unsubAuth(); 
     };
   }, [role, studentClassState]);
@@ -548,37 +722,11 @@ export default function Layout({
 
   const handleLogout = async () => {
     try {
-      if (auth.currentUser) {
-        const localSessionId = localStorage.getItem('localSessionId');
-        if (localSessionId) {
-          // Remove this device's active session token from Firestore
-          await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-            activeSessions: arrayRemove(localSessionId)
-          }).catch(() => {});
-        }
-      }
-    } catch (e) {
-      console.warn("Logout session cleanup error:", e);
-    }
-
-    try {
-      await signOut(auth);
+      await logout();
+      sessionStorage.clear();
     } catch (err) {
       console.error("Sign out error:", err);
     }
-
-    setIsAuthenticated(false);
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('studentId');
-    localStorage.removeItem('studentClass');
-    localStorage.removeItem('adminSearchStudentId');
-    localStorage.removeItem('isGuest');
-    localStorage.removeItem('teacherSubjects');
-    localStorage.removeItem('lastUserUid');
-    localStorage.removeItem('localSessionId');
-    localStorage.removeItem('shikshantar_last_activity');
-    sessionStorage.clear();
-    
     navigate('/login?reason=manual');
   };
 
@@ -640,9 +788,145 @@ export default function Layout({
   const unreadEnquiriesCount = pendingEnquiries.filter(e => (!e.readBy || !e.readBy.includes(currentUid)) && !localReads.includes(e.id)).length;
   const unreadAlumniCount = pendingAlumniSubmissions.filter(al => (!al.readBy || !al.readBy.includes(currentUid)) && !localReads.includes(al.id)).length;
 
-  const unreadUrgentCount = (role === 'admin') 
+  // Safe internal navigation allowlist and normalization
+  const SAFE_INTERNAL_PREFIXES = [
+    '/',
+    '/result',
+    '/account',
+    '/teacher-salary',
+    '/admin',
+    '/admin-admissions',
+    '/user-approvals',
+    '/profile',
+    '/settings',
+    '/calendar',
+    '/notices',
+    '/fee-structure',
+    '/admission',
+    '/facilities',
+    '/gallery',
+    '/alumni',
+    '/about',
+    '/contact',
+    '/faq',
+    '/iemis'
+  ];
+
+  const sanitizeAndValidateLink = (rawLink?: string): string | null => {
+    if (!rawLink || typeof rawLink !== 'string') return null;
+    let trimmed = rawLink.trim();
+    if (!trimmed.startsWith('/')) return null;
+
+    // Normalize legacy /results to /result
+    if (trimmed === '/results' || trimmed.startsWith('/results?') || trimmed.startsWith('/results/')) {
+      trimmed = trimmed.replace(/^\/results/, '/result');
+    }
+
+    const [path] = trimmed.split('?');
+    if (SAFE_INTERNAL_PREFIXES.includes(path)) {
+      return trimmed;
+    }
+    return null;
+  };
+
+  const getNotificationIcon = (type: string) => {
+    const t = (type || '').toUpperCase();
+    if (t === 'RESULT_PUBLISHED') {
+      return <GraduationCap className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />;
+    }
+    if (t.includes('MARKS') || t.includes('SUBMISSION') || t.includes('REVIEW')) {
+      return <Upload className="w-4 h-4 text-blue-600 dark:text-blue-400" />;
+    }
+    if (t.includes('FEE') || t.includes('BILL') || t.includes('PAYMENT')) {
+      return <CreditCard className="w-4 h-4 text-amber-600 dark:text-amber-400" />;
+    }
+    if (t.includes('SALARY')) {
+      return <Wallet className="w-4 h-4 text-purple-600 dark:text-purple-400" />;
+    }
+    return <Bell className="w-4 h-4 text-blue-600 dark:text-blue-400" />;
+  };
+
+  const formatNotificationTime = (createdAt: any) => {
+    if (!createdAt) return '';
+    try {
+      let dateObj: Date;
+      if (typeof createdAt === 'string') dateObj = new Date(createdAt);
+      else if (typeof createdAt === 'number') dateObj = new Date(createdAt);
+      else if (typeof createdAt.toDate === 'function') dateObj = createdAt.toDate();
+      else if (typeof createdAt.seconds === 'number') dateObj = new Date(createdAt.seconds * 1000);
+      else dateObj = new Date();
+
+      const diffMs = Date.now() - dateObj.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  };
+
+  const unreadPrivateCount = privateNotifications.filter(n => !n.read).length;
+  const unreadUrgentCount = unreadPrivateCount + ((role === 'admin') 
     ? unreadNoticesCount + unreadAdmissionsCount + unreadEnquiriesCount + unreadAlumniCount 
-    : unreadNoticesCount;
+    : unreadNoticesCount);
+  const unreadCurrentTabCount = activeBellTab === 'personal' ? unreadPrivateCount : (
+    (role === 'admin') 
+      ? unreadNoticesCount + unreadAdmissionsCount + unreadEnquiriesCount + unreadAlumniCount 
+      : unreadNoticesCount
+  );
+
+  const markPrivateNotificationRead = async (notifId: string, rawLink?: string) => {
+    setIsBellOpen(false);
+    const target = privateNotifications.find(n => n.id === notifId);
+    if (target && !target.read && auth.currentUser) {
+      try {
+        await updateDoc(doc(db, 'notifications', notifId), {
+          read: true,
+          readAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn('Failed to mark private notification as read:', err);
+      }
+    }
+
+    const safeLink = sanitizeAndValidateLink(rawLink);
+    if (safeLink) {
+      navigate(safeLink);
+    } else if (role === 'student') {
+      navigate('/result');
+    } else if (role === 'teacher' || role === 'admin') {
+      navigate('/admin');
+    }
+  };
+
+  const markAllPrivateNotificationsRead = async () => {
+    const unreadItems = privateNotifications.filter(n => !n.read);
+    if (unreadItems.length === 0 || !auth.currentUser) return;
+
+    const nowIso = new Date().toISOString();
+    const CHUNK_SIZE = 450;
+    for (let i = 0; i < unreadItems.length; i += CHUNK_SIZE) {
+      const chunk = unreadItems.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        batch.update(doc(db, 'notifications', item.id), {
+          read: true,
+          readAt: nowIso
+        });
+      }
+      try {
+        await batch.commit();
+      } catch (err) {
+        console.error('Failed to mark batch of notifications read:', err);
+      }
+    }
+  };
 
   const markAsRead = async (
     noticeId: string, 
@@ -752,12 +1036,21 @@ export default function Layout({
     setLocalReads([...newReads]);
     localStorage.setItem('localReadNotices', JSON.stringify(newReads));
     safeDispatchEvent('localReadsChanged');
-    setIsBellOpen(false); // Always close the dropdown immediately
+    setIsBellOpen(false);
 
     if (updates.length > 0) {
       Promise.all(updates).catch(err => {
         console.warn("Error marking all as read:", err);
       });
+    }
+  };
+
+  const handleMarkAllRead = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (activeBellTab === 'personal') {
+      await markAllPrivateNotificationsRead();
+    } else {
+      markAllAsRead();
     }
   };
 
@@ -780,12 +1073,9 @@ export default function Layout({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {unreadUrgentCount > 0 && (
+          {unreadCurrentTabCount > 0 && (
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                markAllAsRead();
-              }}
+              onClick={handleMarkAllRead}
               className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer mr-1"
             >
               Mark all read
@@ -802,89 +1092,250 @@ export default function Layout({
         </div>
       </div>
 
-      {/* Notice Items List */}
-      <div className="max-h-[340px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 custom-scrollbar">
-        {recentNotices.length > 0 ? (
-          recentNotices.map((notice) => {
-            const isRead = (notice.readBy && notice.readBy.includes(currentUid)) || localReads.includes(notice.id);
-            const isUrgent = (notice.priority || '').toUpperCase() === 'URGENT';
-            const isHigh = (notice.priority || '').toUpperCase() === 'HIGH';
-
-            return (
-              <div
-                key={notice.id}
-                onClick={(e) => {
-                  markAsRead(notice.id, 'notice', e, false);
-                  setIsBellOpen(false);
-                  navigate('/notices');
-                }}
-                className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group text-left ${
-                  !isRead ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
-                    isUrgent 
-                      ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300' 
-                      : isHigh
-                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                      : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-                  }`}>
-                    {notice.priority ? notice.priority.toUpperCase() : 'NORMAL'}
-                  </span>
-                  {!isRead && (
-                    <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
-                  )}
-                </div>
-                <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                  {notice.title}
-                </div>
-                {notice.date && (
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium mt-1">
-                    {notice.date.split('T')[0]}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        ) : (
-          <div className="p-8 text-center text-slate-400 dark:text-slate-500">
-            <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-xs font-semibold">No notifications right now</p>
-          </div>
-        )}
-
-        {/* Admin Pending Items */}
-        {role === 'admin' && pendingAdmissions.map((adm) => (
-          <div
-            key={adm.id}
+      {/* Tabs Header for Authenticated Users */}
+      {isAuthenticated && (
+        <div className="flex border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 p-1 gap-1">
+          <button
             onClick={(e) => {
-              markAsRead(adm.id, 'admission', e, false);
-              setIsBellOpen(false);
-              navigate('/admin-admissions');
+              e.stopPropagation();
+              setActiveBellTab('personal');
             }}
-            className="p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group bg-emerald-50/30 dark:bg-emerald-950/20 text-left"
+            className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeBellTab === 'personal'
+                ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
           >
-            <span className="inline-block px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 mb-1">
-              ADMISSION
-            </span>
-            <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-emerald-600 transition-colors">
-              New Admission: {adm.studentName || `${adm.studentFirstName || ''} ${adm.studentLastName || ''}`.trim() || 'Student Application'}
-            </div>
-          </div>
-        ))}
-      </div>
+            <Bell className="w-3.5 h-3.5" />
+            <span>Personal Alerts</span>
+            {unreadPrivateCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-blue-600 text-white">
+                {unreadPrivateCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveBellTab('notices');
+            }}
+            className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeBellTab === 'notices'
+                ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <Megaphone className="w-3.5 h-3.5" />
+            <span>Notice Board</span>
+            {unreadNoticesCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-500 text-white">
+                {unreadNoticesCount}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
-      {/* Footer Link */}
-      <button
-        onClick={() => {
-          setIsBellOpen(false);
-          navigate('/notices');
-        }}
-        className="py-3 px-4 text-center font-bold text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors border-t border-slate-100 dark:border-slate-800 block w-full cursor-pointer"
-      >
-        Open Notice Board
-      </button>
+      {/* Content Area */}
+      {(!isAuthenticated || activeBellTab === 'notices') ? (
+        /* --- NOTICE BOARD TAB CONTENT --- */
+        <>
+          <div className="max-h-[340px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 custom-scrollbar">
+            {recentNotices.length > 0 ? (
+              recentNotices.map((notice) => {
+                const isRead = (notice.readBy && notice.readBy.includes(currentUid)) || localReads.includes(notice.id);
+                const isUrgent = (notice.priority || '').toUpperCase() === 'URGENT';
+                const isHigh = (notice.priority || '').toUpperCase() === 'HIGH';
+
+                return (
+                  <div
+                    key={notice.id}
+                    onClick={(e) => {
+                      markAsRead(notice.id, 'notice', e, false);
+                      setIsBellOpen(false);
+                      navigate('/notices');
+                    }}
+                    className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group text-left ${
+                      !isRead ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
+                        isUrgent 
+                          ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300' 
+                          : isHigh
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                      }`}>
+                        {notice.priority ? notice.priority.toUpperCase() : 'NORMAL'}
+                      </span>
+                      {!isRead && (
+                        <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                      )}
+                    </div>
+                    <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {notice.title}
+                    </div>
+                    {notice.date && (
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium mt-1">
+                        {notice.date.split('T')[0]}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-8 text-center text-slate-400 dark:text-slate-500">
+                <Megaphone className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                <p className="text-xs font-semibold">No notices right now</p>
+              </div>
+            )}
+
+            {/* Admin Pending Items */}
+            {role === 'admin' && pendingAdmissions.map((adm) => (
+              <div
+                key={adm.id}
+                onClick={(e) => {
+                  markAsRead(adm.id, 'admission', e, false);
+                  setIsBellOpen(false);
+                  navigate('/admin-admissions');
+                }}
+                className="p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group bg-emerald-50/30 dark:bg-emerald-950/20 text-left"
+              >
+                <span className="inline-block px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 mb-1">
+                  ADMISSION
+                </span>
+                <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-emerald-600 transition-colors">
+                  New Admission: {adm.studentName || `${adm.studentFirstName || ''} ${adm.studentLastName || ''}`.trim() || 'Student Application'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Notice Board Footer */}
+          <button
+            onClick={() => {
+              setIsBellOpen(false);
+              navigate('/notices');
+            }}
+            className="py-3 px-4 text-center font-bold text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors border-t border-slate-100 dark:border-slate-800 block w-full cursor-pointer"
+          >
+            Open Notice Board
+          </button>
+        </>
+      ) : (
+        /* --- PERSONAL ALERTS TAB CONTENT --- */
+        <>
+          {notifPermission === 'default' && (
+            <div className="px-3.5 py-2 bg-blue-50/90 dark:bg-blue-950/40 border-b border-blue-100 dark:border-blue-900/50 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-blue-800 dark:text-blue-200">
+                Get instant alerts on your device / installed app
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestAppNotificationPermission();
+                }}
+                className="px-2.5 py-1 rounded-md text-[10px] font-extrabold bg-blue-600 hover:bg-blue-700 text-white shrink-0 cursor-pointer"
+              >
+                Enable App Alerts
+              </button>
+            </div>
+          )}
+          <div className="max-h-[340px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 custom-scrollbar">
+            {loadingPrivateNotifs ? (
+              <div className="p-8 text-center text-slate-400 dark:text-slate-500">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                <p className="text-xs font-semibold">Loading notifications...</p>
+              </div>
+            ) : privateNotifsError ? (
+              <div className="p-6 text-center text-red-500">
+                <AlertCircle className="w-6 h-6 mx-auto mb-1 opacity-80" />
+                <p className="text-xs font-semibold">{privateNotifsError}</p>
+              </div>
+            ) : privateNotifications.length > 0 ? (
+              privateNotifications.map((notif) => (
+                <div
+                  key={notif.id}
+                  onClick={() => markPrivateNotificationRead(notif.id, notif.link)}
+                  className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group text-left ${
+                    !notif.read ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 shrink-0 mt-0.5">
+                      {getNotificationIcon(notif.type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-primary truncate">
+                          {(notif.type || 'ALERT').replace(/_/g, ' ')}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {formatNotificationTime(notif.createdAt) && (
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                              {formatNotificationTime(notif.createdAt)}
+                            </span>
+                          )}
+                          {!notif.read && (
+                            <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" title="Unread" />
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        {notif.title}
+                      </div>
+                      {notif.message && (
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                          {notif.message}
+                        </div>
+                      )}
+                      {(notif.classId || notif.sectionId || notif.academicYearId) && (
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          {notif.classId && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              Class {notif.classId}
+                            </span>
+                          )}
+                          {notif.sectionId && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              Sec {notif.sectionId}
+                            </span>
+                          )}
+                          {notif.academicYearId && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              BS {notif.academicYearId}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-8 text-center text-slate-400 dark:text-slate-500">
+                <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                <p className="text-xs font-semibold">No personal alerts right now</p>
+                <p className="text-[10px] text-slate-400 mt-1">Published exam results and private alerts will appear here</p>
+              </div>
+            )}
+          </div>
+
+          {/* Personal Alerts Footer */}
+          <button
+            onClick={() => {
+              setIsBellOpen(false);
+              if (role === 'student') navigate('/result');
+              else navigate('/admin');
+            }}
+            className="py-3 px-4 text-center font-bold text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors border-t border-slate-100 dark:border-slate-800 block w-full cursor-pointer"
+          >
+            {role === 'student' ? 'View My Results' : 'Open Portal'}
+          </button>
+        </>
+      )}
     </div>
   );
 
@@ -1145,7 +1596,7 @@ export default function Layout({
                 alt="Shikshantar Academy Logo" 
                 referrerPolicy="no-referrer" 
                 className="w-full h-full object-contain rounded-full" 
-                fetchPriority="high"
+                loading="eager"
                 onError={(e) => {
                   const target = e.currentTarget;
                   if (target.src !== logoFallback) {
@@ -1214,7 +1665,7 @@ export default function Layout({
             </div>
             <div className="text-[11px] text-[#6b7280] dark:text-gray-400 font-mono mt-0.5 font-semibold flex flex-col items-end leading-tight">
               <span className="text-[13px] text-gray-800 dark:text-gray-200 tracking-wider font-bold">{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', second:'2-digit' })}</span>
-              <span className="text-[10px] text-gray-500 dark:text-gray-400">{formatBSDate(currentTime)}<span className="hidden lg:inline"> | {academicYearString}</span></span>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">{formatBSDate(currentTime, true)}</span>
             </div>
           </div>
 
@@ -1289,6 +1740,12 @@ export default function Layout({
                           <li>
                             <Link
                               to={item.href}
+                              onClick={(e) => {
+                                const navGuard = (window as any).__shikshantarNavigationGuard;
+                                if (typeof navGuard === 'function' && location.pathname !== item.href && !navGuard(item.href, item.name)) {
+                                  e.preventDefault();
+                                }
+                              }}
                               className={`px-3.5 py-2.5 text-[0.82rem] font-semibold cursor-pointer flex items-center gap-3 transition-all rounded-xl my-0.5 ${ 
                                 location.pathname === item.href 
                                   ? 'bg-amber-500 text-slate-950 font-black shadow-md' 
@@ -1347,9 +1804,13 @@ export default function Layout({
                               onMouseLeave={handleNavMouseLeave}
                               onFocus={(e) => handleNavMouseEnter(item.name, e.currentTarget)}
                               onBlur={handleNavMouseLeave}
-                              onClick={() => {
+                              onClick={(e) => {
                                 clearFlyoutTimeouts();
                                 setFlyoutState(null);
+                                const navGuard = (window as any).__shikshantarNavigationGuard;
+                                if (typeof navGuard === 'function' && location.pathname !== item.href && !navGuard(item.href, item.name)) {
+                                  e.preventDefault();
+                                }
                               }}
                               className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer ${ 
                                 isItemActive 
@@ -1383,6 +1844,7 @@ export default function Layout({
         {/* Main Content Area */}
         <div 
           ref={mainRef}
+          data-portal-scroll-container="true"
           onScroll={handleScroll}
           className={`flex-1 flex flex-col min-w-0 min-h-0 h-full ${
             (isMenuOpen || isBellOpen || isProfileOpen) ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden'
@@ -1402,9 +1864,9 @@ export default function Layout({
             <div className="w-full max-w-[1680px] mx-auto flex-1 px-3 sm:px-6 lg:px-8">
               <motion.div
                 key={location.pathname}
-                initial={{ opacity: 0, y: 15, filter: 'blur(4px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
                 className="w-full min-h-full flex flex-col flex-1"
               >
                 <Outlet />
@@ -1413,7 +1875,7 @@ export default function Layout({
           </div>
 
           {/* Institutional School Footer */}
-          <Footer isAuthenticated={isAuthenticated} userRole={userRole} />
+          <Footer />
         </div>
       </div>
 
@@ -1476,7 +1938,13 @@ export default function Layout({
                       )}
                       <Link
                         to={item.href}
-                        onClick={() => setIsMenuOpen(false)}
+                        onClick={(e) => {
+                          setIsMenuOpen(false);
+                          const navGuard = (window as any).__shikshantarNavigationGuard;
+                          if (typeof navGuard === 'function' && location.pathname !== item.href && !navGuard(item.href, item.name)) {
+                            e.preventDefault();
+                          }
+                        }}
                         className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-3 transition-colors ${
                           location.pathname === item.href
                             ? 'bg-amber-500 text-slate-950 font-bold shadow'
@@ -1726,6 +2194,50 @@ export default function Layout({
           document.body
         );
       })()}
+
+      {/* Real-time Floating In-Portal Toast Alert for New App / Bell Notifications */}
+      {liveToastNotif && (
+        <div className="fixed bottom-5 right-5 z-[9999] max-w-sm w-full px-4 sm:px-0 pointer-events-auto animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div
+            onClick={() => {
+              const target = liveToastNotif;
+              setLiveToastNotif(null);
+              markPrivateNotificationRead(target.id, target.link);
+            }}
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-blue-200 dark:border-blue-800 p-4 flex items-start gap-3 cursor-pointer hover:border-blue-400 transition-colors"
+          >
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 shrink-0">
+              {getNotificationIcon(liveToastNotif.type)}
+            </div>
+            <div className="flex-1 min-w-0 text-left">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                  {(liveToastNotif.type || 'ALERT').replace(/_/g, ' ')}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLiveToastNotif(null);
+                  }}
+                  aria-label="Dismiss notification"
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="text-xs font-bold text-slate-900 dark:text-white mt-0.5 leading-snug">
+                {liveToastNotif.title}
+              </div>
+              {liveToastNotif.message && (
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 mt-0.5">
+                  {liveToastNotif.message}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

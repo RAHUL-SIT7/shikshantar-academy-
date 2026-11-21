@@ -58,10 +58,7 @@ export default function ProcessSalaryTab({ teachers, structures, records }: { te
                 status: nextStatus
             });
         } catch(err: any) {
-            const isPreviewMode = !!new URLSearchParams(window.location.search).get('previewRole');
-            if (!isPreviewMode) {
-                alert("Action failed: " + err.message);
-            }
+            alert("Action failed: " + err.message);
         }
     };
 
@@ -107,17 +104,10 @@ export default function ProcessSalaryTab({ teachers, structures, records }: { te
             setSelectedTeacher('');
         } catch (error: any) {
              console.error("Error saving salary record:", error);
-             const isPreviewMode = !!new URLSearchParams(window.location.search).get('previewRole');
-             if (isPreviewMode) {
-                 alert('Salary processed successfully! (Simulated locally for preview mode)');
-                 setTax(''); setAbsentDeduction(''); setLoanRecovery('');
-                 setSelectedTeacher('');
+             if (error.code === 'permission-denied' || String(error.message).includes('permissions')) {
+                 alert("Failed to save: You do not have true admin permissions in the database.");
              } else {
-                 if (error.code === 'permission-denied' || String(error.message).includes('permissions')) {
-                     alert("Failed to save: You do not have true admin permissions in the database.");
-                 } else {
-                     alert("Failed to save: " + error.message);
-                 }
+                 alert("Failed to save: " + error.message);
              }
         }
     }

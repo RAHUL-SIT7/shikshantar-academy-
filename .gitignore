@@ -1,0 +1,17 @@
+node_modules
+dist
+.aistudio
+.jre_archive.tar.gz
+jre
+jdk-21
+.browsers
+*.log
+*.mov
+live_index.*
+_GOLDEN_UI_SRC*
+_phase2_baseline_backup
+_backup_current_code
+_checkpoint_*
+public/phase2_*.zip
+public/PHASE_2_*.zip
+public/phase2_*.patch

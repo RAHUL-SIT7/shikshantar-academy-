@@ -5,7 +5,7 @@ const saveAs = (fileSaver as any)?.saveAs || fileSaver;
 import { Upload, CheckCircle2, AlertCircle, Download, FileEdit } from 'lucide-react';
 
 import { doc, writeBatch, collection, getDocs, query, where, setDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import { recordAuditLog } from '../../lib/auditLogger';
 import { canTeacherAccessSubject } from '../../lib/resultPreparationEngine';
 
@@ -355,20 +355,47 @@ export function UploadTab({ EXAM_TYPES, allClasses, data, setStatus, userRole, a
           }, { merge: true });
 
           // Fetch student user records for this class to link stable identities
-          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student'), where('class', '==', uploadClass)));
           const usersMap = new Map<string, any>();
-          usersSnap.forEach(d => {
-             const u = d.data();
-             const obj = { uid: d.id, ...u };
-             usersMap.set(d.id, obj);
-             if (u.studentId) usersMap.set(String(u.studentId).trim().toLowerCase(), obj);
-             if (u.permanentStudentId) usersMap.set(String(u.permanentStudentId).trim().toLowerCase(), obj);
-             if (u.emisNumber) usersMap.set(String(u.emisNumber).trim().toLowerCase(), obj);
-             if (u.rollNumber) usersMap.set(String(u.rollNumber).trim().toLowerCase(), obj);
-             if (u.rollNo) usersMap.set(String(u.rollNo).trim().toLowerCase(), obj);
-             if (u.fullName) usersMap.set(String(u.fullName).trim().toLowerCase(), obj);
-             if (u.name) usersMap.set(String(u.name).trim().toLowerCase(), obj);
-          });
+          if (userRole === 'admin') {
+            const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student'), where('class', '==', uploadClass)));
+            usersSnap.forEach(d => {
+               const u = d.data();
+               const obj = { uid: d.id, ...u };
+               usersMap.set(d.id, obj);
+               if (u.studentId) usersMap.set(String(u.studentId).trim().toLowerCase(), obj);
+               if (u.permanentStudentId) usersMap.set(String(u.permanentStudentId).trim().toLowerCase(), obj);
+               if (u.emisNumber) usersMap.set(String(u.emisNumber).trim().toLowerCase(), obj);
+               if (u.rollNumber) usersMap.set(String(u.rollNumber).trim().toLowerCase(), obj);
+               if (u.rollNo) usersMap.set(String(u.rollNo).trim().toLowerCase(), obj);
+               if (u.fullName) usersMap.set(String(u.fullName).trim().toLowerCase(), obj);
+               if (u.name) usersMap.set(String(u.name).trim().toLowerCase(), obj);
+            });
+          } else {
+            const idToken = await auth.currentUser?.getIdToken();
+            if (idToken) {
+              const targetYear = teacherProfile?.primaryClassTeacherYear || '2083';
+              const params = new URLSearchParams({
+                academicYear: String(targetYear),
+                className: String(uploadClass),
+                section: String(teacherProfile?.primaryClassTeacherSection || 'All')
+              });
+              const rosterRes = await fetch(`/api/exams/authorized-roster?${params.toString()}`, {
+                headers: { Authorization: `Bearer ${idToken}` }
+              });
+              if (rosterRes.ok) {
+                const rosterJson = await rosterRes.json();
+                (rosterJson.students || []).forEach((s: any) => {
+                  const obj = { uid: s.studentUid, ...s };
+                  if (s.studentUid) usersMap.set(s.studentUid, obj);
+                  if (s.studentId) usersMap.set(String(s.studentId).trim().toLowerCase(), obj);
+                  if (s.permanentStudentId) usersMap.set(String(s.permanentStudentId).trim().toLowerCase(), obj);
+                  if (s.studentEmis) usersMap.set(String(s.studentEmis).trim().toLowerCase(), obj);
+                  if (s.rollNo) usersMap.set(String(s.rollNo).trim().toLowerCase(), obj);
+                  if (s.studentName) usersMap.set(String(s.studentName).trim().toLowerCase(), obj);
+                });
+              }
+            }
+          }
 
           const allowedClassSubjects = getAllowedSubjectsForClass(uploadClass);
 
@@ -560,63 +587,64 @@ export function UploadTab({ EXAM_TYPES, allClasses, data, setStatus, userRole, a
 
   const publishResults = async () => {
     if (!uploadClass || !uploadExamType) return;
-    setStatus({type: 'info', message: 'Calculating ranks and publishing results...'});
+    if (userRole !== 'admin') {
+      setStatus({ type: 'error', message: 'Result publication is restricted to Administrators only.' });
+      return;
+    }
+    setStatus({ type: 'info', message: 'Publishing results via trusted server...' });
     try {
-        const examId = `${uploadExamType.replace(/\s+/g, '_')}_${uploadClass}`;
-        const summaryDocs = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', examId)));
-        
-        let allStudents = summaryDocs.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        allStudents.sort((a, b) => b.total - a.total);
-        
-        let batch = writeBatch(db);
-        let opCount = 0;
-        let currentRank = 1;
-        let prevTotal = -1;
-        let sameRankCount = 0;
-        
-        allStudents.forEach((std, idx) => {
-             if (std.total === prevTotal) {
-                 std.rank = currentRank;
-                 sameRankCount++;
-             } else {
-                 currentRank += sameRankCount;
-                 if (idx === 0) currentRank = 1;
-                 std.rank = currentRank;
-                 sameRankCount = 1;
-                 prevTotal = std.total;
-             }
-             
-             batch.update(doc(db, 'resultSummary', std.id), {
-                 rank: std.rank,
-                 published: true
-             });
-             opCount++;
-        });
-        
-        batch.update(doc(db, 'exams', examId), { published: true });
-        
-        await batch.commit();
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        setStatus({ type: 'error', message: 'Authentication required. Please sign in again.' });
+        return;
+      }
 
-        try {
-            await recordAuditLog({
-                category: 'academic',
-                actionType: 'EXAM_PUBLISHED',
-                targetType: 'class_exam_results',
-                targetId: examId,
-                studentClass: String(uploadClass),
-                academicYear: new Date().getFullYear().toString(),
-                reason: `Calculated ranks and published results for Class ${uploadClass} - ${uploadExamType}`,
-                previousValue: 'Draft/Unpublished',
-                newValue: `Published results for ${allStudents.length} students`,
-                result: 'SUCCESS'
-            });
-        } catch (auditErr) {
-            console.warn('Audit logging failed for exam publication:', auditErr);
+      const examId = `${uploadExamType.replace(/\s+/g, '_')}_${uploadClass}`;
+      const summaryDocs = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', examId)));
+
+      let allStudents = summaryDocs.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      allStudents.sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
+
+      let currentRank = 1;
+      let prevTotal = -1;
+      let sameRankCount = 0;
+
+      allStudents.forEach((std, idx) => {
+        if (std.total === prevTotal) {
+          std.rank = currentRank;
+          sameRankCount++;
+        } else {
+          currentRank += sameRankCount;
+          if (idx === 0) currentRank = 1;
+          std.rank = currentRank;
+          sameRankCount = 1;
+          prevTotal = std.total;
         }
+      });
 
-        setStatus({type: 'success', message: `Results and Ranks Published successfully for Class ${uploadClass}.`});
-    } catch(err: any) {
-        setStatus({type: 'error', message: 'Publish failed: ' + err.message});
+      const res = await fetch('/api/results/publish', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          examId,
+          targetClass: uploadClass,
+          targetSection: 'All',
+          targetAcademicYear: new Date().getFullYear().toString(),
+          summaryRecords: allStudents
+        })
+      });
+
+      const respData = await res.json().catch(() => ({}));
+      if (!res.ok || !respData.success) {
+        throw new Error(respData.error || 'Trusted server rejected publication request.');
+      }
+
+      setStatus({ type: 'success', message: `Results published successfully for Class ${uploadClass} via trusted server.` });
+    } catch (err: any) {
+      setStatus({ type: 'error', message: 'Publish failed: ' + err.message });
     }
   };
 

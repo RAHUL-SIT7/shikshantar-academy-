@@ -1,10 +1,27 @@
+import {
+  applyCorsAndSecurityHeaders,
+  getVercelAdminDb,
+  createSignedChallenge,
+  verifyChallengeResponse,
+  issueSignedVerificationToken,
+  verifyTurnstileToken,
+  getEffectiveNowMs
+} from '../_lib/auth';
+
 export default async function handler(req: any, res: any) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  applyCorsAndSecurityHeaders(req, res, 'GET, POST, OPTIONS');
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
+  }
+
+  if (req.method === 'GET') {
+    try {
+      const challenge = createSignedChallenge();
+      return res.status(200).json({ success: true, ...challenge });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Unable to generate security challenge.' });
+    }
   }
 
   if (req.method !== 'POST') {
@@ -13,45 +30,52 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    const { clientTimestamp, recaptchaToken } = body;
-    const recaptchaSecret = process.env.RECAPTCHA_SECRET_KEY;
+    const { turnstileToken, action, challengeToken, answer } = body;
+    const db = getVercelAdminDb();
+    const nowMs = getEffectiveNowMs(req);
+    const forwarded = req.headers?.['x-forwarded-for'];
+    const remoteIp = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : undefined;
 
-    if (recaptchaSecret && recaptchaToken) {
-      try {
-        const verifyUrl = `https://www.google.com/recaptcha/api/siteverify?secret=${encodeURIComponent(recaptchaSecret)}&response=${encodeURIComponent(recaptchaToken)}`;
-        const googleRes = await fetch(verifyUrl, { method: 'POST' });
-        const googleData = await googleRes.json();
-        if (googleData.success) {
-          return res.status(200).json({
-            success: true,
-            verificationToken: `srv_recaptcha_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`,
-            verifiedAt: new Date().toISOString()
-          });
-        } else {
-          return res.status(400).json({
-            success: false,
-            error: 'reCAPTCHA verification rejected. Please try again.'
-          });
-        }
-      } catch (err) {
-        console.warn('[SECURITY] Google reCAPTCHA verify network error:', err);
+    if (turnstileToken) {
+      const tsRes = await verifyTurnstileToken(db, String(turnstileToken), remoteIp, action ? String(action) : undefined, nowMs);
+      if (!tsRes.valid || !tsRes.verificationToken) {
+        return res.status(tsRes.statusCode || 400).json({
+          success: false,
+          error: tsRes.error || 'Cloudflare Turnstile verification failed.'
+        });
       }
-    }
-
-    const now = Date.now();
-    const clientTime = Number(clientTimestamp);
-    if (!clientTime || Math.abs(now - clientTime) > 180000) {
-      return res.status(400).json({
-        success: false,
-        error: 'Security challenge expired or invalid system clock. Please retry.'
+      return res.status(200).json({
+        success: true,
+        verificationToken: tsRes.verificationToken,
+        verifiedAt: new Date(nowMs).toISOString()
       });
     }
 
-    const serverToken = `srv_verified_${now}_${Math.random().toString(36).substring(2, 15)}`;
+    if (!challengeToken || typeof challengeToken !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing Turnstile token or CAPTCHA challenge token.' });
+    }
+
+    const check = verifyChallengeResponse(challengeToken, answer);
+    if (!check.valid || !check.challengeId) {
+      return res.status(400).json({ success: false, error: check.error || 'CAPTCHA verification failed.' });
+    }
+
+    const challengeRef = db.collection('used_captcha_challenges').doc(`chal_${check.challengeId}`);
+    const claimed = await db.runTransaction(async (txn) => {
+      const snap = await txn.get(challengeRef);
+      if (snap.exists) return false;
+      txn.set(challengeRef, { kind: 'challenge', usedAtMs: nowMs, usedAt: new Date(nowMs).toISOString() });
+      return true;
+    });
+
+    if (!claimed) {
+      return res.status(409).json({ success: false, error: 'Security challenge already consumed. Please solve a fresh challenge.' });
+    }
+
     return res.status(200).json({
       success: true,
-      verificationToken: serverToken,
-      verifiedAt: new Date().toISOString()
+      verificationToken: issueSignedVerificationToken(check.challengeId, 'challenge', nowMs),
+      verifiedAt: new Date(nowMs).toISOString()
     });
   } catch (error) {
     console.error('[SECURITY] Error during server captcha verification:', error);

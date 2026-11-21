@@ -83,6 +83,11 @@ async function runPhase5ForensicSuite() {
 
   // Authenticate admin cashier
   const adminUid = 'ADMIN_PHASE5_01';
+  try {
+    await admin.auth().getUser(adminUid);
+  } catch (_) {
+    await admin.auth().createUser({ uid: adminUid, email: 'admin.phase5@shikshantar.edu.np' });
+  }
   await db.collection('users').doc(adminUid).set({
     uid: adminUid,
     role: 'admin',
@@ -92,12 +97,18 @@ async function runPhase5ForensicSuite() {
     fullName: 'Phase 5 Audit Administrator',
     createdAt: admin.firestore.FieldValue.serverTimestamp()
   });
+  await admin.auth().setCustomUserClaims(adminUid, {
+    role: 'admin',
+    adminTier: 'primary',
+    email: 'admin.phase5@shikshantar.edu.np'
+  });
   const customToken = await admin.auth().createCustomToken(adminUid, {
     role: 'admin',
     adminTier: 'primary',
     email: 'admin.phase5@shikshantar.edu.np'
   });
   await signInWithCustomToken(auth, customToken);
+  await auth.currentUser?.getIdTokenResult(true);
 
   const ACADEMIC_YEAR = '2083';
 
@@ -520,6 +531,7 @@ async function runPhase5ForensicSuite() {
     rawEvidence: { postVoidBillDoc, postVoidLock }
   });
 
+  console.log('DEBUG AUTH CURRENT USER:', auth.currentUser?.uid);
   // Execute REISSUE using atomic billing engine with reissueContext
   const reissueResult = await generateSingleStudentBillTransactionally({
     db: clientDb,

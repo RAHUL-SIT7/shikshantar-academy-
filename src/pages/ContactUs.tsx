@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { doc, onSnapshot, setDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Edit2, Save, X, Phone, Mail, MapPin, Globe, Facebook, Send, CheckCircle2, MessageSquare } from 'lucide-react';
 import { motion } from 'motion/react';
 import { sendEnquiryEmail } from '../lib/emailService';
+import { useAuth } from '../contexts/AuthContext';
+import CaptchaChallengeBox from '../components/common/CaptchaChallengeBox';
 
 export default function ContactUs() {
   const [isEditing, setIsEditing] = useState(false);
@@ -33,9 +35,10 @@ export default function ContactUs() {
   });
   const [isSubmittingEnquiry, setIsSubmittingEnquiry] = useState(false);
   const [enquiryStatus, setEnquiryStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [captchaToken, setCaptchaToken] = useState('');
 
-  const userRole = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const isAdmin = auth.currentUser ? userRole === 'admin' : false;
+  const { userRole, isAuthenticated } = useAuth();
+  const isAdmin = isAuthenticated && userRole === 'admin';
 
   const handleEnquirySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,23 +46,33 @@ export default function ContactUs() {
       setEnquiryStatus({ type: 'error', message: 'Please fill in your name, contact phone, and message.' });
       return;
     }
+    if (!captchaToken) {
+      setEnquiryStatus({ type: 'error', message: 'Please complete and verify the security challenge before submitting.' });
+      return;
+    }
 
     setIsSubmittingEnquiry(true);
     setEnquiryStatus(null);
 
     try {
-      // 1. Save enquiry to Firestore for Admin portal view
-      await addDoc(collection(db, 'contact_enquiries'), {
-        name: enquiryForm.name,
-        phone: enquiryForm.phone,
-        email: enquiryForm.email || 'N/A',
-        grade: enquiryForm.grade || 'General Enquiry',
-        message: enquiryForm.message,
-        status: 'unread',
-        submittedAt: serverTimestamp(),
+      const res = await fetch('/api/public/submit-enquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verificationToken: captchaToken,
+          name: enquiryForm.name.trim(),
+          phone: enquiryForm.phone.trim(),
+          email: enquiryForm.email.trim() || 'N/A',
+          grade: enquiryForm.grade || 'General Enquiry',
+          message: enquiryForm.message.trim()
+        })
       });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to send enquiry.');
+      }
 
-      // 2. Auto-dispatch EmailJS notification to Admin/Principal email
+      // Auto-dispatch EmailJS notification if configured
       sendEnquiryEmail({
         name: enquiryForm.name,
         phone: enquiryForm.phone,
@@ -75,7 +88,6 @@ export default function ContactUs() {
         message: 'Your enquiry has been sent successfully! The administration will contact you shortly.',
       });
 
-      // Reset form
       setEnquiryForm({
         name: '',
         phone: '',
@@ -83,11 +95,12 @@ export default function ContactUs() {
         grade: '',
         message: '',
       });
+      setCaptchaToken('');
     } catch (err: any) {
       console.error('Enquiry submission error:', err);
       setEnquiryStatus({
         type: 'error',
-        message: 'Failed to send enquiry. Please try again or contact us via WhatsApp.',
+        message: err?.message || 'Failed to send enquiry. Please try again or contact us via WhatsApp.',
       });
     } finally {
       setIsSubmittingEnquiry(false);
@@ -444,6 +457,11 @@ export default function ContactUs() {
                           className="w-full px-3.5 py-2.5 border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500"
                         ></textarea>
                       </div>
+
+                      <CaptchaChallengeBox
+                        onVerified={(token) => setCaptchaToken(token)}
+                        onReset={() => setCaptchaToken('')}
+                      />
 
                       <button
                         type="submit"

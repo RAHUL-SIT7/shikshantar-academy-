@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import { useAuth } from "../contexts/AuthContext";
 import NepaliDate from "nepali-date-converter";
 import autoTable from "jspdf-autotable";
 import jsPDF from "jspdf";
@@ -895,9 +896,8 @@ export default function AcademicCalendar() {
   // Rotating Quote State
   const [quoteIdx, setQuoteIdx] = useState(0);
 
-  const role = auth.currentUser
-    ? localStorage.getItem("userRole") || "student"
-    : "guest";
+  const { userRole: authRole, isAuthenticated } = useAuth();
+  const role = isAuthenticated ? authRole : "guest";
   const isAdmin = role === "admin";
   const isRegisteredUser =
     role === "admin" || role === "teacher" || role === "student";
@@ -1475,7 +1475,7 @@ export default function AcademicCalendar() {
   return (
     <div className="w-full max-w-7xl mx-auto p-4 lg:p-6 flex flex-col items-center">
       <Helmet>
-        <title>Academic Calendar {selectedYear} | Shikshantar Academy</title>
+        <title>{`Academic Calendar ${selectedYear} | Shikshantar Academy`}</title>
         <meta name="description" content="View the annual academic calendar, holiday schedules, examination dates, and event list for Shikshantar Academy." />
         <link rel="canonical" href="https://www.shikshantaracademy.edu.np/calendar" />
       </Helmet>
@@ -2081,7 +2081,6 @@ export default function AcademicCalendar() {
                   </button>
 
                   <div className="relative flex justify-center items-center drop-shadow-[0_20px_25px_rgba(0,0,0,0.15)] mx-auto perspective-1000 w-full max-w-4xl aspect-[3/4] md:aspect-[8/5.5]">
-                    {/* @ts-ignore */}
                     <HTMLFlipBook
                       width={500}
                       height={700}
@@ -2093,7 +2092,7 @@ export default function AcademicCalendar() {
                       maxShadowOpacity={0.6}
                       showCover={true}
                       mobileScrollSupport={true}
-                      clickToChangePages={false}
+                      {...({ clickToChangePages: false } as any)}
                       useMouseEvents={false}
                       showPageCorners={false}
                       className="demo-book"

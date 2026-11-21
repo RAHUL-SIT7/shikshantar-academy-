@@ -262,13 +262,7 @@ export default function TeacherSalary() {
          setJustification('');
      } catch (error: any) {
          console.error("Error submitting salary request:", error);
-         const isPreviewMode = !!new URLSearchParams(window.location.search).get('previewRole');
-         if (isPreviewMode) {
-             setReqStatus({type: 'success', msg: `Your request (${referenceNo}) has been submitted successfully! (Simulated locally for preview)`});
-             setJustification('');
-         } else {
-             setReqStatus({type: 'error', msg: error.message});
-         }
+         setReqStatus({type: 'error', msg: error.message || 'Permission denied submitting salary request.'});
      } finally {
          setSubmitting(false);
      }

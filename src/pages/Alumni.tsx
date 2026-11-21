@@ -2,9 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Search, MapPin, Award, Briefcase, GraduationCap, Edit2, Trash2, Star, Plus, Mail, X, CheckCircle2, BarChart2, PieChart, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, auth } from '../firebase';
-import { collection, addDoc, query, where, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { sendAlumniEmail } from '../lib/emailService';
+import { useAuth } from '../contexts/AuthContext';
+import CaptchaChallengeBox from '../components/common/CaptchaChallengeBox';
 
 const initialAlumni = [
   {
@@ -201,12 +203,12 @@ function AnimatedCounter({ target, suffix = "" }: { target: number; suffix?: str
 }
 
 export default function Alumni() {
-  const userRole = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const actualAdmin = auth.currentUser ? userRole === 'admin' : false;
+  const { userRole, isAuthenticated } = useAuth();
+  const actualAdmin = isAuthenticated && userRole === 'admin';
   const [previewAsStudent, setPreviewAsStudent] = useState(false);
   const isAdmin = actualAdmin && !previewAsStudent;
 
-  const [alumni, setAlumni] = useState(initialAlumni);
+  const [alumni, setAlumni] = useState<any[]>(initialAlumni);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedYear, setSelectedYear] = useState("All");
@@ -217,6 +219,7 @@ export default function Alumni() {
     organization: '', degree: '', location: '', quote: '', achievement: '',
     category: 'Technology'
   });
+  const [captchaToken, setCaptchaToken] = useState('');
   const [recommendationSent, setRecommendationSent] = useState(false);
   const [pendingStories, setPendingStories] = useState<any[]>([]);
 
@@ -256,7 +259,7 @@ export default function Alumni() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAlumnus, setEditingAlumnus] = useState<any>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<any>({
     name: '', graduationYear: '', batch: '', seeBand: '', currentStatus: '',
     organization: '', degree: '', location: '', quote: '', achievement: '',
     category: 'Other', featured: false, photo: '', photoSource: 'url'
@@ -838,29 +841,34 @@ export default function Alumni() {
                         showToast("❌ Please fill out all required fields.");
                         return;
                       }
-                      const newStory = {
-                        name: storyForm.name,
-                        graduationYear: `${storyForm.batch} Alumni`,
-                        batch: storyForm.batch,
-                        class: 'Class 10',
-                        seeBand: storyForm.seeBand,
-                        currentStatus: storyForm.currentStatus,
-                        organization: storyForm.organization,
-                        degree: storyForm.degree || 'B.E. — Pulchowk Campus, IOE',
-                        location: storyForm.location || 'Kathmandu, Nepal',
-                        quote: storyForm.quote || 'Strong academic foundation sparked my interest to reach new professional milestones.',
-                        achievement: storyForm.achievement || 'Excellent SEE Results & Placement',
-                        photo: null,
-                        category: storyForm.category,
-                        featured: false,
-                        isGuestRecommended: true,
-                        status: 'pending',
-                        createdAt: new Date().toISOString()
-                      };
+                      if (!captchaToken) {
+                        showToast("❌ Please complete and verify the security challenge first.");
+                        return;
+                      }
                       try {
-                        await addDoc(collection(db, 'alumni_submissions'), newStory);
-                        
-                        // Also notify Principal/Management via EmailJS
+                        const res = await fetch('/api/public/submit-alumni', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            verificationToken: captchaToken,
+                            name: storyForm.name.trim(),
+                            batch: storyForm.batch,
+                            seeBand: storyForm.seeBand,
+                            currentStatus: storyForm.currentStatus.trim(),
+                            organization: storyForm.organization.trim(),
+                            degree: storyForm.degree || 'B.E. — Pulchowk Campus, IOE',
+                            location: storyForm.location || 'Kathmandu, Nepal',
+                            quote: storyForm.quote || 'Strong academic foundation sparked my interest to reach new professional milestones.',
+                            achievement: storyForm.achievement || 'Excellent SEE Results & Placement',
+                            category: storyForm.category
+                          })
+                        });
+                        const resData = await res.json().catch(() => ({}));
+                        if (!res.ok || !resData.success) {
+                          throw new Error(resData.error || 'Failed to submit story.');
+                        }
+
+                        // Also notify Principal/Management via EmailJS if configured
                         sendAlumniEmail({
                           name: storyForm.name,
                           batch: storyForm.batch,
@@ -871,11 +879,12 @@ export default function Alumni() {
                           quote: storyForm.quote,
                         }).catch(err => console.warn("Email notification failed for alumni submission:", err));
 
+                        setCaptchaToken('');
                         setRecommendationSent(true);
                         showToast("🎉 Thank you! Your story has been submitted for administrator review.");
-                      } catch (err) {
+                      } catch (err: any) {
                         console.error("Error submitting story:", err);
-                        showToast("❌ Error submitting your story. Please try again.");
+                        showToast(`❌ ${err?.message || 'Error submitting your story. Please try again.'}`);
                       }
                     }} className="space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -975,6 +984,11 @@ export default function Alumni() {
                           className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-semibold text-sm text-primary resize-none"
                         />
                       </div>
+
+                      <CaptchaChallengeBox
+                        onVerified={(token) => setCaptchaToken(token)}
+                        onReset={() => setCaptchaToken('')}
+                      />
 
                       <div className="flex justify-end pt-2">
                         <button 

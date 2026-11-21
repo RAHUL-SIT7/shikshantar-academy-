@@ -5,8 +5,8 @@ const saveAs = (fileSaver as any)?.saveAs || (fileSaver as any)?.default || file
 const logoImage = "/logo.png";
 
 const addSchoolHeaderToSheet = async (
-  workbook: ExcelJS.Workbook,
-  sheet: ExcelJS.Worksheet,
+  workbook: any,
+  sheet: any,
   title: string,
   columns: { header: string, key: string, width?: number }[]
 ) => {
@@ -82,7 +82,7 @@ const addSchoolHeaderToSheet = async (
   }
 };
 
-const populateSheetData = (sheet: ExcelJS.Worksheet, data: any[]) => {
+const populateSheetData = (sheet: any, data: any[]) => {
   // Add data
   data.forEach((row, index) => {
     const addedRow = sheet.addRow(row);
@@ -114,7 +114,7 @@ export const createExcelWorkbook = async (
   title: string, 
   columns: { header: string, key: string, width?: number }[], 
   data: any[]
-): Promise<ExcelJS.Workbook> => {
+): Promise<any> => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Data');
 

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { collection, doc, writeBatch, serverTimestamp, query, where, getDocs, setDoc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { Search, Loader2, Download, Printer, Plus, X, Receipt, Zap, BookOpen, Banknote, Bell, FileText, Table, AlertCircle, Layers, ShieldCheck, CheckCircle2, ChevronDown, ChevronRight, ChevronsUpDown, Info } from 'lucide-react';
+import { Search, Loader2, Download, Printer, Plus, X, Receipt, Zap, BookOpen, Banknote, Bell, FileText, Table, AlertCircle, Layers, ShieldCheck, CheckCircle2, ChevronDown, ChevronRight, ChevronsUpDown, Info, History } from 'lucide-react';
 import { formatBSDate, getBSYearMonthDate } from '../../lib/nepaliDate';
 import CashReceiptModal, { CashReceiptData } from './CashReceiptModal';
 import BillingCoverageReconciliationModal from './BillingCoverageReconciliationModal';
@@ -174,7 +174,7 @@ export default function SimpleStudentLedgerTab({
         setExpandedLedgerMonths(newState);
     };
 
-    const [prefilledBillData, setPrefilledBillData] = useState<{ id: string; billId: string; amount: number; billingPeriod?: string; itemizedCharges?: any[] } | null>(null);
+    const [prefilledBillData, setPrefilledBillData] = useState<{ id: string; billId: string; amount: number; billingPeriod?: string; coveredMonths?: string[]; itemizedCharges?: any[] } | null>(null);
 
     // Operator & Cashier Dynamic Identity
     const [activeAdminName, setActiveAdminName] = useState<string>('Administrator');
@@ -2973,7 +2973,7 @@ export default function SimpleStudentLedgerTab({
                                                         key={cat.id}
                                                         type="button" 
                                                         onClick={() => {
-                                                            setPaymentCategory(cat.id);
+                                                            setPaymentCategory(cat.id as any);
                                                             if (cat.id === 'custom') {
                                                                 setCustomNumberOfMonths('1');
                                                                 const defaultMonthly = Math.floor(Number(selectedStudent?.monthlyFee || 1000));

@@ -24,10 +24,11 @@ import {
   ExternalLink,
   Layers
 } from 'lucide-react';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { getStudentAcademicEnrollments, AcademicEnrollment } from '../lib/academicPromotionEngine';
 import { formatBSDate } from '../lib/nepaliDate';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function StudentProfileView() {
   const { id } = useParams<{ id: string }>();
@@ -35,13 +36,17 @@ export default function StudentProfileView() {
 
   const [student, setStudent] = useState<any | null>(null);
   const [enrollments, setEnrollments] = useState<AcademicEnrollment[]>([]);
+  const { userRole, isAuthenticated, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentRole, setCurrentRole] = useState<string>('admin');
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole') || 'admin';
-    setCurrentRole(role);
+    if (authLoading) return;
+    if (!isAuthenticated || (userRole !== 'admin' && userRole !== 'teacher')) {
+      setError('Access restricted to authorized administrators and teachers.');
+      setLoading(false);
+      return;
+    }
 
     const fetchStudent = async () => {
       if (!id) {
@@ -103,7 +108,7 @@ export default function StudentProfileView() {
     };
 
     fetchStudent();
-  }, [id]);
+  }, [id, authLoading, isAuthenticated, userRole]);
 
   if (loading) {
     return (

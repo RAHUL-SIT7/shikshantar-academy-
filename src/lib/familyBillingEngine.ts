@@ -437,11 +437,7 @@ export async function executeFamilyCashFeePayment(params: ExecuteFamilyPaymentPa
   const operatorName = params.operatorName || 'Cashier Desk';
   const operatorUid = params.operatorUid || auth.currentUser?.uid || 'system';
 
-  const receiptNo = params.receiptNo || (await allocateNextDocumentNumber({
-    db: firestoreDb,
-    academicYear,
-    documentType: 'RECEIPT'
-  }));
+  const receiptNo = params.receiptNo || (await allocateNextDocumentNumber('RCP', academicYear));
 
   const cleanReceipt = canonicalizeReceiptNo(receiptNo);
   if (!cleanReceipt) {

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { useAuth } from './AuthContext';
 
 import NepaliDateImport from 'nepali-date-converter';
 const NepaliDate: any = (NepaliDateImport as any)?.default || NepaliDateImport;
@@ -91,9 +91,13 @@ export const isNoticePopupEligible = (notice: Notice, referenceDate: Date = new 
 };
 
 export function NoticeProvider({ children }: { children: React.ReactNode }) {
+  const { userRole, userProfile, isAuthenticated } = useAuth();
   const [notices, setNotices] = useState<Notice[]>([]);
-  const [role, setRole] = useState<string>(() => localStorage.getItem('userRole') || 'student');
-  const [studentClass, setStudentClass] = useState<string>(() => localStorage.getItem('studentClass') || '');
+  const role: string = isAuthenticated ? userRole : 'guest';
+  const studentClass: string =
+    isAuthenticated && userProfile
+      ? String(userProfile.class || userProfile.studentClass || userProfile.children?.[0]?.studentClass || '')
+      : '';
   const [loading, setLoading] = useState(true);
 
   // Popup states
@@ -127,36 +131,6 @@ export function NoticeProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('localReadsChanged', handleStorageOrCustom);
       window.removeEventListener('storage', handleStorageOrCustom);
     };
-  }, []);
-
-  // Listen to Auth State changes to load role & class
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        // Fetch role and class from Firestore
-        getDoc(doc(db, 'users', user.uid))
-          .then((userDoc) => {
-            if (userDoc.exists()) {
-              const data = userDoc.data();
-              const fetchedRole = data.role || 'student';
-              const fetchedClass = data.class || data.studentClass || (data.children?.[0]?.studentClass) || '';
-              
-              setRole(fetchedRole);
-              setStudentClass(fetchedClass);
-              localStorage.setItem('userRole', fetchedRole);
-              if (fetchedClass) {
-                localStorage.setItem('studentClass', fetchedClass);
-              }
-            }
-          })
-          .catch((e) => console.warn('NoticeContext: error loading user profile', e));
-      } else {
-        setRole('student');
-        setStudentClass('');
-      }
-    });
-
-    return () => unsubAuth();
   }, []);
 
   // Real-time listener for notices

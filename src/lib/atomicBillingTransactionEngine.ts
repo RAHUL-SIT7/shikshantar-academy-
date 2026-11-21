@@ -121,12 +121,11 @@ export async function generateSingleStudentBillTransactionally(
       };
     });
 
-    const monthLockDocs = await Promise.all(
-      monthLockRefs.map(async item => {
-        const snap = await transaction.get(item.ref);
-        return { ...item, snap };
-      })
-    );
+    const monthLockDocs: Array<{ monthName: string; monthId: string; ref: any; snap: any }> = [];
+    for (const item of monthLockRefs) {
+      const snap = await transaction.get(item.ref);
+      monthLockDocs.push({ ...item, snap });
+    }
 
     // D. Document Number Sequence
     const seqDocRef = doc(db, 'document_sequences', `RMT_${cleanYear}`);

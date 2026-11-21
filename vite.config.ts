@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
+    entries: ['index.html'],
     exclude: ['lucide-react'],
   },
   server: {
@@ -13,5 +14,19 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     hmr: false,
+    ws: false,
+    watch: {
+      ignored: [
+        '**/.browsers/**',
+        '**/jdk-21/**',
+        '**/_GOLDEN_*/**',
+        '**/_checkpoint_*/**',
+        '**/_backup_*/**',
+        '**/_phase2_*/**',
+        '**/result_workspace/**',
+        '**/tests/**',
+        '**/live_index.*',
+      ],
+    },
   },
 });

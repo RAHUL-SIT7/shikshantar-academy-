@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { auth } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 import { Helmet } from 'react-helmet-async';
 import { HelpCircle, Search, Edit2, Trash2, Plus, ArrowUp, ArrowDown, ChevronDown, ChevronUp, MapPin, Mail, Phone } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
@@ -151,8 +151,8 @@ export default function FAQ() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [openIds, setOpenIds] = useState<number[]>([]);
   
-  const userRole = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const trueAdmin = auth.currentUser ? userRole === 'admin' : false;
+  const { isAuthenticated, userRole } = useAuth();
+  const trueAdmin = isAuthenticated && userRole === 'admin';
   const [previewAsStudent, setPreviewAsStudent] = useState(false);
   const isAdmin = trueAdmin && !previewAsStudent;
   

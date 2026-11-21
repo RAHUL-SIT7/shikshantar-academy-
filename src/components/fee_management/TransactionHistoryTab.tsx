@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { formatBSDate, formatBSDateTime } from '../../lib/nepaliDate';
+import { formatBSDate } from '../../lib/nepaliDate';
 import { Search, Printer, Edit2, CornerUpLeft, Download, Calendar, Filter, ChevronRight, ChevronDown, Receipt, FileDown, X, Undo2, Plus, Trash2, ArrowUpRight, ArrowDownRight, UserCheck, Lock } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { db, auth } from '../../firebase';
@@ -14,7 +14,7 @@ import 'nepali-datepicker-reactjs/dist/index.css';
 import NepaliDate from 'nepali-date-converter';
 import { exportToPDF } from '../../lib/pdfExport';
 import { exportToExcel, exportMultiSheetExcel } from '../../lib/excelExport';
-import { recordLedgerAuditLog, buildAuthoritativeAuditPayload } from '../../lib/auditLogger';
+import { recordLedgerAuditLog } from '../../lib/auditLogger';
 import { cancelPaymentTransaction } from '../../lib/paymentCancellationEngine';
 import { processPaymentRefund, deleteSystemTransactionSafe } from '../../lib/paymentRefundEngine';
 import SecurityPasswordConfirmModal from './SecurityPasswordConfirmModal';
@@ -165,36 +165,22 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
         return;
       }
 
-      const opId = `OP_CASH_DEL_${targetEntry.id}`;
-      const auditPayload = await buildAuthoritativeAuditPayload({
-        operationId: opId,
-        category: 'financial',
-        targetType: 'cash_ledger',
-        targetId: targetEntry.id,
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'cash_ledger', targetEntry.id));
+      await batch.commit();
+
+      await recordLedgerAuditLog({
         transactionId: targetEntry.id,
         receipt: targetEntry.receipt || targetEntry.id,
         studentName: targetEntry.category || 'Cash Register Entry',
         studentClass: '-',
         actionType: 'TRANSACTION_DELETED',
-        action: 'TRANSACTION_DELETED',
-        beforeState: {
-          id: targetEntry.id,
-          type: targetEntry.type || 'Expense',
-          category: targetEntry.category,
-          amount: targetEntry.amount,
-          remarks: targetEntry.remarks || ''
-        },
-        afterState: { deleted: true },
         previousValue: targetEntry ? `Type: ${targetEntry.type || 'Expense'} | Category: ${targetEntry.category} | Amount: NRs. ${Number(targetEntry.amount || 0).toLocaleString()} | Remarks: ${targetEntry.remarks || 'None'}` : `Cash Entry ID: ${targetEntry.id}`,
         newValue: 'CASH REGISTER ENTRY PERMANENTLY REMOVED',
-        reason: reason || 'Cash register entry deleted with password verification'
-      }, opId);
-
-      const batch = writeBatch(db);
-      batch.delete(doc(db, 'cash_ledger', targetEntry.id));
-      batch.set(doc(db, 'ledger_audit_logs', opId), auditPayload);
-      batch.set(doc(db, 'audit_logs', opId), auditPayload);
-      await batch.commit();
+        reason: reason || 'Cash register entry deleted with password verification',
+        adminName,
+        adminEmail
+      });
 
       setDeleteCashModalTarget(null);
     } catch (err) {
@@ -946,38 +932,22 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
               });
           }
           
-          const opId = `OP_CASH_EDIT_${editModalTx.id}_${Date.now()}`;
-          const auditPayload = await buildAuthoritativeAuditPayload({
-              operationId: opId,
-              category: 'financial',
-              targetType: 'cash_ledger',
-              targetId: editModalTx.id,
+          await batch.commit();
+
+          await recordLedgerAuditLog({
               transactionId: editModalTx.id,
               receipt: editModalTx.receipt || editModalTx.id,
               studentId: editModalTx.studentId || '',
               studentName: editModalTx.studentName || editModalTx.category || 'General Ledger',
               studentClass: editModalTx.class || '-',
               actionType: isLinkedOrSystem ? 'REMARKS_MODIFIED' : 'AMOUNT_MODIFIED',
-              action: isLinkedOrSystem ? 'REMARKS_MODIFIED' : 'AMOUNT_MODIFIED',
-              beforeState: {
-                  amount: oldAmount,
-                  remarks: oldRemarks
-              },
-              afterState: {
-                  amount: isLinkedOrSystem ? oldAmount : newAmt,
-                  remarks: isLinkedOrSystem ? ((oldRemarks ? oldRemarks + '\n' : '') + `Admin Note: ${editRemarks}`) : ((oldRemarks ? oldRemarks + '\n' : '') + `Edited: ${editRemarks}`)
-              },
               previousValue: `Amount: NRs. ${Number(oldAmount).toLocaleString()} | Particulars: ${editModalTx.isSystem ? (editModalTx.studentName + ' (' + (editModalTx.class || '-') + ')') : editModalTx.category} | Remarks: ${oldRemarks || 'None'}`,
               newValue: isLinkedOrSystem 
                 ? `Amount: NRs. ${Number(oldAmount).toLocaleString()} (Protected Immutable) | Remarks: ${editRemarks || 'Modified by Admin'}`
                 : `Amount: NRs. ${newAmt.toLocaleString()} | Updated Remarks: ${editRemarks || 'Modified by Admin'}`,
-              reason: editRemarks.trim() || 'Particulars/remarks modified by administrator'
-          }, opId);
-
-          batch.set(doc(db, 'ledger_audit_logs', opId), auditPayload);
-          batch.set(doc(db, 'audit_logs', opId), auditPayload);
-          
-          await batch.commit();
+              reason: editRemarks.trim() || 'Particulars/remarks modified by administrator',
+              adminName: activeAdminName
+          });
 
           setEditModalTx(null);
           onRefresh();
@@ -1271,8 +1241,8 @@ export default function TransactionHistoryTab({ transactionsData, studentsData =
                            <div className="flex flex-col">
                               <span className="text-xs font-bold text-gray-700">{tx.date}</span>
                               {tx.timestamp && (
-                                 <span className="text-[10px] text-gray-400 font-medium mt-0.5" title="B.S. Date and Time">
-                                   {formatBSDateTime(tx.timestamp)}
+                                 <span className="text-[10px] text-gray-400 font-medium mt-0.5" title="A.D. Date and Time">
+                                   {new Date(tx.timestamp.seconds ? tx.timestamp.seconds * 1000 : tx.timestamp).toLocaleDateString()} {new Date(tx.timestamp.seconds ? tx.timestamp.seconds * 1000 : tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                  </span>
                               )}
                            </div>

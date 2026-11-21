@@ -1,0 +1,367 @@
+{
+  "total": 40,
+  "passed": 25,
+  "failed": 15,
+  "records": [
+    {
+      "testNumber": 1,
+      "testName": "Unauthenticated Read User Profile",
+      "operation": "getDoc(/users/admin_primary)",
+      "authIdentity": "Unauthenticated",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 2,
+      "testName": "Unauthenticated Read Results Collection",
+      "operation": "getDoc(/results/res_101)",
+      "authIdentity": "Unauthenticated",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 3,
+      "testName": "Unauthenticated Direct Write Notice",
+      "operation": "setDoc(/notices/notice_unauth)",
+      "authIdentity": "Unauthenticated",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 4,
+      "testName": "Unauthenticated Submit Admission Enquiry",
+      "operation": "setDoc(/admissions/adm_pub1)",
+      "authIdentity": "Unauthenticated",
+      "expected": "ALLOW",
+      "actual": "DENY (HTTP 404)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 5,
+      "testName": "Unauthenticated Submit Contact Enquiry",
+      "operation": "setDoc(/contact_enquiries/cq_pub1)",
+      "authIdentity": "Unauthenticated",
+      "expected": "ALLOW",
+      "actual": "DENY (HTTP 404)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 6,
+      "testName": "Unauthenticated Read Public Notice",
+      "operation": "getDoc(/notices/notice_pub1)",
+      "authIdentity": "Unauthenticated",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 7,
+      "testName": "Admin Read Student Profile",
+      "operation": "getDoc(/users/student_own)",
+      "authIdentity": "Admin (rahulsah4534@gmail.com)",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 8,
+      "testName": "Admin Direct Read Results Collection",
+      "operation": "getDoc(/results/res_101)",
+      "authIdentity": "Admin",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 9,
+      "testName": "Admin Write Academic Class",
+      "operation": "setDoc(/classes/class_10a)",
+      "authIdentity": "Admin",
+      "expected": "ALLOW",
+      "actual": "DENY (HTTP 404)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 10,
+      "testName": "Admin Read Cash Ledger Financial Record",
+      "operation": "getDoc(/cash_ledger/ledger_001)",
+      "authIdentity": "Admin",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 11,
+      "testName": "Teacher Read Student Record",
+      "operation": "getDoc(/students/student_own)",
+      "authIdentity": "Teacher (Assigned)",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 12,
+      "testName": "Teacher Read Class Structure",
+      "operation": "getDoc(/classes/class_10a)",
+      "authIdentity": "Teacher",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 13,
+      "testName": "Teacher Direct Write to Results (Denied)",
+      "operation": "setDoc(/results/res_101)",
+      "authIdentity": "Teacher",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 14,
+      "testName": "Subject Teacher Read Exam Metadata",
+      "operation": "getDoc(/exams/exam_term1)",
+      "authIdentity": "Teacher",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 15,
+      "testName": "Subject Teacher Read Subject Config",
+      "operation": "getDoc(/subjectConfigs/config_math)",
+      "authIdentity": "Teacher",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 16,
+      "testName": "Unassigned Teacher Read Other Salary Record",
+      "operation": "getDoc(/salary_records/sal_teacher_assigned)",
+      "authIdentity": "Teacher (Unassigned)",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 17,
+      "testName": "Teacher Read Own Salary Record",
+      "operation": "getDoc(/salary_records/sal_teacher_unassigned)",
+      "authIdentity": "Teacher (Self)",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 18,
+      "testName": "Teacher Access Financial Cash Ledger",
+      "operation": "getDoc(/cash_ledger/ledger_001)",
+      "authIdentity": "Teacher",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 19,
+      "testName": "Student Direct Read Results Collection (Denied)",
+      "operation": "getDoc(/results/res_101)",
+      "authIdentity": "Student (Self)",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 20,
+      "testName": "Student Read Own Profile",
+      "operation": "getDoc(/users/student_own)",
+      "authIdentity": "Student (Self)",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 21,
+      "testName": "Student Read Own Session",
+      "operation": "getDoc(/user_sessions/sess_student_own)",
+      "authIdentity": "Student (Self)",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 22,
+      "testName": "Student Read Other Student Profile (Roster Leak)",
+      "operation": "getDoc(/users/student_other)",
+      "authIdentity": "Student",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 23,
+      "testName": "Parent Read Unrelated Student Profile",
+      "operation": "getDoc(/users/student_other)",
+      "authIdentity": "Parent",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 24,
+      "testName": "Parent Direct Read Results Collection",
+      "operation": "getDoc(/results/res_101)",
+      "authIdentity": "Parent",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 25,
+      "testName": "Direct Client Write to /results",
+      "operation": "setDoc(/results/res_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 26,
+      "testName": "Direct Client Write to /academicResults",
+      "operation": "setDoc(/academicResults/res_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 27,
+      "testName": "Direct Client Write to /resultSummary",
+      "operation": "setDoc(/resultSummary/sum_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 28,
+      "testName": "Direct Client Write to /publicationManifests",
+      "operation": "setDoc(/publicationManifests/manifest_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 29,
+      "testName": "Direct Client Write to /exam_subject_status",
+      "operation": "setDoc(/exam_subject_status/status_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 30,
+      "testName": "Direct Client Write to /class_reviews",
+      "operation": "setDoc(/class_reviews/rev_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 31,
+      "testName": "Direct Client Write to /resultHistory",
+      "operation": "setDoc(/resultHistory/hist_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 32,
+      "testName": "Direct Client Write to /auditLogs",
+      "operation": "setDoc(/auditLogs/log_test)",
+      "authIdentity": "Student/Client SDK",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 33,
+      "testName": "Student Read Teacher Profile (Roster Privacy)",
+      "operation": "getDoc(/users/teacher_assigned)",
+      "authIdentity": "Student",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 34,
+      "testName": "Non-Admin Read Submitted Admissions",
+      "operation": "getDoc(/admissions/adm_pub1)",
+      "authIdentity": "Student",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 35,
+      "testName": "Admin Read Submitted Admissions",
+      "operation": "getDoc(/admissions/adm_pub1)",
+      "authIdentity": "Admin",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 36,
+      "testName": "Signed-In Student Read Custom Subjects",
+      "operation": "getDoc(/custom_subjects/cs1)",
+      "authIdentity": "Student",
+      "expected": "ALLOW",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 37,
+      "testName": "Student Write Custom Subject",
+      "operation": "setDoc(/custom_subjects/cs2)",
+      "authIdentity": "Student",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    },
+    {
+      "testNumber": 38,
+      "testName": "Admin Write Custom Subject",
+      "operation": "setDoc(/custom_subjects/cs2)",
+      "authIdentity": "Admin",
+      "expected": "ALLOW",
+      "actual": "DENY (HTTP 404)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 39,
+      "testName": "Default-Deny Read Arbitrary Collection",
+      "operation": "getDoc(/unmapped_secret_collection/doc1)",
+      "authIdentity": "Student",
+      "expected": "DENY",
+      "actual": "ALLOW (HTTP 200)",
+      "status": "FAIL"
+    },
+    {
+      "testNumber": 40,
+      "testName": "Default-Deny Write Arbitrary Collection",
+      "operation": "setDoc(/unmapped_secret_collection/doc1)",
+      "authIdentity": "Student",
+      "expected": "DENY",
+      "actual": "DENY (HTTP 404)",
+      "status": "PASS"
+    }
+  ]
+}

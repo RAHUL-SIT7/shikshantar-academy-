@@ -47,18 +47,6 @@ const IemisExport = ({ userRole }: { userRole?: string }) => {
     { value: '10', label: 'Class 10' }
   ];
 
-  if (userRole !== 'admin') {
-    return (
-      <div className="bg-red-50 text-red-600 p-6 rounded-xl flex items-center gap-3">
-        <ShieldAlert className="w-8 h-8" />
-        <div>
-          <h2 className="text-xl font-bold">Access Denied</h2>
-          <p>You do not have permission to access the IEMIS export module.</p>
-        </div>
-      </div>
-    );
-  }
-
   const fetchStudents = async () => {
     setIsLoading(true);
     setError(null);
@@ -82,8 +70,22 @@ const IemisExport = ({ userRole }: { userRole?: string }) => {
   };
 
   useEffect(() => {
-    fetchStudents();
-  }, []);
+    if (userRole === 'admin') {
+      fetchStudents();
+    }
+  }, [userRole]);
+
+  if (userRole !== 'admin') {
+    return (
+      <div className="bg-red-50 text-red-600 p-6 rounded-xl flex items-center gap-3">
+        <ShieldAlert className="w-8 h-8" />
+        <div>
+          <h2 className="text-xl font-bold">Access Denied</h2>
+          <p>You do not have permission to access the IEMIS export module.</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleExport = async () => {
     setIsLoading(true);

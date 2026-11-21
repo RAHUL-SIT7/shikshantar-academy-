@@ -1,20 +1,48 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
     "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": false,
-    "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
+    "moduleDetection": "force",
+    "allowJs": true,
     "jsx": "react-jsx",
-    "strict": false,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noFallthroughCasesInSwitch": true
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
-  "include": ["server.ts", "vite.config.ts"]
+  "include": [
+    "src",
+    "server.ts",
+    "api",
+    "vite.config.ts"
+  ],
+  "exclude": [
+    "android",
+    "ios",
+    "dist",
+    "node_modules",
+    ".browsers",
+    "jdk-21",
+    "result_workspace",
+    "live_index.js",
+    "_GOLDEN_*",
+    "_phase2_*",
+    "_checkpoint_*",
+    "_backup_*",
+    "tests",
+    "test_*.ts"
+  ]
 }

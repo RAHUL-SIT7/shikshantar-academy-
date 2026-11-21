@@ -6,6 +6,7 @@ import SpotlightCard from '../components/SpotlightCard';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, auth, storage } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Facility {
   id: string;
@@ -81,8 +82,8 @@ export default function Facilities() {
     setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
   }, []);
 
-  const userRole = auth.currentUser ? (localStorage.getItem('userRole') || 'student') : 'guest';
-  const isAdmin = auth.currentUser ? userRole === 'admin' : false;
+  const { userRole, isAuthenticated } = useAuth();
+  const isAdmin = isAuthenticated && userRole === 'admin';
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'school_data', 'facilities_v3'), (docSnap) => {

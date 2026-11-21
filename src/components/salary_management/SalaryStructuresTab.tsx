@@ -67,16 +67,10 @@ export default function SalaryStructuresTab({ teachers, structures }: { teachers
             setTimeout(() => setStatus(null), 3000);
         } catch (error: any) {
             console.error("Error saving salary structure:", error);
-            const isPreviewMode = !!new URLSearchParams(window.location.search).get('previewRole');
-            if (isPreviewMode) {
-                setStatus("Saved structure successfully! (Simulated locally for preview mode)");
-                setTimeout(() => setStatus(null), 3000);
+            if (error.code === 'permission-denied' || String(error.message).includes('permissions')) {
+               setStatus("Failed to save: You do not have true admin permissions in the database.");
             } else {
-                if (error.code === 'permission-denied' || String(error.message).includes('permissions')) {
-                   setStatus("Failed to save: You do not have true admin permissions in the database.");
-                } else {
-                   setStatus("Failed to save: " + error.message);
-                }
+               setStatus("Failed to save: " + error.message);
             }
         }
     };

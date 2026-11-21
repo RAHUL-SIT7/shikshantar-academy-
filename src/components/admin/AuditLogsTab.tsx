@@ -97,7 +97,7 @@ export function AuditLogsTab() {
             studentId: data.studentId || data.studentUid || '',
             studentUid: data.studentUid || data.studentId || '',
             studentEmis: data.studentEmis || '',
-            studentName: data.studentName || 'System Target',
+            studentName: data.targetName || data.studentName || 'System Target',
             studentClass: data.studentClass || '-',
             academicYear: data.academicYear || '',
             enrollmentId: data.enrollmentId || '',
@@ -111,11 +111,11 @@ export function AuditLogsTab() {
             correlationId: data.correlationId || data.operationId || '',
             actorUid: data.actorUid || data.adminUid || '',
             adminUid: data.adminUid || data.actorUid || '',
-            actorName: data.actorName || data.adminName || 'Administrator',
-            adminName: data.adminName || data.actorName || 'Administrator',
-            actorRole: data.actorRole || 'admin',
-            adminEmail: data.adminEmail || '',
-            adminTier: data.adminTier || 'primary',
+            actorName: data.actorName || data.adminName || (data.actorRole === 'anonymous' ? 'Anonymous Visitor' : 'System'),
+            adminName: data.adminName || data.actorName || (data.actorRole === 'anonymous' ? 'Anonymous Visitor' : 'System'),
+            actorRole: data.actorRole || (data.adminTier ? 'admin' : 'admin'),
+            adminEmail: data.adminEmail || data.actorEmail || '',
+            adminTier: (data.actorRole && data.actorRole !== 'admin') ? '' : (data.adminTier || 'primary'),
             meta: data.meta || {}
           } as AuditLogEntry;
         });
@@ -156,7 +156,7 @@ export function AuditLogsTab() {
             studentId: data.studentId || data.studentUid || '',
             studentUid: data.studentUid || data.studentId || '',
             studentEmis: data.studentEmis || '',
-            studentName: data.studentName || 'General / Non-Student Ledger',
+            studentName: data.targetName || data.studentName || 'General / Non-Student Ledger',
             studentClass: data.studentClass || '-',
             academicYear: data.academicYear || '',
             enrollmentId: data.enrollmentId || '',
@@ -220,9 +220,11 @@ export function AuditLogsTab() {
         if (categoryFilter === 'system' && cat !== 'system' && cat !== 'academic') return false;
       }
 
-      // 3. Admin Tier Filter (1° Admin vs 2° Admin)
+      // 3. Admin Tier Filter (1° Admin vs 2° Admin — matches admin logs only)
       if (tierFilter !== 'all') {
-        const tier = (log.adminTier || 'primary').toLowerCase();
+        const role = String(log.actorRole || '').toLowerCase();
+        if (role && role !== 'admin') return false;
+        const tier = String(log.adminTier || '').toLowerCase();
         if (tierFilter === 'primary' && tier !== 'primary') return false;
         if (tierFilter === 'secondary' && tier !== 'secondary') return false;
       }
@@ -580,7 +582,39 @@ export function AuditLogsTab() {
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
                 {filteredLogs.map((log) => {
-                  const isPrimary = (log.adminTier || 'primary') === 'primary';
+                  const role = String(log.actorRole || 'admin').toLowerCase();
+                  const tier = String(log.adminTier || '').toLowerCase();
+                  const isAnonymousOrSystem = role === 'anonymous' || role === 'system';
+                  const isTeacher = role === 'teacher';
+                  const isStudent = role === 'student';
+                  const isPrimaryAdmin = role === 'admin' && (tier === 'primary' || !tier);
+                  const actorBadgeLabel = isAnonymousOrSystem
+                    ? (role === 'anonymous' ? 'Anonymous' : 'System')
+                    : isTeacher
+                    ? 'Teacher'
+                    : isStudent
+                    ? 'Student'
+                    : isPrimaryAdmin
+                    ? '1° Admin'
+                    : '2° Admin';
+                  const actorBadgeClass = isAnonymousOrSystem
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : isTeacher
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : isStudent
+                    ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                    : isPrimaryAdmin
+                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                    : 'bg-gray-100 text-gray-700 border border-gray-200';
+                  const avatarClass = isAnonymousOrSystem
+                    ? 'bg-rose-100 text-rose-700'
+                    : isTeacher
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : isStudent
+                    ? 'bg-sky-100 text-sky-700'
+                    : isPrimaryAdmin
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'bg-slate-100 text-slate-700';
                   return (
                     <tr key={log.id} className="hover:bg-gray-50/80 transition-colors">
                       {/* Timestamp */}
@@ -596,24 +630,20 @@ export function AuditLogsTab() {
                         )}
                       </td>
 
-                      {/* Admin info with 1° vs 2° Badge */}
+                      {/* Actor / Operator Role Badge */}
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${isPrimary ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'}`}>
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${avatarClass}`}>
                             {log.adminName ? log.adminName.charAt(0).toUpperCase() : 'A'}
                           </div>
                           <div>
                             <div className="font-bold text-gray-900 text-xs flex items-center gap-1.5">
                               {log.adminName}
-                              <span
-                                className={`text-[10px] px-1.5 py-0.2 rounded font-black uppercase ${
-                                  isPrimary ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-gray-100 text-gray-700 border border-gray-200'
-                                }`}
-                              >
-                                {isPrimary ? '1° Admin' : '2° Admin'}
+                              <span className={`text-[10px] px-1.5 py-0.2 rounded font-black uppercase ${actorBadgeClass}`}>
+                                {actorBadgeLabel}
                               </span>
                             </div>
-                            <div className="text-[11px] text-gray-400 font-normal">{log.adminEmail || 'admin'}</div>
+                            <div className="text-[11px] text-gray-400 font-normal">{log.adminEmail || role}</div>
                           </div>
                         </div>
                       </td>
@@ -708,15 +738,37 @@ export function AuditLogsTab() {
                   <p className="text-xs text-gray-500 font-mono">{selectedLog.adminEmail || selectedLog.adminUid}</p>
                 </div>
                 <div className="text-right">
-                  <span
-                    className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${
-                      (selectedLog.adminTier || 'primary') === 'primary'
-                        ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                        : 'bg-slate-100 text-slate-800 border border-slate-200'
-                    }`}
-                  >
-                    {(selectedLog.adminTier || 'primary') === 'primary' ? '1° Admin (Primary)' : '2° Admin (Secondary)'}
-                  </span>
+                  {(() => {
+                    const role = String(selectedLog.actorRole || 'admin').toLowerCase();
+                    const tier = String(selectedLog.adminTier || '').toLowerCase();
+                    const isAnon = role === 'anonymous' || role === 'system';
+                    const isTeacher = role === 'teacher';
+                    const isStudent = role === 'student';
+                    const isPrimary = role === 'admin' && (tier === 'primary' || !tier);
+                    const label = isAnon
+                      ? (role === 'anonymous' ? 'Security / Anonymous' : 'System Event')
+                      : isTeacher
+                      ? 'Teacher'
+                      : isStudent
+                      ? 'Student'
+                      : isPrimary
+                      ? '1° Admin (Primary)'
+                      : '2° Admin (Secondary)';
+                    const cls = isAnon
+                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                      : isTeacher
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      : isStudent
+                      ? 'bg-sky-100 text-sky-800 border border-sky-200'
+                      : isPrimary
+                      ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                      : 'bg-slate-100 text-slate-800 border border-slate-200';
+                    return (
+                      <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${cls}`}>
+                        {label}
+                      </span>
+                    );
+                  })()}
                   <p className="text-[11px] text-gray-400 mt-1">{selectedLog.timestampStr || selectedLog.date}</p>
                 </div>
               </div>

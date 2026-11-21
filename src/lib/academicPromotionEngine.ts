@@ -131,20 +131,21 @@ export const CANONICAL_CLASS_ORDER = [
 ];
 
 /**
- * Returns available Bikram Sambat (B.S.) academic years for selection
+ * Returns available Bikram Sambat (B.S.) academic years for selection.
+ * Supports custom Admin-managed academic years from Firestore when provided.
  */
-export function getAvailableAcademicYears(): { id: string; name: string; bsYear: number; isCurrent: boolean }[] {
-  const currentBs = getBSYearMonthDate().year;
-  const years = [];
-  for (let yr = currentBs - 3; yr <= currentBs + 2; yr++) {
-    years.push({
-      id: `${yr}-${yr + 1} B.S.`,
-      name: `${yr}-${yr + 1} B.S. (${yr})`,
-      bsYear: yr,
-      isCurrent: yr === currentBs
-    });
+export function getAvailableAcademicYears(customYears?: any[]): { id: string; name: string; bsYear: number; isCurrent: boolean; status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' }[] {
+  if (customYears && customYears.length > 0) {
+    return customYears.map(y => ({
+      id: y.academicYearId || y.id || String(y.bsYear),
+      name: y.displayTitle || `${y.bsYear} BS`,
+      bsYear: Number(y.bsYear) || parseInt(y.id, 10) || 2083,
+      isCurrent: Boolean(y.isCurrent),
+      status: (y.status === 'ARCHIVED' || y.status === 'INACTIVE' ? y.status : 'ACTIVE') as 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
+    })).sort((a, b) => b.bsYear - a.bsYear);
   }
-  return years;
+
+  return [];
 }
 
 /**
@@ -219,11 +220,23 @@ export async function getPromotionCandidates(
   sourceClass: string,
   targetAcademicYear: string,
   targetClass?: string,
-  sourceSection?: string
+  sourceSection?: string,
+  defaultTargetSection?: string
 ): Promise<PromotionCandidate[]> {
   const normSourceClass = normalizeClass(sourceClass);
-  const sourceBsYear = getCurrentBSAcademicYear(sourceAcademicYear);
   const targetBsYear = getCurrentBSAcademicYear(targetAcademicYear);
+
+  const blockedStatuses = new Set([
+    'deleted',
+    'rejected',
+    'pending',
+    'suspended',
+    'blocked',
+    'archived',
+    'inactive',
+    'auth_deleted_pending_finalization',
+    'deletion_pending'
+  ]);
 
   // 1. Fetch active students from users collection
   const qUsers = query(
@@ -235,11 +248,15 @@ export async function getPromotionCandidates(
 
   usersSnap.forEach(d => {
     const u = d.data();
-    if (u.status === 'DELETED' || u.deleted === true) return;
-    
+    const rawStatus = String(u.status || '').trim().toLowerCase();
+    if (u.deleted === true || u.isDeleted === true || u.active === false || blockedStatuses.has(rawStatus)) {
+      return;
+    }
+
     const uClass = normalizeClass(u.class || '');
     if (uClass.toLowerCase() === normSourceClass.toLowerCase()) {
-      if (!sourceSection || sourceSection === 'All' || (u.section || 'A').toLowerCase() === sourceSection.toLowerCase()) {
+      const uSec = String(u.section || 'A').trim().toUpperCase() || 'A';
+      if (!sourceSection || sourceSection === 'All' || uSec === sourceSection.trim().toUpperCase()) {
         candidateUsers.push({ id: d.id, ...u });
       }
     }
@@ -252,17 +269,11 @@ export async function getPromotionCandidates(
   );
   const targetEnrSnap = await getDocs(qTargetEnr);
   const targetEnrByUid: Record<string, AcademicEnrollment> = {};
-  const targetAssignedRolls: Record<string, string[]> = {}; // key: "class_section" -> array of rolls
 
   targetEnrSnap.forEach(d => {
     const enr = { id: d.id, ...d.data() } as AcademicEnrollment;
     if (enr.studentUid) {
       targetEnrByUid[enr.studentUid] = enr;
-    }
-    const groupKey = `${normalizeClass(enr.class)}_${(enr.section || 'A').toUpperCase()}`;
-    if (!targetAssignedRolls[groupKey]) targetAssignedRolls[groupKey] = [];
-    if (enr.rollNumber || enr.roll) {
-      targetAssignedRolls[groupKey].push(String(enr.rollNumber || enr.roll).trim());
     }
   });
 
@@ -273,8 +284,12 @@ export async function getPromotionCandidates(
   const candidates: PromotionCandidate[] = candidateUsers.map(u => {
     const existingTarget = targetEnrByUid[u.id];
     const alreadyEnrolled = Boolean(existingTarget);
-    const assignedRoll = u.rollNumber || u.rollNo || '';
-    
+    const assignedRoll = String(u.rollNumber || u.rollNo || '').trim();
+    const currentSec = String(u.section || 'A').trim().toUpperCase() || 'A';
+    const resolvedTargetSection = alreadyEnrolled
+      ? (existingTarget.section || currentSec)
+      : (defaultTargetSection && defaultTargetSection !== 'Keep' ? defaultTargetSection : currentSec);
+
     return {
       studentUid: u.id,
       studentId: u.permanentStudentId || u.studentId || `STU-${u.id.substring(0, 6)}`,
@@ -282,16 +297,16 @@ export async function getPromotionCandidates(
       emisNumber: u.emisNumber || u.studentEmis || '',
       studentName: u.fullName || u.name || 'Unnamed Student',
       gender: u.gender || '',
-      currentClass: u.class || sourceClass,
-      currentSection: u.section || 'A',
+      currentClass: normalizeClass(u.class || sourceClass),
+      currentSection: currentSec,
       currentRoll: assignedRoll,
       currentStatus: u.academicStatus || u.status || 'active',
       sourceAcademicYear: sourceAcademicYear,
       targetAcademicYear: targetAcademicYear,
       targetClass: alreadyEnrolled ? existingTarget.class : (isGraduating ? 'Graduated' : defaultTargetNext),
-      targetSection: alreadyEnrolled ? existingTarget.section : (u.section || 'A'),
-      targetRoll: alreadyEnrolled ? (existingTarget.rollNumber || existingTarget.roll) : assignedRoll,
-      proposedOutcome: alreadyEnrolled 
+      targetSection: resolvedTargetSection,
+      targetRoll: alreadyEnrolled ? (existingTarget.rollNumber || existingTarget.roll || '') : assignedRoll,
+      proposedOutcome: alreadyEnrolled
         ? (existingTarget.promotionOutcome || 'PROMOTED')
         : (isGraduating ? 'GRADUATED' : 'PROMOTED'),
       alreadyEnrolledInTargetYear: alreadyEnrolled,
@@ -299,11 +314,14 @@ export async function getPromotionCandidates(
     };
   });
 
-  // Sort candidates by current roll number numerically
+  // Sort candidates by current roll number numerically, then alphabetically by name
   candidates.sort((a, b) => {
-    const numA = parseInt(a.currentRoll, 10) || 999;
-    const numB = parseInt(b.currentRoll, 10) || 999;
-    return numA - numB;
+    const numA = parseInt(a.currentRoll, 10);
+    const numB = parseInt(b.currentRoll, 10);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+    if (!isNaN(numA) && isNaN(numB)) return -1;
+    if (isNaN(numA) && !isNaN(numB)) return 1;
+    return a.studentName.localeCompare(b.studentName);
   });
 
   return candidates;
@@ -479,123 +497,74 @@ export async function executeSingleStudentPromotion(
 }
 
 /**
- * Executes bulk academic promotion for an array of candidate students with atomic safeguards and audit logging
+ * Executes bulk academic promotion via the trusted Admin server endpoint (/api/academic/execute-promotion)
+ * with atomic transactions, source-year snapshot preservation, and full server-side audit logging.
  */
 export async function executePromotionBatch(
   candidates: PromotionCandidate[],
   sourceAcademicYear: string,
   targetAcademicYear: string,
-  actorUid: string,
-  actorRole: string,
-  actorName: string = 'Administrator'
+  _actorUid?: string,
+  _actorRole?: string,
+  _actorName?: string
 ): Promise<PromotionBatchResult> {
-  const result: PromotionBatchResult = {
-    totalSelected: candidates.length,
-    promotedCount: 0,
-    retainedCount: 0,
-    transferredCount: 0,
-    graduatedCount: 0,
-    skippedCount: 0,
-    failedCount: 0,
-    errors: [],
-    details: []
-  };
+  if (!candidates || candidates.length === 0) {
+    throw new Error('Please select at least one student to promote.');
+  }
 
-  // 1. Validate Roll Conflicts
+  // 1. Validate Roll Conflicts client-side before sending
   const rollValidation = validateTargetRollAssignments(candidates);
   if (!rollValidation.valid) {
     const firstConflict = rollValidation.conflicts[0];
     throw new Error(`Roll Assignment Conflict: ${firstConflict.reason}`);
   }
 
-  // 2. Audit preparation initiation
-  try {
-    await recordAuditLog({
-      category: 'academic',
-      actionType: 'PROMOTION_PREPARED',
-      targetType: 'academic_promotion_batch',
-      targetId: `${sourceAcademicYear}_TO_${targetAcademicYear}`,
-      studentClass: candidates[0]?.currentClass || 'All',
-      previousValue: `Source Year: ${sourceAcademicYear}`,
-      newValue: `Target Year: ${targetAcademicYear}, Candidates: ${candidates.length}`,
-      reason: `Admin initiated promotion preparation for ${candidates.length} students from ${sourceAcademicYear} to ${targetAcademicYear}`,
-      result: 'SUCCESS'
-    });
-  } catch (e) {
-    console.warn('Audit log failed for PROMOTION_PREPARED:', e);
+  // 2. Authenticate with Admin Firebase ID Token
+  const idToken = await auth.currentUser?.getIdToken();
+  if (!idToken) {
+    throw new Error('Administrator authentication required. Please sign in again.');
   }
 
-  // 3. Process each candidate with error isolation
-  for (const candidate of candidates) {
-    try {
-      const outcomeRes = await executeSingleStudentPromotion(
-        candidate,
-        actorUid,
-        actorRole,
-        actorName
-      );
+  const res = await fetch('/api/academic/execute-promotion', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`
+    },
+    body: JSON.stringify({
+      sourceAcademicYear,
+      targetAcademicYear,
+      candidates: candidates.map(c => ({
+        studentUid: c.studentUid,
+        studentId: c.studentId,
+        permanentStudentId: c.permanentStudentId,
+        emisNumber: c.emisNumber,
+        studentName: c.studentName,
+        currentClass: c.currentClass,
+        currentSection: c.currentSection,
+        currentRoll: c.currentRoll,
+        targetClass: c.targetClass,
+        targetSection: c.targetSection,
+        targetRoll: c.targetRoll,
+        proposedOutcome: c.proposedOutcome
+      }))
+    })
+  });
 
-      if (candidate.proposedOutcome === 'PROMOTED') result.promotedCount++;
-      else if (candidate.proposedOutcome === 'RETAINED') result.retainedCount++;
-      else if (candidate.proposedOutcome === 'TRANSFERRED') result.transferredCount++;
-      else if (candidate.proposedOutcome === 'GRADUATED') result.graduatedCount++;
-      else result.skippedCount++;
-
-      result.details.push({
-        studentUid: candidate.studentUid,
-        studentName: candidate.studentName,
-        outcome: candidate.proposedOutcome,
-        enrollmentId: outcomeRes.enrollmentId,
-        status: 'SUCCESS',
-        message: outcomeRes.message
-      });
-
-      // Individual Audit Record
-      try {
-        const actionTypeMap: Record<PromotionOutcome, string> = {
-          PROMOTED: 'STUDENT_PROMOTED',
-          RETAINED: 'STUDENT_RETAINED',
-          TRANSFERRED: 'STUDENT_TRANSFERRED',
-          GRADUATED: 'STUDENT_GRADUATED',
-          INACTIVE: 'STUDENT_MARKED_INACTIVE'
-        };
-
-        await recordAuditLog({
-          category: 'academic',
-          actionType: actionTypeMap[candidate.proposedOutcome] || 'STUDENT_PROMOTED',
-          targetType: 'student_enrollment',
-          targetId: outcomeRes.enrollmentId || candidate.studentUid,
-          studentId: candidate.studentId,
-          studentUid: candidate.studentUid,
-          studentName: candidate.studentName,
-          studentClass: candidate.targetClass,
-          academicYear: candidate.targetAcademicYear,
-          enrollmentId: outcomeRes.enrollmentId,
-          previousValue: `${candidate.sourceAcademicYear}: Class ${candidate.currentClass} (${candidate.currentSection}) Roll ${candidate.currentRoll}`,
-          newValue: `${candidate.targetAcademicYear}: ${candidate.proposedOutcome} -> Class ${candidate.targetClass} (${candidate.targetSection}) Roll ${candidate.targetRoll}`,
-          reason: `Admin confirmed ${candidate.proposedOutcome} for ${candidate.studentName}`,
-          result: 'SUCCESS'
-        });
-      } catch (auditErr) {
-        console.warn('Audit record failed for individual promotion:', auditErr);
-      }
-    } catch (err: any) {
-      console.error(`Failed to promote student ${candidate.studentName} (${candidate.studentUid}):`, err);
-      result.failedCount++;
-      result.errors.push({
-        studentUid: candidate.studentUid,
-        studentName: candidate.studentName,
-        error: err.message || 'Unknown promotion error'
-      });
-      result.details.push({
-        studentUid: candidate.studentUid,
-        studentName: candidate.studentName,
-        outcome: candidate.proposedOutcome,
-        status: 'FAILED',
-        message: err.message || 'Failed'
-      });
-    }
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(payload?.error || `Promotion request failed (HTTP ${res.status}).`);
   }
 
-  return result;
+  return {
+    totalSelected: Number(payload.totalSelected || candidates.length),
+    promotedCount: Number(payload.promotedCount || 0),
+    retainedCount: Number(payload.retainedCount || 0),
+    transferredCount: Number(payload.transferredCount || 0),
+    graduatedCount: Number(payload.graduatedCount || 0),
+    skippedCount: Number(payload.skippedCount || 0),
+    failedCount: Number(payload.failedCount || 0),
+    errors: Array.isArray(payload.errors) ? payload.errors : [],
+    details: Array.isArray(payload.details) ? payload.details : []
+  };
 }

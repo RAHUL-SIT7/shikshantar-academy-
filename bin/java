@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /app/applet/jre/bin/java "$@"

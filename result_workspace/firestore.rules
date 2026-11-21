@@ -1,0 +1,315 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // HELPER FUNCTIONS
+    // ==========================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return hasUserDoc() && getUserData().role == 'admin';
+    }
+
+    function isPrimaryAdmin() {
+      return isAdmin() && (
+        !('adminTier' in getUserData()) || 
+        getUserData().adminTier == 'primary' || 
+        getUserData().email == 'rahulsah4534@gmail.com'
+      );
+    }
+
+    // ==========================================
+    // USER PROFILES & ACCOUNTS (RESTRICTED PRIVACY)
+    // Prevents student roster leaks.
+    // Students/parents can only read their own profile.
+    // ==========================================
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        request.auth.uid == userId || 
+        (hasUserDoc() && getUserData().role == 'teacher')
+      );
+      allow create: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'adminTier', 'class', 'primaryClassTeacher'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // ACADEMIC STRUCTURE & CONFIGURATION
+    // ==========================================
+
+    match /academic_sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /subjectConfigs/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /teacherAssignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /custom_subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /students/{studentId} {
+      allow read: if isSignedIn() && (isAdmin() || (hasUserDoc() && getUserData().role == 'teacher'));
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // PUBLIC & SCHOOL ERP COLLECTIONS (WHITELISTED)
+    // ==========================================
+
+    match /admissions/{admissionId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /contact_enquiries/{enquiryId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /alumni_submissions/{submissionId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /notices/{noticeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /site_content/{contentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /school_data/{dataId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // EXAMINATION & RESULT MANAGEMENT (ZERO-TRUST HARDENED)
+    // Direct client SDK writes are strictly denied (handled by server Admin SDK APIs).
+    // Direct client SDK reads are restricted to Admins.
+    // Teachers, students and parents access verified data via /api/results/*.
+    // ==========================================
+
+    match /exams/{examId} {
+      allow read: if isSignedIn() && (isAdmin() || (hasUserDoc() && getUserData().role == 'teacher'));
+      allow write: if false; // Server Admin SDK only
+    }
+
+    match /results/{resultId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow write: if false; // Direct client SDK access denied
+    }
+
+    match /academicResults/{resultId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow write: if false; // Direct client SDK access denied
+    }
+
+    match /resultSummary/{summaryId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow write: if false; // Direct client SDK access denied
+    }
+
+    match /publicationManifests/{manifestId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow write: if false; // Server Admin SDK only
+    }
+
+    match /exam_subject_status/{statusId} {
+      allow read: if isSignedIn() && (isAdmin() || (hasUserDoc() && getUserData().role == 'teacher'));
+      allow write: if false; // Server Admin SDK only
+    }
+
+    match /class_reviews/{reviewId} {
+      allow read: if isSignedIn() && (isAdmin() || (hasUserDoc() && getUserData().role == 'teacher'));
+      allow write: if false; // Server Admin SDK only
+    }
+
+    match /resultHistory/{historyId} {
+      allow read: if isPrimaryAdmin();
+      allow write: if false; // Server Admin SDK only
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isPrimaryAdmin();
+      allow create, update, delete: if false; // Direct client SDK writes denied
+    }
+
+    match /results_secure/{studentId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow write: if false;
+
+      match /records/{recordId} {
+        allow read: if isSignedIn() && isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /student_enrollments/{enrollmentId} {
+      allow read: if isSignedIn() && isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /userCalendars/{userId} {
+      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      match /{subpath=**} {
+        allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      }
+    }
+
+    // ==========================================
+    // USER SESSIONS & LOGIN SECURITY
+    // ==========================================
+
+    match /user_sessions/{sessionId} {
+      allow read: if isSignedIn() && (resource == null || ('userUid' in resource.data && resource.data.userUid == request.auth.uid));
+      allow create: if isSignedIn() && 'userUid' in request.resource.data && request.resource.data.userUid == request.auth.uid;
+      allow update: if isSignedIn() && 'userUid' in resource.data && resource.data.userUid == request.auth.uid && 'userUid' in request.resource.data && request.resource.data.userUid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ==========================================
+    // FINANCIAL RECORDS & CASH LEDGER
+    // Strict isolation: Zero teacher access, Admin write
+    // ==========================================
+
+    match /remitBills/{billId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /billItems/{itemId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /studentFees/{feeId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /transactions/{txId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /cash_ledger/{entryId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /student_advances/{advanceId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /refund_records/{refundId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /excess_payment_requests/{reqId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /ledger_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /document_sequences/{sequenceId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /annual_fee_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /admission_fee_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /billing_month_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /payment_receipt_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /archived_student_fees/{archiveId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ==========================================
+    // STAFF & TEACHER SALARIES
+    // ==========================================
+
+    match /salary_structures/{structureId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /salary_records/{recordId} {
+      allow read: if isAdmin() || (hasUserDoc() && getUserData().role == 'teacher' && resource != null && 'teacherId' in resource.data && resource.data.teacherId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /salary_requests/{requestId} {
+      allow read: if isAdmin() || (hasUserDoc() && getUserData().role == 'teacher' && resource != null && 'teacherId' in resource.data && resource.data.teacherId == request.auth.uid);
+      allow create: if (hasUserDoc() && getUserData().role == 'teacher') || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // DEFAULT CLOSED FALLBACK
+    // ==========================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

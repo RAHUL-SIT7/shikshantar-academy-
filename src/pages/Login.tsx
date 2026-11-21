@@ -21,6 +21,19 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
+import TurnstileWidget from '../components/common/TurnstileWidget';
+import { useAuth } from '../contexts/AuthContext';
+
+const LOCK_STORAGE_KEY = 'shikshantar_login_lock_until';
+
+function formatCountdown(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+const BOOTSTRAP_OWNER_EMAIL = 'rahulsah4534@gmail.com';
 
 const logoUrl = "/logo.png";
 const logoFallback = "/logo.png";
@@ -34,13 +47,8 @@ const ensureSafePassword = (pwd: string) => {
 
 type View = 'login' | 'forgot' | 'reset';
 
-export default function Login({ 
-  setIsAuthenticated,
-  setUserRole
-}: { 
-  setIsAuthenticated: (val: boolean) => void;
-  setUserRole?: (role: string) => void;
-}) {
+export default function Login({ setIsAuthenticated }: { setIsAuthenticated?: (val: boolean) => void }) {
+  const { refreshProfile } = useAuth();
   const [searchParams] = useSearchParams();
   const [view, setView] = useState<View>('login');
   
@@ -55,21 +63,73 @@ export default function Login({
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Anti-bot check: Unticked by default for human verification security
-  const [captchaVerified, setCaptchaVerified] = useState(false);
-  const [captchaChecking, setCaptchaChecking] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // Server-verified Cloudflare Turnstile token + reset keys
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
+  const [forgotTurnstileResetKey, setForgotTurnstileResetKey] = useState(0);
+  const [lockedUntilMs, setLockedUntilMs] = useState<number>(() => {
+    try {
+      const saved = Number(sessionStorage.getItem(LOCK_STORAGE_KEY) || 0);
+      return saved > Date.now() ? saved : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [lockRemainingSeconds, setLockRemainingSeconds] = useState<number>(() => {
+    try {
+      const saved = Number(sessionStorage.getItem(LOCK_STORAGE_KEY) || 0);
+      return saved > Date.now() ? Math.ceil((saved - Date.now()) / 1000) : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
   const [oobCode, setOobCode] = useState<string | null>(null);
 
   const usernameInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Reset mechanism on component mount and view transition to ensure genuine human interaction
+  const applyLockoutUntil = (untilMs: number, customMsg?: string) => {
+    const safeUntil = untilMs > Date.now() ? untilMs : Date.now() + 5 * 60 * 1000;
+    setLockedUntilMs(safeUntil);
+    setLockRemainingSeconds(Math.max(1, Math.ceil((safeUntil - Date.now()) / 1000)));
+    setRemainingAttempts(0);
+    try {
+      sessionStorage.setItem(LOCK_STORAGE_KEY, String(safeUntil));
+    } catch {}
+    if (customMsg) {
+      setError(customMsg);
+    }
+  };
+
   useEffect(() => {
-    setCaptchaVerified(false);
-    setCaptchaChecking(false);
-    setCaptchaToken(null);
-  }, [view]);
+    if (!lockedUntilMs || lockedUntilMs <= Date.now()) {
+      setLockRemainingSeconds(0);
+      try {
+        sessionStorage.removeItem(LOCK_STORAGE_KEY);
+      } catch {}
+      return;
+    }
+
+    const tick = () => {
+      const diff = lockedUntilMs - Date.now();
+      if (diff <= 0) {
+        setLockedUntilMs(0);
+        setLockRemainingSeconds(0);
+        setRemainingAttempts(null);
+        setError('');
+        try {
+          sessionStorage.removeItem(LOCK_STORAGE_KEY);
+        } catch {}
+      } else {
+        setLockRemainingSeconds(Math.ceil(diff / 1000));
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [lockedUntilMs]);
 
   useEffect(() => {
     const mode = searchParams.get('mode');
@@ -87,62 +147,34 @@ export default function Login({
     }
   }, [searchParams]);
 
-  const handleCaptchaClick = async () => {
-    if (captchaVerified) {
-      setCaptchaVerified(false);
-      setCaptchaToken(null);
-      return;
-    }
-
-    setCaptchaChecking(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/auth/verify-captcha', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientTimestamp: Date.now(),
-          challengeProof: `client_interaction_${Math.random().toString(36).substring(2)}`
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok && data.success) {
-        setCaptchaToken(data.verificationToken || `srv_token_${Date.now()}`);
-        setCaptchaVerified(true);
-      } else {
-        setCaptchaVerified(false);
-        setCaptchaToken(null);
-        setError(data.error || 'Security verification failed. Please try again.');
-      }
-    } catch {
-      // Local fallback verification in case of offline/network interruption
-      setCaptchaToken(`local_verified_${Date.now()}`);
-      setCaptchaVerified(true);
-    } finally {
-      setCaptchaChecking(false);
-    }
-  };
-
   const handleContinueAsGuest = () => {
-    localStorage.setItem('userRole', 'guest');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('userRoleOverride');
     localStorage.setItem('isGuest', 'true');
     localStorage.removeItem('studentId');
     localStorage.removeItem('studentClass');
     localStorage.removeItem('adminSearchStudentId');
     localStorage.removeItem('teacherSubjects');
-    setIsAuthenticated(false);
+    setIsAuthenticated?.(false);
     navigate('/');
+  };
+
+  const resetLoginTurnstile = () => {
+    setTurnstileToken('');
+    setTurnstileResetKey(k => k + 1);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Security validation: genuine user interaction verified via server token
-    if (!captchaVerified || !captchaToken) {
-      setError('Please click the "I\'m not a robot" checkbox to verify security.');
+    if (lockRemainingSeconds > 0) {
+      setError(`Account temporarily locked. Please wait ${formatCountdown(lockRemainingSeconds)} before trying again.`);
+      return;
+    }
+
+    if (!turnstileToken) {
+      setError('Please complete the Cloudflare Turnstile security verification before signing in.');
       return;
     }
 
@@ -163,11 +195,56 @@ export default function Login({
         emailToAuth = `${emailToAuth.toLowerCase()}@shikshantar.edu.np`;
       }
 
-      let userCredential;
       const cleanEmail = emailToAuth.trim().toLowerCase();
+
+      // 1. Fail-closed server-side brute-force lockout & Cloudflare Turnstile verification gate
+      try {
+        const precheckRes = await fetch('/api/auth/login-precheck', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            identifier: cleanEmail,
+            turnstileToken,
+            action: 'login'
+          })
+        });
+        const precheckData = await precheckRes.json().catch(() => ({}));
+        if (precheckRes.status === 429 || precheckData.locked) {
+          const untilMs = precheckData.lockedUntil
+            ? Date.parse(precheckData.lockedUntil)
+            : Date.now() + Number(precheckData.retryAfterSeconds || 300) * 1000;
+          applyLockoutUntil(
+            untilMs,
+            precheckData.error || 'Account temporarily locked after 4 consecutive failed attempts. Please wait 5 minutes.'
+          );
+          resetLoginTurnstile();
+          setLoading(false);
+          return;
+        }
+        if (!precheckRes.ok || precheckData.allowed !== true) {
+          setError(precheckData.error || 'Cloudflare Turnstile security verification failed. Please verify again.');
+          resetLoginTurnstile();
+          setLoading(false);
+          return;
+        }
+      } catch {
+        setError('Security verification service is unreachable. Login blocked for your protection. Please try again.');
+        resetLoginTurnstile();
+        setLoading(false);
+        return;
+      }
+
+      // Keep Turnstile widget steady on success; reset only on auth failure/block branches below
+
+      let userCredential;
       try {
         userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
       } catch (signInErr: any) {
+        const errCode = String(signInErr?.code || '');
+        if (errCode === 'auth/network-request-failed' || errCode === 'auth/too-many-requests') {
+          throw signInErr;
+        }
+
         const attempts = [
           ensureSafePassword(password),
           password.trim(),
@@ -181,30 +258,117 @@ export default function Login({
             userCredential = await signInWithEmailAndPassword(auth, cleanEmail, candidate);
             resolved = true;
             break;
-          } catch {
-            // continue checking fallback
+          } catch (fallbackErr: any) {
+            const fbCode = String(fallbackErr?.code || '');
+            if (fbCode === 'auth/network-request-failed' || fbCode === 'auth/too-many-requests') {
+              throw fallbackErr;
+            }
           }
         }
         if (!resolved) {
+          try {
+            const failRes = await fetch('/api/auth/login-attempt', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ identifier: cleanEmail, outcome: 'FAILURE' })
+            });
+            const failData = await failRes.json().catch(() => ({}));
+            if (failRes.status === 429 || failData.locked) {
+              const untilMs = failData.lockedUntil
+                ? Date.parse(failData.lockedUntil)
+                : Date.now() + Number(failData.retryAfterSeconds || 300) * 1000;
+              applyLockoutUntil(
+                untilMs,
+                failData.error || 'Account temporarily locked for 5 minutes after 4 consecutive failed password attempts.'
+              );
+              resetLoginTurnstile();
+              setLoading(false);
+              return;
+            }
+            if (typeof failData.remainingAttemptsBeforeCooldown === 'number') {
+              setRemainingAttempts(failData.remainingAttemptsBeforeCooldown);
+              setError(
+                `Invalid username or password. ${failData.remainingAttemptsBeforeCooldown} attempt${failData.remainingAttemptsBeforeCooldown === 1 ? '' : 's'} remaining before temporary 5-minute lock.`
+              );
+              resetLoginTurnstile();
+              setLoading(false);
+              return;
+            }
+          } catch {
+            // fall through to generic invalid credential error
+          }
           throw signInErr;
         }
       }
+
+      // Reset server-side failed login counter using verified Firebase ID token
+      try {
+        const idToken = await userCredential.user.getIdToken();
+        const resetAttemptRes = await fetch('/api/auth/login-attempt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ identifier: cleanEmail, outcome: 'SUCCESS' })
+        });
+        if (resetAttemptRes.status === 423) {
+          const lockData = await resetAttemptRes.json().catch(() => ({}));
+          await signOut(auth);
+          const untilMs = lockData.lockedUntil
+            ? Date.parse(lockData.lockedUntil)
+            : Date.now() + Number(lockData.retryAfterSeconds || 300) * 1000;
+          applyLockoutUntil(
+            untilMs,
+            lockData.error || 'Account is temporarily locked. Please wait before signing in.'
+          );
+          resetLoginTurnstile();
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // non-blocking
+      }
+
+      setRemainingAttempts(null);
+      setLockedUntilMs(0);
+      setLockRemainingSeconds(0);
+      try {
+        sessionStorage.removeItem(LOCK_STORAGE_KEY);
+      } catch {}
       
       const userSnap = await getDoc(doc(db, 'users', userCredential.user.uid));
-      
+      const isVerifiedOwner =
+        (userCredential.user.email || '').trim().toLowerCase() === BOOTSTRAP_OWNER_EMAIL &&
+        userCredential.user.emailVerified === true;
+
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        
-        if (userData.status === 'pending') {
+        const stUpper = String(userData.status || '').trim().toUpperCase();
+        if (stUpper === 'PENDING') {
           await signOut(auth);
           setError('Invalid username or password.');
+          resetLoginTurnstile();
           setLoading(false);
           return;
         }
 
-        if (userData.status === 'blocked' || userData.status === 'rejected' || userData.active === false) {
+        if (
+          userData.deleted === true ||
+          userData.active === false ||
+          ['BLOCKED', 'REJECTED', 'SUSPENDED', 'INACTIVE', 'DELETED', 'ARCHIVED', 'AUTH_DELETED_PENDING_FINALIZATION', 'DELETION_PENDING'].includes(stUpper)
+        ) {
           await signOut(auth);
           setError('Your account has been deactivated. Please contact school administration.');
+          resetLoginTurnstile();
+          setLoading(false);
+          return;
+        }
+
+        if (!userData.role && !isVerifiedOwner) {
+          await signOut(auth);
+          setError('Invalid username or password.');
+          resetLoginTurnstile();
           setLoading(false);
           return;
         }
@@ -214,78 +378,20 @@ export default function Login({
         } else if (userData.studentId) {
           localStorage.setItem('studentId', userData.studentId);
         }
-
-        const authoritativeRole = (userData.role || 'student').toLowerCase();
-        localStorage.setItem('userRole', authoritativeRole);
-        sessionStorage.setItem('shikshantar_active_tab_session', 'true');
-        if (setUserRole) {
-          setUserRole(authoritativeRole);
-        }
-      } else {
+      } else if (!isVerifiedOwner) {
         await signOut(auth);
         setError('Invalid username or password.');
+        resetLoginTurnstile();
         setLoading(false);
         return;
       }
 
-      // Record Server-Side Login Security Event & Send Email Alert
       try {
-        const idToken = await userCredential.user.getIdToken();
-        const currentLocalSessionId = localStorage.getItem('localSessionId') || `sess_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
-        localStorage.setItem('localSessionId', currentLocalSessionId);
+        localStorage.setItem('shikshantar_last_activity', Date.now().toString());
+      } catch {}
 
-        const loginEventId = `login_${userCredential.user.uid}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kathmandu';
-
-        // Detect client browser with reliable client-side Brave & Chromium signals
-        let clientBrowser = 'Unknown Browser';
-        try {
-          const nav = navigator as any;
-          if (nav.brave && typeof nav.brave.isBrave === 'function') {
-            const isBrave = await nav.brave.isBrave().catch(() => false);
-            if (isBrave) clientBrowser = 'Brave';
-          } else if (Boolean(nav.brave)) {
-            clientBrowser = 'Brave';
-          }
-
-          if (clientBrowser === 'Unknown Browser') {
-            const ua = navigator.userAgent || '';
-            if ((window as any).opr !== undefined || (window as any).opera !== undefined || ua.includes('OPR/') || ua.includes('Opera/')) {
-              clientBrowser = 'Opera';
-            } else if (ua.includes('Edg/')) {
-              clientBrowser = 'Microsoft Edge';
-            } else if (ua.includes('SamsungBrowser/')) {
-              clientBrowser = 'Samsung Internet';
-            } else if (ua.includes('Vivaldi/')) {
-              clientBrowser = 'Vivaldi';
-            } else if (ua.includes('Chrome/') && !ua.includes('Edg/')) {
-              clientBrowser = 'Chrome';
-            } else if (ua.includes('Firefox/')) {
-              clientBrowser = 'Firefox';
-            } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
-              clientBrowser = 'Safari';
-            }
-          }
-        } catch {}
-
-        await fetch('/api/auth/record-login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${idToken}`
-          },
-          body: JSON.stringify({
-            sessionId: currentLocalSessionId,
-            loginEventId,
-            clientTimeZone: tz,
-            clientBrowser
-          })
-        });
-      } catch (loginSecErr) {
-        console.warn('[LOGIN SECURITY] Non-blocking post-login security event error:', loginSecErr);
-      }
-
-      setIsAuthenticated(true);
+      await refreshProfile().catch(() => {});
+      setIsAuthenticated?.(true);
       navigate('/');
     } catch (err: any) {
       if (
@@ -304,6 +410,7 @@ export default function Login({
       } else {
          setError('Invalid username or password.');
       }
+      resetLoginTurnstile();
     } finally {
       setLoading(false);
     }
@@ -320,6 +427,11 @@ export default function Login({
       return;
     }
 
+    if (!turnstileToken) {
+      setError('Please complete the Cloudflare Turnstile security verification before requesting a password reset.');
+      return;
+    }
+
     setLoading(true);
     try {
       let emailToSend = inputIdentifier;
@@ -327,9 +439,33 @@ export default function Login({
         emailToSend = `${emailToSend.toLowerCase()}@shikshantar.edu.np`;
       }
 
-      await sendPasswordResetEmail(auth, emailToSend);
+      const resetCheckRes = await fetch('/api/auth/password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: emailToSend,
+          turnstileToken
+        })
+      });
+      const resetCheckData = await resetCheckRes.json().catch(() => ({}));
+      setTurnstileToken('');
+      setForgotTurnstileResetKey(k => k + 1);
+      if (resetCheckRes.status === 429) {
+        setError(resetCheckData.error || 'Password reset limit reached (maximum 2 requests per 5 minutes). Please wait before trying again.');
+        setLoading(false);
+        return;
+      }
+      if (!resetCheckRes.ok) {
+        setError(resetCheckData.error || 'Security verification failed. Please complete Turnstile again.');
+        setLoading(false);
+        return;
+      }
+
+      await sendPasswordResetEmail(auth, emailToSend).catch(() => {});
       setMessage('If an authorized account exists for this identifier, password reset instructions have been sent.');
     } catch (err: any) {
+      setTurnstileToken('');
+      setForgotTurnstileResetKey(k => k + 1);
       if (err.code === 'auth/too-many-requests') {
         setError('Too many requests. Please try again later.');
       } else {
@@ -491,11 +627,29 @@ export default function Login({
               </p>
             </div>
 
-            {/* Feedback Messages */}
+            {/* Feedback Messages & Lockout Countdown */}
+            {lockRemainingSeconds > 0 && view === 'login' && (
+              <div className="mb-4 p-3.5 bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>Temporary security lockout active. Please wait before signing in again.</span>
+                </div>
+                <span className="font-mono text-sm font-black px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
+                  {formatCountdown(lockRemainingSeconds)}
+                </span>
+              </div>
+            )}
+
             {error && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-xs">
                 <ShieldAlert className="w-4 h-4 shrink-0 text-red-600" />
                 <span>{error}</span>
+              </div>
+            )}
+
+            {remainingAttempts !== null && remainingAttempts > 0 && remainingAttempts < 4 && lockRemainingSeconds === 0 && view === 'login' && (
+              <div className="mb-4 px-3 py-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-[11px] font-semibold">
+                Security Notice: {remainingAttempts} failed attempt{remainingAttempts === 1 ? '' : 's'} left before a 5-minute cooldown lock.
               </div>
             )}
 
@@ -607,6 +761,8 @@ export default function Login({
                       setView('forgot');
                       setError('');
                       setMessage('');
+                      setTurnstileToken('');
+                      setForgotTurnstileResetKey(k => k + 1);
                     }}
                     className="text-xs font-semibold text-[#1d70b8] hover:text-[#0c4b8e] hover:underline transition-colors cursor-pointer"
                   >
@@ -614,53 +770,27 @@ export default function Login({
                   </button>
                 </div>
 
-                {/* RECAPTCHA / ANTI-BOT BOX - UNCHECKED BY DEFAULT */}
-                <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-3 sm:p-3.5 flex items-center justify-between shadow-xs">
-                  <button
-                    type="button"
-                    onClick={handleCaptchaClick}
-                    className="flex items-center gap-3 cursor-pointer group text-left"
-                  >
-                    <div className={`w-6 h-6 rounded-md border flex items-center justify-center transition-all ${
-                      captchaVerified 
-                        ? 'bg-emerald-500 border-emerald-600 text-white' 
-                        : 'bg-white border-slate-300 group-hover:border-slate-400'
-                    }`}>
-                      {captchaChecking ? (
-                        <RotateCw className="w-3.5 h-3.5 text-blue-600 animate-spin" />
-                      ) : captchaVerified ? (
-                        <Check className="w-4 h-4 text-white stroke-[3]" />
-                      ) : null}
-                    </div>
-                    <div>
-                      <div className={`text-xs sm:text-sm font-semibold transition-colors ${captchaVerified ? 'text-emerald-700' : 'text-slate-700'}`}>
-                        {captchaVerified ? "I'm not a robot (Verified)" : "I'm not a robot"}
-                      </div>
-                      <div className={`text-[10px] font-medium transition-colors ${captchaVerified ? 'text-emerald-600' : 'text-slate-400'}`}>
-                        {captchaVerified ? "Security token verified" : "Anti-bot protection active"}
-                      </div>
-                    </div>
-                  </button>
-
-                  <div className="flex flex-col items-center justify-center text-center pl-2 border-l border-slate-200">
-                    <RotateCw className="w-4 h-4 text-slate-400 mb-0.5" />
-                    <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">
-                      RECAPTCHA
-                    </span>
-                    <span className="text-[7px] text-slate-400">
-                      Privacy - Terms
-                    </span>
-                  </div>
-                </div>
+                {/* CLOUDFLARE TURNSTILE ANTI-BOT VERIFICATION */}
+                <TurnstileWidget
+                  action="login"
+                  resetKey={turnstileResetKey}
+                  onVerify={(token) => setTurnstileToken(token)}
+                  onExpire={() => setTurnstileToken('')}
+                  onError={() => setTurnstileToken('')}
+                />
 
                 {/* SIGN IN TO PORTAL BUTTON */}
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="w-full mt-2 py-3.5 px-6 rounded-2xl bg-gradient-to-b from-[#1c4b78] via-[#13375b] to-[#0d2847] hover:from-[#173e63] hover:to-[#0a1f38] text-white font-black text-sm tracking-wider uppercase flex items-center justify-center gap-2.5 shadow-lg shadow-[#0d2847]/35 hover:shadow-[#0d2847]/50 transition-all duration-200 cursor-pointer disabled:opacity-75 active:scale-[0.99] relative overflow-hidden z-20 pointer-events-auto"
+                  disabled={loading || lockRemainingSeconds > 0}
+                  className="w-full mt-2 py-3.5 px-6 rounded-2xl bg-gradient-to-b from-[#1c4b78] via-[#13375b] to-[#0d2847] hover:from-[#173e63] hover:to-[#0a1f38] text-white font-black text-sm tracking-wider uppercase flex items-center justify-center gap-2.5 shadow-lg shadow-[#0d2847]/35 hover:shadow-[#0d2847]/50 transition-all duration-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99] relative overflow-hidden"
                 >
                   <div className="absolute top-0 inset-x-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent pointer-events-none" />
-                  <span className="relative z-10">{loading ? 'AUTHENTICATING...' : 'SIGN IN TO PORTAL'}</span>
+                  <span>
+                    {lockRemainingSeconds > 0
+                      ? `LOCKED (${formatCountdown(lockRemainingSeconds)})`
+                      : (loading ? 'AUTHENTICATING...' : 'SIGN IN TO PORTAL')}
+                  </span>
                 </button>
 
                 {/* CONTINUE AS GUEST USER BUTTON */}
@@ -712,6 +842,14 @@ export default function Login({
                   </div>
                 </div>
 
+                <TurnstileWidget
+                  action="password_reset"
+                  resetKey={forgotTurnstileResetKey}
+                  onVerify={(token) => setTurnstileToken(token)}
+                  onExpire={() => setTurnstileToken('')}
+                  onError={() => setTurnstileToken('')}
+                />
+
                 <button
                   type="submit"
                   disabled={loading}
@@ -727,6 +865,8 @@ export default function Login({
                       setView('login');
                       setError('');
                       setMessage('');
+                      setTurnstileToken('');
+                      setTurnstileResetKey(k => k + 1);
                     }}
                     className="text-xs font-bold text-[#092b4c] hover:underline flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
                   >

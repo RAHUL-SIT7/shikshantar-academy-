@@ -411,6 +411,8 @@ export default function RemitBillsGeneratorTab({
       if (docSnap.exists()) {
         setFeeStructure(docSnap.data());
       }
+    }, (err) => {
+      console.warn('RemitBillsGeneratorTab: fee_structure subscription warning:', err?.message);
     });
     return () => unsubFee();
   }, []);
@@ -534,19 +536,19 @@ export default function RemitBillsGeneratorTab({
         return;
       }
 
-      // Read role from state or local storage if authenticated
-      let role = user ? localStorage.getItem('userRole') : 'guest';
-      
-      // Fallback: fetch from users collection
-      if (!role) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            role = userDoc.data().role;
+      let role = 'guest';
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data() || {};
+          const st = String(data.status || '').trim().toUpperCase();
+          const isInactive = data.deleted === true || data.active === false || ['PENDING', 'INACTIVE', 'SUSPENDED', 'BLOCKED', 'REJECTED', 'DELETED'].includes(st);
+          if (!isInactive) {
+            role = String(data.role || 'guest').trim().toLowerCase();
           }
-        } catch (e) {
-          console.warn('Could not read user role from Firestore', e);
         }
+      } catch (e) {
+        console.warn('Could not read user role from Firestore', e);
       }
 
       const isAuthorized = role === 'admin';
@@ -643,7 +645,7 @@ export default function RemitBillsGeneratorTab({
         includeAdmission,
         includeExam,
         academyFeeRate,
-        customCharges: customChargesList
+        customCharges: customChargesList.map(c => ({ ...c, amount: Number(c.amount) || 0 }))
       }
     });
   }, [
@@ -1418,7 +1420,7 @@ export default function RemitBillsGeneratorTab({
 
       // 1. Release all uniqueness locks for this exact bill so months and fees can be re-billed
       try {
-        await releaseBillUniquenessLocks(db, billToDelete);
+        await releaseBillUniquenessLocks(db, { ...billToDelete, academicYear: billToDelete.academicYear || currentAcademicYear });
       } catch (lockErr) {
         console.warn('Could not release uniqueness locks upon draft bill deletion:', lockErr);
       }
@@ -1476,7 +1478,7 @@ export default function RemitBillsGeneratorTab({
       for (const bill of billsToDeleteObj) {
         // Release uniqueness locks for each eligible bill being deleted
         try {
-          await releaseBillUniquenessLocks(db, bill);
+          await releaseBillUniquenessLocks(db, { ...bill, academicYear: bill.academicYear || currentAcademicYear });
         } catch (lockErr) {
           console.warn(`Could not release uniqueness locks for bill ${bill.id}:`, lockErr);
         }
@@ -2624,7 +2626,7 @@ export default function RemitBillsGeneratorTab({
                         </td>
                         <td className="py-4 px-6">
                           <span className={`font-mono font-black ${bill.status === 'void' ? 'line-through text-slate-400' : 'text-[#1B4F72]'} block`}>{bill.billNo}</span>
-                          <span className="text-[10px] text-slate-400">{typeof bill.createdAt === 'object' && bill.createdAt !== null ? (bill.createdAt.seconds ? formatBSDate(new Date(bill.createdAt.seconds * 1000)) : 'N/A') : String(bill.createdAt || 'N/A')} (BS)</span>
+                          <span className="text-[10px] text-slate-400">{typeof bill.createdAt === 'object' && bill.createdAt !== null ? ((bill.createdAt as any).seconds ? formatBSDate(new Date((bill.createdAt as any).seconds * 1000)) : 'N/A') : String(bill.createdAt || 'N/A')} (BS)</span>
                           {bill.reissuedFromBillNo && (
                             <span className="text-[9px] text-blue-600 font-bold block mt-0.5">Reissued from #{bill.reissuedFromBillNo}</span>
                           )}
@@ -3730,7 +3732,7 @@ export default function RemitBillsGeneratorTab({
                 </div>
                 <div className="text-right">
                   <h3 className="text-base font-mono font-black text-[#1B4F72] leading-none uppercase">{printingBill.billNo}</h3>
-                  <p className="text-[10px] text-slate-400 mt-1">Issue Date: {typeof printingBill.createdAt === 'object' && printingBill.createdAt !== null ? (printingBill.createdAt.seconds ? formatBSDate(new Date(printingBill.createdAt.seconds * 1000)) : 'N/A') : String(printingBill.createdAt || 'N/A')} (BS)</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Issue Date: {typeof printingBill.createdAt === 'object' && printingBill.createdAt !== null ? ((printingBill.createdAt as any).seconds ? formatBSDate(new Date((printingBill.createdAt as any).seconds * 1000)) : 'N/A') : String(printingBill.createdAt || 'N/A')} (BS)</p>
                   <p className="text-[10px] text-slate-400">Due Date: Within 15 Days</p>
                 </div>
               </div>

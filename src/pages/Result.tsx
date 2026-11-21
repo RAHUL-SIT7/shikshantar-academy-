@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Download, PieChart as PieChartIcon, Loader2, Search, User, ClipboardList } from 'lucide-react';
+import { CheckCircle2, Download, PieChart as PieChartIcon, Loader2, Search, User, ClipboardList, Filter, RotateCcw } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { useAuth } from '../contexts/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import jsPDF from 'jspdf';
 import { toCanvas } from 'html-to-image';
 
-import { ReportCardTemplate } from '../components/admin/ReportCardTemplate';
+import { getNepalGPA, getGrade } from '../components/admin/ManualEntryTab';
 import { StudentResult } from '../data/resultsState';
-
-const EXAM_TYPES = ['Terminal 1', 'Unit Test 1', 'Terminal 2', 'Final Exam'];
+import { ReportCardTemplate } from '../components/admin/ReportCardTemplate';
 
 export default function Result() {
   const [searchParams] = useSearchParams();
@@ -19,11 +19,13 @@ export default function Result() {
 
   const [studentId, setStudentId] = useState('');
   const [results, setResults] = useState<StudentResult[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('Terminal 1');
+  const [activeTab, setActiveTab] = useState<string>('');
+  const [filterAcademicYear, setFilterAcademicYear] = useState<string>('ALL');
+  const [filterExamType, setFilterExamType] = useState<string>('ALL');
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchStudentId, setSearchStudentId] = useState(urlStudentId || '');
-  const [userRole, setUserRole] = useState('student');
+  const [userRole, setUserRole] = useState('guest');
   const [childrenList, setChildrenList] = useState<any[]>([]);
   const [selectedChildId, setSelectedChildId] = useState<string>('');
   const [compareExamA, setCompareExamA] = useState<string>('');
@@ -31,215 +33,168 @@ export default function Result() {
 
   const pdfRef = useRef<HTMLDivElement>(null);
 
-  const fetchResults = async (uid: string) => {
+  const fetchResults = async (targetUid: string, resolvedRole?: string) => {
      setLoading(true);
      try {
-         // Resolve all possible student IDs and fetch published exams in parallel!
-         const examsPromise = getDocs(query(collection(db, 'exams'), where('published', '==', true)));
-         
-         const resolveIdsPromise = (async () => {
-             const possibleIds = new Set<string>();
-             const trimmedUid = String(uid || '').trim();
-             if (trimmedUid) possibleIds.add(trimmedUid);
+         // Authenticated student portal query strictly uses auth.currentUser.uid
+         const currentUser = auth.currentUser;
+         const effectiveRole = resolvedRole || userRole;
+         const studentUid = (effectiveRole === 'student' && currentUser) ? currentUser.uid : targetUid;
 
-             try {
-                 const uDoc = await getDoc(doc(db, 'users', trimmedUid));
-                 if (uDoc.exists()) {
-                     const uData = uDoc.data();
-                     possibleIds.add(uDoc.id);
-                     if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
-                     if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
-                     if (uData.emisNumber) possibleIds.add(String(uData.emisNumber).trim());
-                     if (uData.studentEmis) possibleIds.add(String(uData.studentEmis).trim());
-                     if (uData.legacyStudentId) possibleIds.add(String(uData.legacyStudentId).trim());
-                     if (uData.rollNumber) possibleIds.add(String(uData.rollNumber).trim());
-                     if (uData.rollNo) possibleIds.add(String(uData.rollNo).trim());
-                 } else {
-                     // Try resolving student by permanentStudentId
-                     try {
-                         const qPerm = query(collection(db, 'users'), where('permanentStudentId', '==', trimmedUid));
-                         const snapPerm = await getDocs(qPerm);
-                         snapPerm.forEach(docSnap => {
-                             possibleIds.add(docSnap.id);
-                             const uData = docSnap.data();
-                             if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
-                             if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
-                             if (uData.emisNumber) possibleIds.add(String(uData.emisNumber).trim());
-                             if (uData.studentEmis) possibleIds.add(String(uData.studentEmis).trim());
-                         });
-                     } catch (_) {}
+         if (!studentUid) {
+             setResults([]);
+             setLoading(false);
+             return;
+         }
 
-                     // Try resolving student by studentId
-                     try {
-                         const q1 = query(collection(db, 'users'), where('studentId', '==', trimmedUid));
-                         const qSnap1 = await getDocs(q1);
-                         qSnap1.forEach(docSnap => {
-                             possibleIds.add(docSnap.id);
-                             const uData = docSnap.data();
-                             if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
-                             if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
-                             if (uData.emisNumber) possibleIds.add(String(uData.emisNumber).trim());
-                             if (uData.studentEmis) possibleIds.add(String(uData.studentEmis).trim());
-                         });
-                     } catch (_) {}
+         // Query secured student-specific subcollection: results_secure/{studentUid}/records where published == true
+         const recordsSnap = await getDocs(
+           query(
+             collection(db, 'results_secure', studentUid, 'records'),
+             where('published', '==', true)
+           )
+         );
 
-                     // Try resolving student by EMIS
-                     try {
-                         const qEmis = query(collection(db, 'users'), where('emisNumber', '==', trimmedUid));
-                         const snapEmis = await getDocs(qEmis);
-                         snapEmis.forEach(docSnap => {
-                             possibleIds.add(docSnap.id);
-                             const uData = docSnap.data();
-                             if (uData.permanentStudentId) possibleIds.add(String(uData.permanentStudentId).trim());
-                             if (uData.studentId) possibleIds.add(String(uData.studentId).trim());
-                         });
-                     } catch (_) {}
-                 }
-             } catch (e) {
-                 // Fallback to uid directly
-             }
-             return Array.from(possibleIds).filter(Boolean);
-         })();
+         if (recordsSnap.empty) {
+             setResults([]);
+             setLoading(false);
+             return;
+         }
 
-         const [examsSnap, idList] = await Promise.all([examsPromise, resolveIdsPromise]);
+         // Group individual subject records by examId
+         const recordsByExam: Record<string, {
+           examId: string;
+           examType: string;
+           academicYear: string;
+           class: string;
+           section: string;
+           studentName: string;
+           rollNo: string;
+           subjects: Record<string, any>;
+         }> = {};
 
-         const publishedExamIds = new Set<string>();
-         const examStats: Record<string, { highestMarks?: Record<string, number>, classAverages?: Record<string, number> }> = {};
-         
-         examsSnap.forEach(doc => {
-            publishedExamIds.add(doc.id);
-            const data = doc.data();
-            examStats[doc.id] = {
-               highestMarks: data.highestMarks || {},
-               classAverages: data.classAverages || {}
+         recordsSnap.forEach(docSnap => {
+            const data = docSnap.data();
+            const examId = data.examId || `${data.subjectKey || 'exam'}_${data.academicYear || ''}`;
+
+            if (!recordsByExam[examId]) {
+              recordsByExam[examId] = {
+                examId,
+                examType: data.examType || (data.examId ? data.examId.split('_')[0].replace(/_/g, ' ') : 'Terminal Examination'),
+                academicYear: data.academicYear || '',
+                class: String(data.class || ''),
+                section: data.section || 'A',
+                studentName: data.studentName || '',
+                rollNo: data.rollNo || data.rollNumberSnapshot || '',
+                subjects: {}
+              };
+            }
+
+            recordsByExam[examId].subjects[data.subject] = {
+              fullMarks: data.fullMarks || ((data.thFull || 0) + (data.prFull || 0)),
+              obtained: data.marks,
+              thMarks: data.thMarks,
+              prMarks: data.prMarks,
+              thFull: data.thFull,
+              prFull: data.prFull,
+              thPass: data.thPass,
+              prPass: data.prPass
             };
          });
 
-         if (publishedExamIds.size === 0 || idList.length === 0) {
-             setResults([]);
-             setLoading(false);
-             return;
-         }
-
-         // Fetch summaries and result details across all resolved student identities
-         const summaryQueries = [
-             getDocs(query(collection(db, 'resultSummary'), where('studentId', 'in', idList.slice(0, 30))))
-         ];
-         const resultsQueries = [
-             getDocs(query(collection(db, 'results'), where('studentId', 'in', idList.slice(0, 30))))
-         ];
-
-         try {
-             summaryQueries.push(getDocs(query(collection(db, 'resultSummary'), where('studentUid', 'in', idList.slice(0, 30)))));
-         } catch (_) {}
-         try {
-             resultsQueries.push(getDocs(query(collection(db, 'results'), where('studentUid', 'in', idList.slice(0, 30)))));
-         } catch (_) {}
-
-         const [summarySnaps, resultsSnaps] = await Promise.all([
-             Promise.all(summaryQueries),
-             Promise.all(resultsQueries)
-         ]);
-
+         // Load readable summary doc for rank and class teacher remarks
          const summaryMap = new Map<string, any>();
-         summarySnaps.forEach(snap => {
-             snap.forEach(doc => {
-                 if (publishedExamIds.has(doc.data().examId)) {
-                     summaryMap.set(doc.id, { id: doc.id, ...doc.data() });
-                 }
-             });
-         });
+         try {
+           const summarySnap = await getDocs(
+             query(
+               collection(db, 'resultSummary'),
+               where('studentUid', '==', studentUid),
+               where('published', '==', true)
+             )
+           );
+           summarySnap.forEach(sDoc => {
+             summaryMap.set(sDoc.data().examId, sDoc.data());
+           });
+         } catch (_) {}
 
-         const summaryList = Array.from(summaryMap.values());
-
-         if (summaryList.length === 0) {
-             setResults([]);
-             setLoading(false);
-             return;
-         }
-
-         const resultsByExamId: Record<string, any> = {};
-         resultsSnaps.forEach(snap => {
-             snap.forEach(doc => {
-                 const sub = doc.data();
-                 if (!resultsByExamId[sub.examId]) resultsByExamId[sub.examId] = {};
-                 resultsByExamId[sub.examId][sub.subject] = {
-                     fullMarks: sub.fullMarks, 
-                     obtained: sub.marks,
-                     thMarks: sub.thMarks,
-                     prMarks: sub.prMarks,
-                     thFull: sub.thFull,
-                     prFull: sub.prFull,
-                     thPass: sub.thPass,
-                     prPass: sub.prPass
-                 };
-             });
-         });
-         
-         // Calculate dynamic highest marks for each exam if needed
-         const currentRole = localStorage.getItem('userRole') || 'student';
-         if (currentRole !== 'student' && currentRole !== 'guest') {
-             for (const sum of summaryList) {
-                 const examId = sum.examId;
-                 try {
-                     const allRes = await getDocs(query(collection(db, 'results'), where('examId', '==', examId)));
-                     const dynamicHighest: Record<string, number> = {};
-                     allRes.forEach(doc => {
-                         const data = doc.data();
-                         const sub = data.subject;
-                         const obtained = data.marks === "AB" ? 0 : Number(data.marks) || 0;
-                         if (!dynamicHighest[sub] || dynamicHighest[sub] < obtained) {
-                             dynamicHighest[sub] = obtained;
-                         }
-                     });
-                     if (!examStats[examId]) examStats[examId] = {};
-                     examStats[examId].highestMarks = dynamicHighest;
-                 } catch (e) {
-                     console.error("Failed to fetch all results for dynamic highest marks", e);
-                 }
+         // Load parent exam documents for highestMarks & classAverages
+         const examStats: Record<string, { highestMarks?: Record<string, number>; classAverages?: Record<string, number> }> = {};
+         try {
+           const examIds = Object.keys(recordsByExam);
+           for (const eid of examIds) {
+             const eDoc = await getDoc(doc(db, 'exams', eid));
+             if (eDoc.exists()) {
+               const eData = eDoc.data();
+               examStats[eid] = {
+                 highestMarks: eData.highestMarks || {},
+                 classAverages: eData.classAverages || {}
+               };
              }
-         }
+           }
+         } catch (_) {}
 
-         const parsedData: StudentResult[] = summaryList.map(sum => ({
-              studentUid: sum.studentUid || sum.studentId,
-              studentId: sum.permanentStudentId || sum.studentId,
-              permanentStudentId: sum.permanentStudentId || sum.studentId,
-              studentEmis: sum.studentEmis || '',
-              studentName: sum.studentName,
-              academicYear: sum.academicYear || '',
-              class: sum.class,
-              section: sum.section || 'A',
-              rollNumberSnapshot: sum.rollNumberSnapshot || sum.rollNo || '',
-              rollNo: sum.rollNo || sum.rollNumberSnapshot || '',
-              examType: sum.examType,
-              examId: sum.examId,
-              subjects: resultsByExamId[sum.examId] || {},
-              highestMarks: examStats[sum.examId]?.highestMarks || {},
-              classAverages: examStats[sum.examId]?.classAverages || {},
-              total: sum.total,
-              fullTotal: sum.fullTotal,
-              percentage: sum.percentage,
-              grade: sum.grade,
-              gpa: sum.gpa || 0,
-              rank: sum.rank || 0,
-              published: true,
-              classTeacherRemark: sum.classTeacherRemark || ''
-         }));
+         const parsedData: StudentResult[] = Object.values(recordsByExam).map(rec => {
+           const summaryDoc = summaryMap.get(rec.examId) || {};
+
+           let totalObtained = 0;
+           let fullTotal = 0;
+
+           Object.values(rec.subjects).forEach((sub: any) => {
+             if (sub.obtained !== 'AB') {
+               totalObtained += Number(sub.obtained) || 0;
+             }
+             fullTotal += Number(sub.fullMarks) || 0;
+           });
+
+           const pct = fullTotal > 0 ? (totalObtained / fullTotal) * 100 : 0;
+           const grade = summaryDoc.grade || getGrade(totalObtained, fullTotal);
+           const gpa = summaryDoc.gpa !== undefined ? summaryDoc.gpa : getNepalGPA(pct);
+
+           return {
+             studentUid: studentUid,
+             studentId: summaryDoc.studentId || studentUid,
+             permanentStudentId: summaryDoc.permanentStudentId || studentUid,
+             studentEmis: summaryDoc.studentEmis || '',
+             studentName: summaryDoc.studentName || rec.studentName || 'Student',
+             academicYear: rec.academicYear || summaryDoc.academicYear || '',
+             class: rec.class || summaryDoc.class || '',
+             section: rec.section || summaryDoc.section || 'A',
+             rollNumberSnapshot: rec.rollNo || summaryDoc.rollNo || '',
+             rollNo: rec.rollNo || summaryDoc.rollNo || '',
+             examType: summaryDoc.examType || rec.examType,
+             examId: rec.examId,
+             subjects: rec.subjects,
+             highestMarks: examStats[rec.examId]?.highestMarks || summaryDoc.highestMarks || {},
+             classAverages: examStats[rec.examId]?.classAverages || summaryDoc.classAverages || {},
+             total: summaryDoc.total !== undefined ? summaryDoc.total : totalObtained,
+             fullTotal: summaryDoc.fullTotal !== undefined ? summaryDoc.fullTotal : fullTotal,
+             percentage: summaryDoc.percentage !== undefined ? summaryDoc.percentage : pct,
+             grade,
+             gpa,
+             rank: summaryDoc.rank || 0,
+             published: true,
+             classTeacherRemark: summaryDoc.classTeacherRemark || ''
+           };
+         });
 
          setResults(parsedData);
          if (parsedData.length > 0) {
-             setActiveTab(parsedData[parsedData.length - 1].examType);
+             setActiveTab(parsedData[parsedData.length - 1].examId || parsedData[parsedData.length - 1].examType);
          }
      } catch (err: any) {
-         console.error("Error retrieving results:", err);
+         console.error("Error retrieving student results:", err);
+         setResults([]);
      } finally {
          setLoading(false);
      }
   };
 
+  const { userRole: contextRole, userProfile: contextProfile, isAuthenticated } = useAuth();
+
   useEffect(() => {
     let unsubAuth = onAuthStateChanged(auth, async (user) => {
        if (!user) {
+           setUserRole('guest');
            setResults([]);
            setLoading(false);
            return;
@@ -247,14 +202,20 @@ export default function Result() {
 
        try {
            const uDoc = await getDoc(doc(db, 'users', user.uid));
-           let role = localStorage.getItem('userRole') || 'student';
+           let role = '';
            let uidToUse = null;
 
            if (uDoc.exists()) {
                const userData = uDoc.data();
-               role = userData.role || 'student';
+               const rawRole = String(userData.role || '').trim().toLowerCase();
+               role = rawRole === 'class_teacher' ? 'teacher' : rawRole;
+               if (!role || !isAuthenticated) {
+                   setUserRole('guest');
+                   setResults([]);
+                   setLoading(false);
+                   return;
+               }
                setUserRole(role);
-               localStorage.setItem('userRole', role);
 
                if (urlStudentId) {
                    uidToUse = urlStudentId;
@@ -267,29 +228,27 @@ export default function Result() {
                            setSelectedChildId(activeId);
                        }
                        uidToUse = activeId;
-                       localStorage.setItem('studentId', activeId);
                    } else {
-                       uidToUse = userData.permanentStudentId || userData.studentId || user.uid;
-                       localStorage.setItem('studentId', uidToUse);
+                       uidToUse = user.uid;
                    }
                } else {
                    uidToUse = localStorage.getItem('adminSearchStudentId');
                }
+           } else if (isAuthenticated && contextRole === 'admin' && contextProfile) {
+               role = 'admin';
+               setUserRole('admin');
+               uidToUse = urlStudentId || localStorage.getItem('adminSearchStudentId');
+               if (urlStudentId) setSearchStudentId(urlStudentId);
            } else {
-               setUserRole(role);
-               if (urlStudentId) {
-                   uidToUse = urlStudentId;
-                   setSearchStudentId(urlStudentId);
-               } else if (role === 'student') {
-                   uidToUse = localStorage.getItem('studentId') || user.uid;
-               } else {
-                   uidToUse = localStorage.getItem('adminSearchStudentId');
-               }
+               setUserRole('guest');
+               setResults([]);
+               setLoading(false);
+               return;
            }
 
            setStudentId(uidToUse || '');
            if (uidToUse) {
-               await fetchResults(uidToUse);
+               await fetchResults(uidToUse, role);
            } else {
                setLoading(false);
            }
@@ -302,7 +261,7 @@ export default function Result() {
     return () => {
        unsubAuth();
     };
-  }, [selectedChildId, urlStudentId]);
+  }, [selectedChildId, urlStudentId, isAuthenticated, contextRole, contextProfile]);
 
   const handleChildChange = (childId: string) => {
      setSelectedChildId(childId);
@@ -319,12 +278,52 @@ export default function Result() {
       fetchResults(searchStudentId.trim());
   };
 
-  // Group results into dynamically available exam types to act as navigation
-  const availableExams = useMemo(() => {
-     return Array.from(new Set(results.map(r => r.examType)));
+  // Extract dynamic available academic years from results
+  const availableYears = useMemo(() => {
+     return Array.from(new Set(results.map(r => r.academicYear).filter(Boolean))).sort().reverse();
   }, [results]);
 
-  const currentResult = results.find(r => r.examType === activeTab);
+  // Extract dynamic available exam types from results
+  const availableExamTypes = useMemo(() => {
+     return Array.from(new Set(results.map(r => r.examType).filter(Boolean)));
+  }, [results]);
+
+  // Combined filtering by Academic Year & Exam Type
+  const filteredResults = useMemo(() => {
+     return results.filter(r => {
+        const matchYear = filterAcademicYear === 'ALL' || String(r.academicYear) === String(filterAcademicYear);
+        const matchExam = filterExamType === 'ALL' || r.examType === filterExamType;
+        return matchYear && matchExam;
+     });
+  }, [results, filterAcademicYear, filterExamType]);
+
+  // Group filtered results into dynamically available exam types/IDs to act as tab navigation
+  const availableExams = useMemo(() => {
+     return Array.from(new Set(filteredResults.map(r => r.examType)));
+  }, [filteredResults]);
+
+  // Select active result based on activeTab or default to latest filtered result
+  const currentResult = useMemo(() => {
+     if (filteredResults.length === 0) return null;
+     const match = filteredResults.find(r => r.examId === activeTab || r.examType === activeTab);
+     return match || filteredResults[filteredResults.length - 1];
+  }, [filteredResults, activeTab]);
+
+  // Synchronize activeTab when filteredResults change
+  useEffect(() => {
+     if (filteredResults.length > 0) {
+        const exists = filteredResults.some(r => r.examId === activeTab || r.examType === activeTab);
+        if (!exists) {
+           const last = filteredResults[filteredResults.length - 1];
+           setActiveTab(last.examId || last.examType);
+        }
+     }
+  }, [filteredResults, activeTab]);
+
+  const resetFilters = () => {
+     setFilterAcademicYear('ALL');
+     setFilterExamType('ALL');
+  };
 
   const getGradeInfo = (obtained: number | "AB", full: number) => {
      if (obtained === "AB") return { grade: "NG", gpa: 0, pass: false, text: "Absent" };
@@ -348,7 +347,7 @@ export default function Result() {
          if (highest === undefined || highest < myMarks) {
              highest = myMarks;
          }
-         let average = currentResult.classAverages?.[sub] || 0;
+         let average = (currentResult as any).classAverages?.[sub] || 0;
          return {
             subject: sub,
             myMarks: myMarks,
@@ -368,7 +367,7 @@ export default function Result() {
      Object.entries(currentResult.subjects).forEach(([sub, rawMarks]) => {
          const marks: any = rawMarks;
          const myMarks = marks.obtained === "AB" ? 0 : Number(marks.obtained) || 0;
-         const avg = Number(currentResult.classAverages?.[sub]) || 0;
+         const avg = Number((currentResult as any).classAverages?.[sub]) || 0;
          
          totalSubjectsCount++;
          if (myMarks >= avg) {
@@ -534,6 +533,58 @@ export default function Result() {
             </form>
          </div>
       )}
+
+      {/* HISTORICAL RESULTS FILTER BAR */}
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-wrap items-center justify-between gap-4">
+         <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-indigo-600" />
+            <span className="text-sm font-black text-gray-800">Filter Historical Results</span>
+         </div>
+
+         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* Academic Year Filter */}
+            <div className="flex items-center gap-2">
+               <label className="text-xs font-bold text-gray-500 whitespace-nowrap">Academic Year:</label>
+               <select
+                  value={filterAcademicYear}
+                  onChange={(e) => setFilterAcademicYear(e.target.value)}
+                  className="border border-gray-200 px-3 py-1.5 rounded-xl text-xs font-bold text-gray-800 bg-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm"
+               >
+                  <option value="ALL">All Academic Years</option>
+                  {availableYears.map(year => (
+                     <option key={year} value={year}>BS {year}</option>
+                  ))}
+               </select>
+            </div>
+
+            {/* Exam Type Filter */}
+            <div className="flex items-center gap-2">
+               <label className="text-xs font-bold text-gray-500 whitespace-nowrap">Exam Type:</label>
+               <select
+                  value={filterExamType}
+                  onChange={(e) => setFilterExamType(e.target.value)}
+                  className="border border-gray-200 px-3 py-1.5 rounded-xl text-xs font-bold text-gray-800 bg-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm"
+               >
+                  <option value="ALL">All Exam Types</option>
+                  {availableExamTypes.map(exam => (
+                     <option key={exam} value={exam}>{exam}</option>
+                  ))}
+               </select>
+            </div>
+
+            {/* Clear/Reset Filters Action */}
+            {(filterAcademicYear !== 'ALL' || filterExamType !== 'ALL') && (
+               <button
+                  onClick={resetFilters}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 transition-colors shadow-sm"
+               >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Clear Filters
+               </button>
+            )}
+         </div>
+      </div>
+
       <div className="flex flex-col gap-2 pb-2">
          {availableExams.length === 0 && !loading && (
              <span className="text-sm font-bold text-gray-400">No Exams to display</span>
@@ -817,8 +868,8 @@ export default function Result() {
                         
                         if (!examA || !examB) return null;
 
-                        const gpaA = examA.gpa || 0;
-                        const gpaB = examB.gpa || 0;
+                        const gpaA = Number(examA.gpa) || 0;
+                        const gpaB = Number(examB.gpa) || 0;
                         const gpaDiff = gpaB - gpaA;
 
                         const pctA = examA.percentage || 0;
@@ -981,7 +1032,7 @@ export default function Result() {
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end mt-4 gap-3">
-               {localStorage.getItem('userRole') !== 'student' && (
+               {(userRole === 'admin' || userRole === 'teacher') && (
                  <div className="flex bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                    <button onClick={downloadClassResultExcel} className="text-gray-700 bg-white px-4 py-3 font-bold flex items-center justify-center gap-2 transition-all hover:bg-gray-50 border-r border-gray-200">
                      <Download className="w-4 h-4 text-green-600" />

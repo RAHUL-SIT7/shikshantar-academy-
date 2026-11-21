@@ -31,6 +31,7 @@ interface Enquiry {
   phone: string;
   message?: string;
   createdAt?: string;
+  submittedAt?: any;
   status?: "unread" | "resolved" | string;
 }
 
@@ -72,6 +73,9 @@ export function EnquiriesTab() {
             } as Enquiry);
           });
           setEnquiries(list);
+          setLoading(false);
+        }, (fallbackErr) => {
+          console.warn("EnquiriesTab: fallback collection subscription warning:", fallbackErr?.message);
           setLoading(false);
         });
       }

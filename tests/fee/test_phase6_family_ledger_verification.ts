@@ -86,16 +86,36 @@ export async function runPhase6ForensicSuite() {
   console.log('🚀 EXECUTING PHASE 6 FORENSIC VERIFICATION');
   console.log('================================================================\n');
 
+  // Clean prior collections for emulator isolation
+  const collsToClean = ['remitBills', 'transactions', 'student_advances', 'cash_ledger', 'payment_receipt_locks', 'document_sequences', 'ledger_audit_logs', 'audit_logs'];
+  for (const cName of collsToClean) {
+    const snap = await db.collection(cName).get();
+    const batchClean = db.batch();
+    snap.docs.forEach(d => batchClean.delete(d.ref));
+    await batchClean.commit();
+  }
+
   // Authenticate admin cashier
   const adminUid = 'ADMIN_PHASE6_01';
+  try {
+    await admin.auth().getUser(adminUid);
+  } catch (_) {
+    await admin.auth().createUser({ uid: adminUid, email: 'admin.phase6@shikshantar.edu.np' });
+  }
   await db.collection('users').doc(adminUid).set({
     uid: adminUid,
     role: 'admin',
     adminTier: 'primary',
     status: 'approved',
+    deleted: false,
     email: 'admin.phase6@shikshantar.edu.np',
     fullName: 'Phase 6 Audit Administrator',
     createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+  await admin.auth().setCustomUserClaims(adminUid, {
+    role: 'admin',
+    adminTier: 'primary',
+    email: 'admin.phase6@shikshantar.edu.np'
   });
   const customToken = await admin.auth().createCustomToken(adminUid, {
     role: 'admin',
@@ -103,6 +123,7 @@ export async function runPhase6ForensicSuite() {
     email: 'admin.phase6@shikshantar.edu.np'
   });
   await signInWithCustomToken(auth, customToken);
+  await auth.currentUser?.getIdTokenResult(true);
 
   const ACADEMIC_YEAR = '2083';
   const PREV_YEAR = '2082';
@@ -589,6 +610,8 @@ export async function runPhase6ForensicSuite() {
     class: 'Class 9',
     rollNumber: '11',
     advanceBalance: 0,
+    role: 'student',
+    status: 'approved',
     academicYear: ACADEMIC_YEAR,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
@@ -887,6 +910,8 @@ export async function runPhase6ForensicSuite() {
     class: 'Class 10',
     rollNumber: '15',
     academicYear: '2083',
+    role: 'student',
+    status: 'approved',
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
 
@@ -988,6 +1013,8 @@ export async function runPhase6ForensicSuite() {
     class: 'Class 8',
     rollNumber: '22',
     advanceBalance: 0,
+    role: 'student',
+    status: 'approved',
     academicYear: ACADEMIC_YEAR,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
@@ -1263,6 +1290,8 @@ export async function runPhase6ForensicSuite() {
     class: 'Class 5',
     rollNumber: '18',
     advanceBalance: 0,
+    role: 'student',
+    status: 'approved',
     academicYear: ACADEMIC_YEAR,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
@@ -1470,6 +1499,8 @@ export async function runPhase6ForensicSuite() {
     class: 'Class 7',
     rollNumber: '09',
     advanceBalance: 0,
+    role: 'student',
+    status: 'approved',
     academicYear: ACADEMIC_YEAR,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
@@ -1503,6 +1534,14 @@ export async function runPhase6ForensicSuite() {
   });
 
   // Reissue new bill
+  const partPToken = await admin.auth().createCustomToken(adminUid, {
+    role: 'admin',
+    adminTier: 'primary',
+    email: 'admin.phase6@shikshantar.edu.np'
+  });
+  await signInWithCustomToken(auth, partPToken);
+  const tokenRes = await auth.currentUser?.getIdTokenResult(true);
+  console.log('DEBUG PART P AUTH UID:', auth.currentUser?.uid, 'CLAIMS:', tokenRes?.claims);
   const reissueRes = await generateSingleStudentBillTransactionally({
     db: clientDb,
     academicYear: ACADEMIC_YEAR,
@@ -1678,6 +1717,8 @@ export async function runPhase6ForensicSuite() {
     class: 'Class 8',
     rollNumber: '30',
     advanceBalance: 0,
+    role: 'student',
+    status: 'approved',
     academicYear: ACADEMIC_YEAR,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });

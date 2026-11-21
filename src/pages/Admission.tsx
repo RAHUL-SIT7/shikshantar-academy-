@@ -1,19 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { Helmet } from 'react-helmet-async';
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import AdmissionIntro from "../components/AdmissionIntro";
 import { sendAdmissionEmail } from "../lib/emailService";
+import { useAuth } from "../contexts/AuthContext";
+import CaptchaChallengeBox from "../components/common/CaptchaChallengeBox";
 import {
-  collection,
-  addDoc,
-  serverTimestamp,
   doc,
   getDoc,
-  query,
-  where,
-  getDocs,
   setDoc,
 } from "firebase/firestore";
 import {
@@ -48,6 +44,8 @@ import { auth } from "../firebase";
 const logoImage = "/logo.png";
 
 export default function Admission() {
+  const { userRole, isAuthenticated } = useAuth();
+  const isAdmin = isAuthenticated && userRole === "admin";
   const navigate = useNavigate();
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [formFields, setFormFields] = useState<any[]>([]);
@@ -56,21 +54,17 @@ export default function Admission() {
     "Admission Closed for this Academic Year",
   );
   const [isLoadingFields, setIsLoadingFields] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [showIntro, setShowIntro] = useState(true);
 
-  // reCAPTCHA states
-  const [isCaptchaVerified, setIsCaptchaVerified] = useState(false);
-  const [isCheckingRobot, setIsCheckingRobot] = useState(false);
-  const [showChallenge, setShowChallenge] = useState(false);
+  // Server-signed CAPTCHA verification token
+  const [captchaToken, setCaptchaToken] = useState("");
 
   // Ref to scroll to the top of the form on error
   const formTopRef = React.useRef<HTMLDivElement>(null);
 
   const scrollToTop = () => {
     if (formTopRef.current) {
-      // scroll-mt-24 gives some nice header padding
       formTopRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -83,103 +77,6 @@ export default function Admission() {
     const val = formData[k];
     return val !== undefined && val !== null && String(val).trim() !== "";
   });
-
-  // BOT Prevention CAPTCHA Guard
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const [captchaCode, setCaptchaCode] = useState("");
-  const [captchaInput, setCaptchaInput] = useState("");
-  const [captchaError, setCaptchaError] = useState("");
-
-  const drawCaptcha = useCallback((code: string, canvas: HTMLCanvasElement | null) => {
-    if (!canvas || !code) return;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Gradient BG
-      const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      grad.addColorStop(0, '#f8fafc');
-      grad.addColorStop(1, '#e2e8f0');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Noise lines
-      for (let i = 0; i < 6; i++) {
-        ctx.strokeStyle = `rgba(${Math.floor(Math.random() * 100 + 50)}, ${Math.floor(Math.random() * 100 + 50)}, ${Math.floor(Math.random() * 150 + 100)}, 0.45)`;
-        ctx.lineWidth = Math.random() * 1.5 + 1;
-        ctx.beginPath();
-        ctx.moveTo(Math.random() * canvas.width, Math.random() * canvas.height);
-        ctx.lineTo(Math.random() * canvas.width, Math.random() * canvas.height);
-        ctx.stroke();
-      }
-
-      // Noise dots
-      for (let i = 0; i < 40; i++) {
-        ctx.fillStyle = `rgba(${Math.floor(Math.random() * 150)}, ${Math.floor(Math.random() * 150)}, ${Math.floor(Math.random() * 150)}, 0.3)`;
-        ctx.beginPath();
-        ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, Math.random() * 1.5 + 0.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Characters
-      ctx.font = "bold 24px 'Space Grotesk', 'Courier New', monospace";
-      ctx.textBaseline = "middle";
-      for (let i = 0; i < code.length; i++) {
-        const char = code[i];
-        const x = 14 + i * 26 + Math.random() * 4;
-        const y = canvas.height / 2 + (Math.random() * 6 - 3);
-        ctx.save();
-        ctx.translate(x, y);
-        const angle = ((Math.random() * 30) - 15) * Math.PI / 180;
-        ctx.rotate(angle);
-        ctx.fillStyle = `rgb(${Math.floor(Math.random() * 80)}, ${Math.floor(Math.random() * 60)}, ${Math.floor(Math.random() * 120)})`;
-        ctx.fillText(char, 0, 0);
-        ctx.restore();
-      }
-    }
-  }, []);
-
-  const generateNewCaptcha = useCallback((preserveError = false) => {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; 
-    let code = "";
-    for (let i = 0; i < 5; i++) {
-       code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setCaptchaCode(code);
-    setCaptchaInput("");
-    if (!preserveError) {
-      setCaptchaError("");
-    }
-  }, []);
-
-  const handleVerifyCaptcha = () => {
-    if (captchaInput.trim().toUpperCase() === captchaCode) {
-      setIsCaptchaVerified(true);
-      setShowChallenge(false);
-      setCaptchaError("");
-    } else {
-      generateNewCaptcha(true);
-      setCaptchaError("Incorrect verification code. Please try again.");
-    }
-  };
-
-  // Callback Ref triggered on DOM mount
-  const canvasRefCallback = useCallback((canvas: HTMLCanvasElement | null) => {
-    (canvasRef as any).current = canvas;
-    if (canvas && captchaCode) {
-      drawCaptcha(captchaCode, canvas);
-    }
-  }, [captchaCode, drawCaptcha]);
-
-  useEffect(() => {
-    if (captchaCode && canvasRef.current) {
-      drawCaptcha(captchaCode, canvasRef.current);
-    }
-  }, [captchaCode, drawCaptcha]);
-
-  useEffect(() => {
-    generateNewCaptcha();
-  }, [generateNewCaptcha]);
 
   // Form Config State
   const [isFormConfigOpen, setIsFormConfigOpen] = useState(false);
@@ -232,21 +129,6 @@ export default function Admission() {
   }, [formData.dateOfBirth]);
 
   useEffect(() => {
-    // Check if user is admin
-    const checkAdmin = async () => {
-      try {
-        const user = auth.currentUser;
-        if (user) {
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists() && userDoc.data().role === "admin") {
-            setIsAdmin(true);
-          }
-        }
-      } catch (err) {
-        console.warn("Could not check admin status, continuing as non-admin:", err);
-      }
-    };
-    checkAdmin();
 
     const fetchFields = async () => {
       const defaultFields = [
@@ -404,13 +286,8 @@ export default function Admission() {
     setDobBSDay("");
     setDobADDate("");
 
-    // Clear captcha errors and generate a new code
-    setCaptchaInput("");
-    setCaptchaError("");
-    setIsCaptchaVerified(false);
-    setIsCheckingRobot(false);
-    setShowChallenge(false);
-    generateNewCaptcha();
+    // Clear captcha token
+    setCaptchaToken("");
 
     // Clear alert banner
     setStatus({ type: null, message: "" });
@@ -424,12 +301,10 @@ export default function Admission() {
     setIsSubmitting(true);
     setStatus({ type: null, message: "" });
 
-    // CAPTCHA check - always applies for human users to strictly prevent bots
-    const isCaptchaActive = !isAdmin;
-    if (isCaptchaActive && !isCaptchaVerified) {
+    if (!captchaToken) {
       setStatus({
         type: "error",
-        message: "Please complete the security reCAPTCHA ('I'm not a robot') to submit your form.",
+        message: "Please complete and verify the security challenge before submitting your form.",
       });
       setIsSubmitting(false);
       scrollToTop();
@@ -495,22 +370,29 @@ export default function Admission() {
     });
 
     try {
-      const currentBSYear = new Date().getFullYear() + 57;
-      const generatedTrackingId = `SA-${currentBSYear}-${Date.now().toString().slice(-6)}`;
-      await addDoc(collection(db, "admissions"), {
-        ...submissionData,
-        trackingId: generatedTrackingId,
-        status: "Pending",
-        submittedAt: serverTimestamp(),
+      const res = await fetch('/api/public/submit-admission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verificationToken: captchaToken,
+          formData: submissionData
+        })
       });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to submit admission form.');
+      }
 
-      // Dispatch EmailJS notification to Admin/Principal
+      const generatedTrackingId = resData.trackingId || `SA-${new Date().getFullYear() + 57}-${Date.now().toString().slice(-6)}`;
+
+      // Dispatch EmailJS notification if configured
       sendAdmissionEmail(submissionData, generatedTrackingId).catch(err => {
         console.warn("EmailJS auto-dispatch warning:", err);
       });
 
       setSubmittedValues(submissionData);
       setTrackingId(generatedTrackingId);
+      setCaptchaToken("");
 
       setStatus({
         type: "success",
@@ -518,7 +400,7 @@ export default function Admission() {
           "Admission form submitted successfully! We will contact you soon.",
       });
 
-      // Construct beautiful detailed summary of all filled fields for WhatsApp
+      // Construct detailed summary for WhatsApp
       let fieldSummary = "";
       formFields.forEach((field) => {
         const val = submissionData[field.id];
@@ -534,10 +416,9 @@ ${fieldSummary}---------------------------------------
 Submitted via Digital Admission Portal.`;
 
       const encodedMessage = encodeURIComponent(whatsappText);
-      const whatsappNumber = "9713688926"; // Official school real WhatsApp number
+      const whatsappNumber = "9713688926";
       const whatsappUrl = `https://api.whatsapp.com/send?phone=${whatsappNumber}&text=${encodedMessage}`;
 
-      // Automatically try to open in a new tab/window
       try {
         window.open(whatsappUrl, "_blank", "noopener,noreferrer");
       } catch (err) {
@@ -553,12 +434,12 @@ Submitted via Digital Admission Portal.`;
         }
       });
       setFormData(resetData);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error submitting form: ", error);
       setStatus({
         type: "error",
         message:
-          "Failed to submit form. Please make sure database rules allow writing to admissions collection, or try again later.",
+          error?.message || "Failed to submit form. Please complete the security challenge and try again.",
       });
     }
 
@@ -1428,133 +1309,13 @@ Submitted via Digital Admission Portal.`;
                       </div>
                     </div>
 
-                    {/* BOT PREVENTION RECAPTCHA SHIELD */}
+                    {/* SERVER-SIGNED ANTI-BOT CHALLENGE */}
                     {!isAdmin && (
-                      <div className="space-y-4 mt-6">
-                        {/* The reCAPTCHA Box */}
-                        <div className="flex items-center justify-between border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-3.5 rounded-xl max-w-sm shadow-sm">
-                          <div className="flex items-center gap-3">
-                            {/* Checkbox */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (isCaptchaVerified || isCheckingRobot) return;
-                                setIsCheckingRobot(true);
-                                setCaptchaError("");
-                                setTimeout(() => {
-                                  setIsCheckingRobot(false);
-                                  setShowChallenge(true);
-                                }, 800);
-                              }}
-                              className={`w-6 h-6 border-2 rounded transition-all flex items-center justify-center relative outline-none ${
-                                isCaptchaVerified
-                                  ? "border-emerald-500 bg-emerald-500 text-white animate-bounce"
-                                  : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 hover:border-slate-450 focus:ring-2 focus:ring-[#1B4F72]/10"
-                              }`}
-                            >
-                              {isCheckingRobot && (
-                                <Loader2 className="w-4 h-4 animate-spin text-[#1B4F72] dark:text-sky-400" />
-                              )}
-                              {isCaptchaVerified && (
-                                <Check className="w-4 h-4 stroke-[3px]" />
-                              )}
-                            </button>
-                            
-                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                              I'm not a robot
-                            </span>
-                          </div>
-
-                          <div className="flex flex-col items-end opacity-75">
-                            <div className="flex items-center gap-1 text-[#1B4F72] dark:text-sky-400">
-                              <Shield className="w-3.5 h-3.5 fill-current/10" />
-                              <span className="text-[9px] font-black tracking-wider uppercase">reCAPTCHA</span>
-                            </div>
-                            <span className="text-[7px] text-slate-400 font-medium">Privacy • Terms</span>
-                          </div>
-                        </div>
-
-                        {/* Interactive Puzzle Challenge Dropdown */}
-                        {showChallenge && (
-                          <div className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 rounded-2xl max-w-md shadow-lg space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                            <div className="border-b border-slate-100 dark:border-slate-900 pb-2 flex justify-between items-center">
-                              <div>
-                                <h4 className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                                  Verification Challenge
-                                </h4>
-                                <p className="text-[10px] text-slate-400 mt-0.5">
-                                  Type the 5 characters shown in the graphic card below.
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setShowChallenge(false)}
-                                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-
-                            <div className="flex flex-col gap-4">
-                              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/50 p-1.5 border border-slate-200 dark:border-slate-800/80 rounded-xl shadow-inner shrink-0 w-fit">
-                                <canvas
-                                  ref={canvasRefCallback}
-                                  width="140"
-                                  height="44"
-                                  onClick={() => generateNewCaptcha()}
-                                  className="rounded-lg bg-white dark:bg-slate-950 shadow-sm cursor-pointer hover:opacity-85 active:scale-95 transition-all"
-                                  title="Click image to reload code"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => generateNewCaptcha()}
-                                  className="p-2.5 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-colors shrink-0"
-                                  title="Click to draw a different code"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-
-                              <div className="w-full space-y-1.5">
-                                <label className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block ml-1">
-                                  Enter code here
-                                </label>
-                                <div className="flex gap-2">
-                                  <input
-                                    type="text"
-                                    value={captchaInput}
-                                    onChange={(e) => {
-                                      setCaptchaInput(e.target.value);
-                                      if (captchaError) setCaptchaError("");
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        handleVerifyCaptcha();
-                                      }
-                                    }}
-                                    placeholder="5-char code"
-                                    className="flex-1 min-w-0 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-100 placeholder-slate-400 text-xs focus:ring-2 focus:ring-[#1B4F72]/15 focus:border-[#1B4F72] outline-none transition-all font-mono tracking-widest font-black uppercase text-center"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={handleVerifyCaptcha}
-                                    className="px-5 py-2 bg-[#1B4F72] hover:bg-[#123851] text-white font-bold text-xs rounded-xl shadow transition-all active:scale-95 shrink-0"
-                                  >
-                                    Verify
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-
-                            {captchaError && (
-                              <div className="flex items-center gap-2 p-2.5 bg-rose-50/85 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 rounded-xl text-rose-700 dark:text-rose-400 text-[11px] font-bold animate-in fade-in duration-250 shadow-sm">
-                                <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                <span>{captchaError}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                      <div className="mt-6">
+                        <CaptchaChallengeBox
+                          onVerified={(token) => setCaptchaToken(token)}
+                          onReset={() => setCaptchaToken("")}
+                        />
                       </div>
                     )}
 

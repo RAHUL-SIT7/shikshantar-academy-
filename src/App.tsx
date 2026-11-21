@@ -5,9 +5,11 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { NoticeProvider } from "./contexts/NoticeContext";
 import Layout from "./components/Layout";
 import SessionTimeoutHandler from "./components/SessionTimeoutHandler";
+import DeviceVerificationGate from "./components/DeviceVerificationGate";
 import Home from "./pages/Home";
 import About from "./pages/About";
 import Facilities from "./pages/Facilities";
@@ -26,21 +28,16 @@ import Admin from "./pages/Admin";
 import Admission from "./pages/Admission";
 import AdminAdmissions from "./pages/AdminAdmissions";
 import UserApprovals from "./pages/UserApprovals";
-import StudentProfileView from "./pages/StudentProfileView";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import TeacherSalary from "./pages/TeacherSalary";
 import SalaryAdmin from "./pages/SalaryAdmin";
 import IemisExport from "./pages/Iemis";
-import { useState, useEffect } from "react";
-import { auth, db } from "./firebase";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { Component, ReactNode, useState, useEffect } from "react";
+import { db } from "./firebase";
 import {
   doc,
-  getDoc,
-  setDoc,
   onSnapshot,
-  arrayUnion,
 } from "firebase/firestore";
 
 import FeeStructure from "./pages/FeeStructure";
@@ -56,11 +53,6 @@ function ScrollToTop() {
 
   return null;
 }
-
-const localSessionId =
-  localStorage.getItem("localSessionId") ||
-  `sess_${Date.now().toString(36)}_${Math.floor(performance.now()).toString(36)}`;
-localStorage.setItem("localSessionId", localSessionId);
 
 export const THEMES: Record<string, any> = {
   shikshantar_elite: {
@@ -195,15 +187,14 @@ export const THEMES: Record<string, any> = {
   }
 };
 
-export default function App() {
-  // Reset any previous simulator overrides to ensure absolute security
-  useEffect(() => {
-    localStorage.removeItem("userRoleOverride");
-  }, []);
-
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState<string>("guest");
-  const [loading, setLoading] = useState(true);
+function AppContent() {
+  const {
+    isAuthenticated,
+    userRole,
+    loading,
+    verifyingDeviceSession,
+    deviceVerificationRequired,
+  } = useAuth();
   const [activeTheme, setActiveTheme] = useState(
     localStorage.getItem("appTheme") || "shikshantar_elite",
   );
@@ -317,184 +308,23 @@ export default function App() {
     (window as any).applyThemeGlobal = applyTheme;
   }, []);
 
-  useEffect(() => {
-    let unSubDoc: (() => void) | null = null;
-    let isCancelled = false;
-
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Multi-user safety check: If a different user has signed in, clear all previous cached keys
-        const lastUid = localStorage.getItem("lastUserUid");
-        if (lastUid && lastUid !== user.uid) {
-          localStorage.removeItem("userRole");
-          localStorage.removeItem("studentId");
-          localStorage.removeItem("studentClass");
-          localStorage.removeItem("adminSearchStudentId");
-          localStorage.removeItem("isGuest");
-          localStorage.removeItem("teacherSubjects");
-        }
-        localStorage.setItem("lastUserUid", user.uid);
-
-        // Authoritative validation from Firestore
-        try {
-          const userDoc = await Promise.race([
-            getDoc(doc(db, "users", user.uid)),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("Firestore timeout")), 8000),
-            ),
-          ]);
-          
-          if (isCancelled) return;
-
-          if (userDoc && userDoc.exists()) {
-            const uData = userDoc.data();
-            if (uData.status === 'blocked' || uData.status === 'rejected' || uData.active === false || uData.status === 'pending') {
-              await signOut(auth);
-              setIsAuthenticated(false);
-              setUserRole('guest');
-              localStorage.removeItem("userRole");
-              setLoading(false);
-              return;
-            }
-            const authoritativeRole = (uData.role || "student").toLowerCase();
-            setUserRole(authoritativeRole);
-            localStorage.setItem("userRole", authoritativeRole);
-            
-            setDoc(
-              doc(db, "users", user.uid),
-              { activeSessions: arrayUnion(localSessionId) },
-              { merge: true },
-            ).catch((e) => console.warn("Failed to set active session:", e));
-          } else {
-            // Unregistered / arbitrary account not in database -> Deny access
-            await signOut(auth);
-            setIsAuthenticated(false);
-            setUserRole('guest');
-            localStorage.removeItem("userRole");
-            setLoading(false);
-            return;
-          }
-
-          setIsAuthenticated(true);
-          setLoading(false);
-
-          let docExisted = userDoc ? userDoc.exists() : false;
-
-          // Setup real-time listener for cross-device logout, role change, and status revocation
-          if (unSubDoc) unSubDoc();
-          unSubDoc = onSnapshot(
-            doc(db, "users", user.uid),
-            (docSnap) => {
-              if (docSnap.exists()) {
-                docExisted = true;
-                const data = docSnap.data();
-                if (data.status === 'blocked' || data.status === 'rejected' || data.active === false || data.status === 'pending') {
-                  signOut(auth);
-                  setIsAuthenticated(false);
-                  setUserRole('guest');
-                  localStorage.removeItem("userRole");
-                  return;
-                }
-                if (data.role) {
-                  const newRole = data.role.toLowerCase();
-                  setUserRole(newRole);
-                  localStorage.setItem("userRole", newRole);
-                }
-              } else {
-                if (docExisted) {
-                  // Profile deleted while actively using the app!
-                  signOut(auth);
-                  window.location.reload();
-                }
-              }
-            },
-            (err) => {
-              console.warn("Could not load user active sessions:", err.message);
-            },
-          );
-        } catch (err) {
-          console.error("Error fetching authoritative role:", err);
-          // FAIL CLOSED: Do not trust localStorage for role determination or grant privileged access
-          setIsAuthenticated(false);
-          setUserRole("guest");
-          localStorage.removeItem("userRole");
-        }
-      } else {
-        setIsAuthenticated(false);
-        setUserRole("guest");
-        localStorage.removeItem("userRole");
-        localStorage.removeItem("studentId");
-        localStorage.removeItem("studentClass");
-        localStorage.removeItem("adminSearchStudentId");
-        localStorage.removeItem("isGuest");
-        localStorage.removeItem("teacherSubjects");
-        localStorage.removeItem("lastUserUid");
-        localStorage.removeItem("localSessionId");
-        localStorage.removeItem("shikshantar_last_activity");
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('shikshantar_active_tab_session');
-        }
-        if (unSubDoc) {
-          unSubDoc();
-          unSubDoc = null;
-        }
-      }
-      setLoading(false);
-    });
-
-    return () => {
-      isCancelled = true;
-      unsubscribe();
-      if (unSubDoc) unSubDoc();
-    };
-  }, []);
-
-  // Periodic heartbeat to refresh session lastActiveAt and detect remote revocation
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const runHeartbeat = async () => {
-      try {
-        const user = auth.currentUser;
-        if (!user) return;
-        const currentSid = localStorage.getItem("localSessionId");
-        if (!currentSid) return;
-        const idToken = await user.getIdToken();
-        const res = await fetch("/api/auth/heartbeat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({ sessionId: currentSid }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.revoked) {
-            await signOut(auth);
-            setIsAuthenticated(false);
-            setUserRole("guest");
-            localStorage.removeItem("userRole");
-          }
-        }
-      } catch {
-        // Non-blocking background heartbeat
-      }
-    };
-
-    runHeartbeat();
-    const heartbeatTimer = setInterval(runHeartbeat, 60000); // Heartbeat every 60s
-    return () => clearInterval(heartbeatTimer);
-  }, [isAuthenticated]);
-
-  if (loading) {
+  if (loading || (isAuthenticated && verifyingDeviceSession)) {
     return (
       <div className="flex items-center justify-center h-screen bg-[#f3f4f6]">
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-4 border-gray-300 border-t-primary rounded-full animate-spin"></div>
+          {isAuthenticated && verifyingDeviceSession && (
+            <p className="text-xs font-semibold text-slate-600">
+              Verifying device security...
+            </p>
+          )}
         </div>
       </div>
     );
+  }
+
+  if (isAuthenticated && deviceVerificationRequired) {
+    return <DeviceVerificationGate />;
   }
 
   return (
@@ -507,9 +337,9 @@ export default function App() {
           path="/login"
           element={
             !isAuthenticated ? (
-              <Login setIsAuthenticated={setIsAuthenticated} setUserRole={setUserRole} />
+              <Login />
             ) : (
-              <Navigate to="/" replace />
+              <Navigate to="/" />
             )
           }
         />
@@ -518,7 +348,6 @@ export default function App() {
           element={
             <Layout
               isAuthenticated={isAuthenticated}
-              setIsAuthenticated={setIsAuthenticated}
               userRole={userRole}
             />
           }
@@ -615,16 +444,6 @@ export default function App() {
             }
           />
           <Route
-            path="student-profile/:id"
-            element={
-              isAuthenticated && userRole === "admin" ? (
-                <StudentProfileView />
-              ) : (
-                <Navigate to="/" />
-              )
-            }
-          />
-          <Route
             path="profile"
             element={isAuthenticated ? <Profile /> : <Navigate to="/login" />}
           />
@@ -653,5 +472,58 @@ export default function App() {
       </Routes>
     </Router>
    </NoticeProvider>
+  );
+}
+
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Unhandled portal render error:", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+          <div className="max-w-md w-full bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-center space-y-4">
+            <h2 className="text-lg font-bold text-slate-900">
+              Something went wrong while loading this view
+            </h2>
+            <p className="text-sm text-slate-600">
+              Please reload the page to restore your session cleanly.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 rounded-lg bg-[#0A3D62] text-white text-sm font-semibold hover:opacity-95 transition-opacity"
+            >
+              Reload Portal
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </AppErrorBoundary>
   );
 }

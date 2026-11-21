@@ -64,6 +64,8 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { db, auth, handleFirestoreError, OperationType } from "../firebase";
+import { useAuth } from "../contexts/AuthContext";
+import CaptchaChallengeBox from "../components/common/CaptchaChallengeBox";
 import {
   motion,
   useMotionValue,
@@ -183,7 +185,7 @@ const itemVariants = {
     opacity: 1, 
     y: 0, 
     transition: { 
-      type: "spring", 
+      type: "spring" as const, 
       stiffness: 260, 
       damping: 20 
     } 
@@ -197,31 +199,26 @@ const cardHoverProps = {
     boxShadow: "0 12px 24px -6px rgba(0, 0, 0, 0.08), 0 8px 16px -8px rgba(0, 0, 0, 0.08)"
   },
   whileTap: { scale: 0.985 },
-  transition: { type: "spring", stiffness: 400, damping: 25 }
+  transition: { type: "spring" as const, stiffness: 400, damping: 25 }
 };
 
 const buttonHoverProps = {
   whileHover: { scale: 1.03, y: -1 },
   whileTap: { scale: 0.97 },
-  transition: { type: "spring", stiffness: 400, damping: 15 }
+  transition: { type: "spring" as const, stiffness: 400, damping: 15 }
 };
 
-const AnimatedCounter = ({
-  value,
+const NumericAnimatedCounter = ({
+  prefix,
+  targetNumber,
+  suffix,
   className,
 }: {
-  value: string | number;
+  prefix: string;
+  targetNumber: number;
+  suffix: string;
   className?: string;
 }) => {
-  const strValue = String(value);
-  const match = strValue.match(/^(\D*)(\d+)(\D*)$/);
-
-  if (!match) return <span className={className}>{strValue}</span>;
-
-  const prefix = match[1];
-  const targetNumber = parseInt(match[2], 10);
-  const suffix = match[3];
-
   const ref = React.useRef<HTMLSpanElement>(null);
   const count = useMotionValue(0);
   const rounded = useTransform(count, Math.round);
@@ -246,6 +243,28 @@ const AnimatedCounter = ({
       </motion.span>
       {suffix && <span className="opacity-90">{suffix}</span>}
     </span>
+  );
+};
+
+const AnimatedCounter = ({
+  value,
+  className,
+}: {
+  value: string | number;
+  className?: string;
+}) => {
+  const strValue = String(value);
+  const match = strValue.match(/^(\D*)(\d+)(\D*)$/);
+
+  if (!match) return <span className={className}>{strValue}</span>;
+
+  return (
+    <NumericAnimatedCounter
+      prefix={match[1]}
+      targetNumber={parseInt(match[2], 10)}
+      suffix={match[3]}
+      className={className}
+    />
   );
 };
 
@@ -280,11 +299,17 @@ export default function Home() {
   });
 
   useEffect(() => {
-    const unsubSocial = onSnapshot(doc(db, "settings", "contact_us"), (docSnap) => {
-      if (docSnap.exists()) {
-        setSocialData(docSnap.data());
+    const unsubSocial = onSnapshot(
+      doc(db, "settings", "contact_us"),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setSocialData(docSnap.data());
+        }
+      },
+      (err) => {
+        console.warn("Home: contact_us subscription warning:", err?.message);
       }
-    });
+    );
     return () => unsubSocial();
   }, []);
 
@@ -395,6 +420,7 @@ export default function Home() {
   const [enquirySuccess, setEnquirySuccess] = useState(false);
   const [enquiryRefId, setEnquiryRefId] = useState("");
   const [enquiryError, setEnquiryError] = useState("");
+  const [enquiryCaptchaToken, setEnquiryCaptchaToken] = useState("");
 
   const [isUpdatingAnnouncement, setIsUpdatingAnnouncement] = useState(false);
   const [newAnnouncementText, setNewAnnouncementText] = useState("");
@@ -449,13 +475,15 @@ export default function Home() {
   const [selectedPublishExamId, setSelectedPublishExamId] = useState<string>("");
   const [class4Teacher, setClass4Teacher] = useState<any>(null);
 
+  const { user: authUser, userRole: authRole, isAuthenticated } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
-  const [currentAuthUser, setCurrentAuthUser] = useState<any>(auth.currentUser);
+  const currentAuthUser = authUser;
 
   const urlParams = new URLSearchParams(window.location.search);
-  const previewRole = urlParams.get("previewRole");
-  const userRole = previewRole || (currentAuthUser ? (localStorage.getItem("userRole") || "student") : "guest");
-  const isAdmin = userRole === "admin" && Boolean(currentAuthUser || previewRole);
+  const previewRoleParam = urlParams.get("previewRole");
+  // Security: ?previewRole can ONLY downgrade an authenticated user's view to 'guest' for settings preview; never elevate privileges.
+  const userRole = previewRoleParam === "guest" ? "guest" : (isAuthenticated ? authRole : "guest");
+  const isAdmin = isAuthenticated && userRole === "admin";
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -625,7 +653,6 @@ export default function Home() {
     let cleanupAdminData = () => {};
     let isCancelled = false;
     const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentAuthUser(user);
       cleanupAdminData();
       cleanupAdminData = loadAdminData(user);
 
@@ -654,13 +681,14 @@ export default function Home() {
                       sumsRef = await getDocs(
                         query(
                           collection(db, "resultSummary"),
-                          where("studentId", "==", studentIdVal),
+                          where("studentUid", "==", user.uid),
+                          where("published", "==", true),
                         ),
                       );
                     } catch (err: any) {
                       console.error(
-                        "fetchResults error - failed to fetch resultSummary for studentId",
-                        studentIdVal,
+                        "fetchResults error - failed to fetch resultSummary for studentUid",
+                        user.uid,
                         err,
                       );
                       handleFirestoreError(
@@ -687,9 +715,10 @@ export default function Home() {
                           collection(
                             db,
                             "results_secure",
-                            studentIdVal,
+                            user.uid,
                             "records",
                           ),
+                          where("published", "==", true)
                         ),
                       );
                     } catch (err: any) {
@@ -835,7 +864,7 @@ export default function Home() {
 
   useEffect(() => {
     const fetchClass4Teacher = async (user: any) => {
-      if (!user) {
+      if (!user || !isAdmin) {
         setClass4Teacher({ fullName: "Sumita Saha", class: "4" });
         return;
       }
@@ -857,11 +886,9 @@ export default function Home() {
         if (foundTeacher) {
           setClass4Teacher(foundTeacher);
         } else {
-          // Fallback if none in database
           setClass4Teacher({ fullName: "Sumita Saha", class: "4" });
         }
       } catch (err) {
-        // Silently fall back without logging a critical error
         setClass4Teacher({ fullName: "Sumita Saha", class: "4" });
       }
     };
@@ -870,7 +897,7 @@ export default function Home() {
       fetchClass4Teacher(user);
     });
     return () => unsub();
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -2246,90 +2273,9 @@ export default function Home() {
       );
     }
 
-    const handlePublishClassResults = async (examId: string) => {
-      if (!studentData.class) return;
-      const selectedExam = unpublishedExams.find(ex => ex.id === examId);
-      const examName = selectedExam ? selectedExam.name : "Exam";
-      
-      setPublishStatusMessage(`⏳ Fetching results for Class ${studentData.class}...`);
-      try {
-        // 1. Fetch all student summaries for this class & exam
-        const summariesSnap = await getDocs(
-          query(
-            collection(db, "resultSummary"),
-            where("examId", "==", examId),
-            where("class", "==", studentData.class)
-          )
-        );
-
-        if (summariesSnap.empty) {
-          setPublishStatusMessage("⚠️ No student results found for this exam and class in resultSummary.");
-          setTimeout(() => setPublishStatusMessage(""), 5000);
-          return;
-        }
-
-        setPublishStatusMessage("⚡ Calculating highest marks and class averages...");
-
-        // 2. Fetch all raw results (subjects) for this class & exam to calculate highest marks
-        const resultsSnap = await getDocs(
-          query(
-            collection(db, "results"),
-            where("examId", "==", examId),
-            where("class", "==", studentData.class)
-          )
-        );
-
-        const highestMarks: Record<string, number> = {};
-        const sumMarks: Record<string, number> = {};
-        const countMarks: Record<string, number> = {};
-
-        resultsSnap.forEach((docSnap) => {
-          const d = docSnap.data();
-          const sub = d.subject;
-          const obtained = d.marks === "AB" ? 0 : Number(d.marks) || 0;
-          if (!highestMarks[sub] || highestMarks[sub] < obtained) {
-            highestMarks[sub] = obtained;
-          }
-          if (!sumMarks[sub]) { sumMarks[sub] = 0; countMarks[sub] = 0; }
-          sumMarks[sub] += obtained;
-          countMarks[sub] += 1;
-        });
-
-        const classAverages: Record<string, number> = {};
-        Object.keys(sumMarks).forEach(sub => {
-          classAverages[sub] = countMarks[sub] > 0 ? sumMarks[sub] / countMarks[sub] : 0;
-        });
-
-        // 3. Write updates in a batch
-        const batch = writeBatch(db);
-
-        // Update all result summaries for this class to set published: true
-        summariesSnap.forEach((docSnap) => {
-          batch.update(docSnap.ref, { published: true });
-        });
-
-        // Create a nice notification notice
-        const noticeRef = doc(collection(db, "notices"));
-        batch.set(noticeRef, {
-          title: `Class ${studentData.class} Results Published: ${examName}`,
-          message: `The results for ${examName} have been officially published by Class Teacher ${studentData.fullName || studentData.name || 'Teacher'} for Class ${studentData.class}. Students and parents can now view and download report cards.`,
-          date: new Date().toISOString().split('T')[0],
-          priority: 'Urgent',
-          targets: ['Student', 'Guardian'],
-          isPinned: false,
-          status: 'Published',
-          timestamp: new Date().toISOString()
-        });
-
-        await batch.commit();
-
-        setPublishStatusMessage(`✅ Successfully published results for Class ${studentData.class}!`);
-        setTimeout(() => setPublishStatusMessage(""), 5000);
-      } catch (err: any) {
-        console.error("Failed publishing class results:", err);
-        setPublishStatusMessage(`❌ Error: ${err.message || err}`);
-        setTimeout(() => setPublishStatusMessage(""), 5000);
-      }
+    const handlePublishClassResults = async (_examId: string) => {
+      setPublishStatusMessage("🔒 Publication is restricted to School Administration. Please submit marks in Result Management for administrative approval and official publication.");
+      setTimeout(() => setPublishStatusMessage(""), 6000);
     };
 
     return (
@@ -2766,26 +2712,40 @@ export default function Home() {
       return;
     }
 
+    if (!enquiryCaptchaToken) {
+      setEnquiryError("Please complete and verify the security challenge before submitting.");
+      return;
+    }
+
     setEnquiryLoading(true);
     try {
       const combinedMessage = `🏫 Student: ${enquiryStudentName.trim()}\n🎓 Grade: ${enquiryGrade}\n📧 Contact Email: ${enquiryEmail.trim() || "N/A"}\n💬 Message: ${enquiryMessage.trim() || "N/A"}`;
 
-      await setDoc(doc(collection(db, "contact_enquiries")), {
-        name: enquiryName.trim(),
-        studentName: enquiryStudentName.trim(),
-        grade: enquiryGrade,
-        phone: cleanPhone,
-        email: enquiryEmail.trim() || "",
-        message: combinedMessage,
-        rawMessage: enquiryMessage.trim() || "",
-        createdAt: new Date().toISOString(),
-        status: "unread"
+      const res = await fetch("/api/public/submit-enquiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          verificationToken: enquiryCaptchaToken,
+          name: enquiryName.trim(),
+          studentName: enquiryStudentName.trim(),
+          grade: enquiryGrade,
+          phone: cleanPhone,
+          email: enquiryEmail.trim() || "",
+          message: combinedMessage,
+          rawMessage: enquiryMessage.trim() || ""
+        })
       });
-      setEnquiryRefId(`ENQ-${Date.now().toString().slice(-6)}`);
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || "Failed to register enquiry.");
+      }
+
+      setEnquiryRefId(resData.refId || `ENQ-${Date.now().toString().slice(-6)}`);
+      setEnquiryCaptchaToken("");
       setEnquirySuccess(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Enquiry submit error:", err);
-      setEnquiryError("Failed to register. Please check your internet connection.");
+      setEnquiryError(err?.message || "Failed to register. Please verify the security challenge and try again.");
     } finally {
       setEnquiryLoading(false);
     }
@@ -2798,7 +2758,7 @@ export default function Home() {
     <div className="flex flex-col bg-[#FAFAF8] dark:bg-[#0b0f19] w-full min-h-screen text-[#1A1A2E] dark:text-gray-100 relative overflow-hidden">
       <Helmet>
         <title>
-          {content.tagline2 || "Shikshantar Academy"} | Outstanding Education in Siraha
+          {`${content.tagline2 || "Shikshantar Academy"} | Outstanding Education in Siraha`}
         </title>
         <meta
           name="description"
@@ -2845,6 +2805,45 @@ export default function Home() {
           })}
         </script>
       </Helmet>
+
+      {/* 0. Mobile Top Excellence Banner: Rendered on small screens (< md) above Notice Update as requested */}
+      <div className="md:hidden w-full bg-gradient-to-r from-[#071D33] via-[#0d2a45] to-[#071D33] border-b border-[#F0A500]/30 px-3 py-1.5 flex items-center justify-between gap-2.5 shadow-md relative z-30 select-none">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="relative shrink-0">
+            <div className="absolute inset-0 rounded-full bg-[#F0A500]/30 blur-xs scale-110 pointer-events-none" />
+            <img 
+              src="/assets/11_years_excellence_badge.png" 
+              alt="11 Years of Excellence" 
+              className="w-10 h-10 object-contain relative z-10 drop-shadow-[0_2px_8px_rgba(240,165,0,0.5)] select-none"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (!target.src.includes('image_3638013e.png')) {
+                  target.src = '/assets/aistudio/image_3638013e.png';
+                }
+              }}
+            />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] sm:text-xs font-black tracking-wider uppercase text-[#F0A500] font-display">
+                11 Years of Excellence
+              </span>
+              <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#F0A500]/20 text-[#F0A500] border border-[#F0A500]/40 font-mono font-bold">
+                2072–2083 B.S.
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-300 truncate font-sans">
+              Shikshantar Academy • A Decade+ of Academic Trust
+            </p>
+          </div>
+        </div>
+        <Link
+          to="/about"
+          className="shrink-0 bg-[#F0A500] hover:bg-[#D4900A] text-slate-950 font-bold text-[10px] px-2.5 py-1 rounded-md transition-all shadow-sm active:scale-95 whitespace-nowrap"
+        >
+          Our Story
+        </Link>
+      </div>
 
       {/* 1. Notice Announcement Ticker */}
       {(content.announcement || true) && (content.isNoticeEnabled !== false || isAdmin) && (
@@ -2926,8 +2925,8 @@ export default function Home() {
               tabLabel: "School Legacy",
               category: "Bastipur, Siraha",
               image: logoImage,
-              badge: "Serving Since 2072 B.S.",
-              title: "Over 10 Years of Trust in Karjanha",
+              badge: "Serving Since 2072 B.S. • 11 Years",
+              title: "11 Years of Academic Excellence in Karjanha",
               desc: "Serving families in Bastipur and nearby villages since 2072 B.S. with caring teachers, safe school bus service, and 100% pass results in SEE exams.",
               link: "/about",
               cta: "Read Our Story",
@@ -2944,6 +2943,38 @@ export default function Home() {
 
           return (
             <div className="absolute inset-0 w-full h-full flex flex-col md:flex-row">
+              {/* 11 Years of Excellence Badge Emblem - Centered precisely on the top dividing seam between left & right columns on Tablet & Desktop */}
+              <div className="hidden md:flex absolute top-2.5 lg:top-4 z-40 left-[48%] lg:left-[44%] xl:left-[42%] -translate-x-1/2 flex-col items-center pointer-events-auto">
+                <Link
+                  to="/about"
+                  title="11 Years of Academic Excellence (2072–2083 B.S.) • Shikshantar Academy"
+                  className="group relative flex flex-col items-center focus:outline-hidden"
+                >
+                  {/* Ambient golden aura behind emblem */}
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-[#F0A500]/40 via-amber-300/30 to-[#F0A500]/10 blur-md scale-110 pointer-events-none group-hover:blur-xl group-hover:scale-130 transition-all duration-300" />
+                  
+                  <motion.img 
+                    initial={{ scale: 0.85, opacity: 0, y: -8 }}
+                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.15 }}
+                    whileHover={{ scale: 1.08, rotate: [0, -2, 2, 0] }}
+                    src="/assets/11_years_excellence_badge.png" 
+                    alt="11 Years of Academic Excellence - Shikshantar Academy"
+                    className="w-16 h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 xl:w-28 xl:h-28 object-contain relative z-10 drop-shadow-[0_8px_22px_rgba(0,0,0,0.65)] select-none filter contrast-105"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      if (!target.src.includes('image_3638013e.png')) {
+                        target.src = '/assets/aistudio/image_3638013e.png';
+                      }
+                    }}
+                  />
+                  {/* Subtle elegant badge pill underneath on hover */}
+                  <span className="opacity-0 group-hover:opacity-100 transition-all duration-200 -mt-1 text-[9px] font-black uppercase tracking-widest text-[#F0A500] bg-[#071D33]/90 border border-[#F0A500]/50 px-2.5 py-0.5 rounded-full shadow-lg whitespace-nowrap z-20 pointer-events-none">
+                    2072–2083 B.S.
+                  </span>
+                </Link>
+              </div>
+
               {/* Left Column: Dignified Academic Editorial Panel */}
               <div className="w-full h-[58%] sm:h-[54%] md:h-full md:w-[48%] lg:w-[44%] xl:w-[42%] flex flex-col justify-between md:justify-center bg-gradient-to-br from-[#0c2b42] via-[#082033] to-[#04121e] p-6 sm:p-8 md:p-10 lg:p-12 xl:p-14 z-20 relative text-white border-b-2 md:border-b-0 md:border-r-2 border-[#F0A500]/40 shadow-[14px_0_35px_rgba(0,0,0,0.55)]">
                 {/* Subtle watermark logo for institutional texture */}
@@ -3083,7 +3114,6 @@ export default function Home() {
                                     className="w-full h-full object-contain filter drop-shadow select-none pointer-events-none"
                                     referrerPolicy="no-referrer"
                                     loading="eager"
-                                    fetchPriority="high"
                                     onError={(e) => {
                                       const target = e.currentTarget;
                                       if (target.src !== logoFallback && !target.src.endsWith('/logo.png')) {
@@ -3654,28 +3684,28 @@ export default function Home() {
                   initial: { opacity: 0, x: -30, scale: 0.98 },
                   animate: { opacity: 1, x: 0, scale: 1 },
                   exit: { opacity: 0, x: 30, scale: 1.02 },
-                  transition: { duration: 0.45, ease: "easeOut" }
+                  transition: { duration: 0.45, ease: "easeOut" as const }
                 };
               case 1:
                 return {
                   initial: { opacity: 0, scale: 0.95 },
                   animate: { opacity: 1, scale: 1 },
                   exit: { opacity: 0, scale: 1.05 },
-                  transition: { duration: 0.45, ease: "easeOut" }
+                  transition: { duration: 0.45, ease: "easeOut" as const }
                 };
               case 2:
                 return {
                   initial: { opacity: 0, y: 30, scale: 0.98 },
                   animate: { opacity: 1, y: 0, scale: 1 },
                   exit: { opacity: 0, y: -30, scale: 1.02 },
-                  transition: { duration: 0.45, ease: "easeOut" }
+                  transition: { duration: 0.45, ease: "easeOut" as const }
                 };
               case 3:
                 return {
                   initial: { opacity: 0, x: 30, scale: 0.98 },
                   animate: { opacity: 1, x: 0, scale: 1 },
                   exit: { opacity: 0, x: -30, scale: 1.02 },
-                  transition: { duration: 0.45, ease: "easeOut" }
+                  transition: { duration: 0.45, ease: "easeOut" as const }
                 };
               case 4:
               default:
@@ -3683,7 +3713,7 @@ export default function Home() {
                   initial: { opacity: 0, scale: 1.05 },
                   animate: { opacity: 1, scale: 1 },
                   exit: { opacity: 0, scale: 0.95 },
-                  transition: { duration: 0.45, ease: "easeOut" }
+                  transition: { duration: 0.45, ease: "easeOut" as const }
                 };
             }
           };
@@ -4533,6 +4563,11 @@ export default function Home() {
                                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-800 bg-[#FAFAF8] dark:bg-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#1B4F72]/20 focus:border-[#1B4F72] text-gray-800 dark:text-white transition-all placeholder-slate-400"
                               />
                             </div>
+
+                            <CaptchaChallengeBox
+                              onVerified={(token) => setEnquiryCaptchaToken(token)}
+                              onReset={() => setEnquiryCaptchaToken("")}
+                            />
 
                             <button
                               type="submit"

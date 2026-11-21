@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Shield, Search, CheckCircle2, AlertCircle, User, Mail, Smartphone, BadgeCheck, MoreHorizontal, Trash2, Edit3, X, Filter, UserPlus, Users, UserCheck, ShieldCheck, Lock, Eye, EyeOff, ChevronDown, Calendar, KeyRound, Copy, Check, AlertTriangle, BookOpen, Plus, Layers, GraduationCap, Briefcase } from 'lucide-react';
-import { db, auth, firebaseConfig } from '../firebase';
-import { doc, onSnapshot, collection, updateDoc, deleteDoc, setDoc, getDoc, getDocs, query, where, runTransaction } from 'firebase/firestore';
-import { onAuthStateChanged, getAuth } from 'firebase/auth';
-import { initializeApp, getApps } from 'firebase/app';
-import { initializeAuth, createUserWithEmailAndPassword, inMemoryPersistence } from 'firebase/auth';
+import { db, auth } from '../firebase';
+import { doc, onSnapshot, collection, updateDoc, deleteDoc, setDoc, getDoc, getDocs, query, where, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { useAuth } from '../contexts/AuthContext';
 import NepaliADDatePicker from '../components/NepaliADDatePicker';
 import { checkDuplicateStudentRoll, checkDuplicateStudentRollInFirestore, extractStudentRoll } from '../lib/studentValidation';
 import { recordAuditLog, buildAuthoritativeAuditPayload, getAuthoritativeActor } from '../lib/auditLogger';
@@ -27,18 +26,6 @@ import {
   groupAssignmentsByClass
 } from '../lib/teacherAssignmentEngine';
 import { createCustomSubject } from '../lib/customSubjectEngine';
-
-// Initialize a secondary Firebase app to create users without signing out the admin
-const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
-const secondaryAuth = (() => {
-  try {
-    return getAuth(secondaryApp);
-  } catch (e) {
-    return initializeAuth(secondaryApp, {
-      persistence: inMemoryPersistence
-    });
-  }
-})();
 
 interface UserProfile {
   id: string;
@@ -113,8 +100,7 @@ export default function UserApprovals() {
   const [bulkActionOpen, setBulkActionOpen] = useState(false);
   const [academicYear, setAcademicYear] = useState<string>('2083');
 
-  const currentUserData = auth.currentUser ? usersList.find(u => u.id === auth.currentUser?.uid) : null;
-  const isPrimaryAdmin = currentUserData?.adminTier !== 'secondary'; // Default to primary if not set
+  const { isPrimaryAdmin } = useAuth();
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'fee_structure'), (docSnap) => {
@@ -124,6 +110,8 @@ export default function UserApprovals() {
           setAcademicYear(data.academicYear);
         }
       }
+    }, (err) => {
+      console.warn('UserApprovals: fee_structure subscription warning:', err?.message);
     });
     return () => unsub();
   }, []);
@@ -190,21 +178,18 @@ export default function UserApprovals() {
     return () => { unsubUsers(); unsubAuth(); };
   }, []);
 
-  // Self-healing effect for super admin profile if missing
+  // Bootstrap owner self-healing only when verified Firebase owner is missing a Firestore profile
   useEffect(() => {
     const runSelfHeal = async () => {
       if (!auth.currentUser || isUsersLoading) return;
-      
-      const currentUserRole = localStorage.getItem('userRole');
-      if (currentUserRole !== 'admin') return;
+      const emailLower = (auth.currentUser.email || '').trim().toLowerCase();
+      if (emailLower !== 'rahulsah4534@gmail.com' || auth.currentUser.emailVerified !== true) return;
 
-      // 1. Check if the logged-in admin has a document in the users collection
       const adminInList = usersList.find(u => u.id === auth.currentUser?.uid);
       if (!adminInList && auth.currentUser) {
-        console.log("Admin document missing from users collection. Creating it...");
         try {
           await setDoc(doc(db, 'users', auth.currentUser.uid), {
-            email: auth.currentUser.email || 'admin@shikshantar.edu.np',
+            email: auth.currentUser.email || 'rahulsah4534@gmail.com',
             fullName: auth.currentUser.displayName || 'Administrator',
             role: 'admin',
             adminTier: 'primary',
@@ -213,7 +198,7 @@ export default function UserApprovals() {
             createdAt: new Date().toISOString()
           }, { merge: true });
         } catch (err) {
-          console.error("Failed to self-heal admin document:", err);
+          console.error("Failed to self-heal verified bootstrap owner document:", err);
         }
       }
     };
@@ -1117,13 +1102,13 @@ export default function UserApprovals() {
 
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [showTempPassword, setShowTempPassword] = useState(false);
-  const [newUser, setNewUser] = useState({
+  const [newUser, setNewUser] = useState<any>({
     email: '',
     password: '',
     fullName: '',
     dob: '',
     dobBs: '',
-    role: 'teacher' as const,
+    role: 'teacher',
     phone: '',
     class: '',
     studentId: '',
@@ -1237,6 +1222,8 @@ export default function UserApprovals() {
           }
         });
         setCustomSubjectsList(activeNames);
+      }, (err) => {
+        console.warn('UserApprovals: custom_subjects subscription warning:', err?.message);
       });
     } catch (e) {
       console.warn('Failed to listen to custom_subjects:', e);
@@ -1421,106 +1408,81 @@ export default function UserApprovals() {
         generatedAdminId = await generateNextAdminId();
       }
 
-      let emailToRegister = newUser.email;
-      let userCredential;
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error('Authentication session expired. Please log in again.');
+      }
 
-      // Create user auth account without signing current admin out
-      try {
-        userCredential = await createUserWithEmailAndPassword(secondaryAuth, emailToRegister, newUser.password);
-      } catch (authError: any) {
-        if (authError.code === 'auth/email-already-in-use' || String(authError.message).includes('auth/email-already-in-use')) {
-          // Check if there is an active profile document in the users database.
-          const docSnap = await getDocs(query(collection(db, 'users'), where('email', '==', newUser.email)));
-          if (docSnap.empty) {
-            // Firestore profile does NOT exist! It's an orphan auth account! Let's register using sub-addressing.
-            const parts = newUser.email.split('@');
-            emailToRegister = `${parts[0]}+reg${Math.floor(Date.now() / 1000)}@${parts[1]}`;
-            userCredential = await createUserWithEmailAndPassword(secondaryAuth, emailToRegister, newUser.password);
-          } else {
-            throw authError;
-          }
-        } else {
-          throw authError;
-        }
-      }
-      
-      const docId = userCredential.user.uid;
-      
-      // Store in users collection
-      const userProfilePayload: any = {
-        email: newUser.email,
-        authEmail: emailToRegister,
-        fullName: newUser.fullName,
+      const permanentId = generatedStudentId || generatedTeacherId || generatedAdminId;
+      const createPayload: Record<string, any> = {
+        email: newUser.email.trim().toLowerCase(),
+        password: newUser.password,
+        fullName: newUser.fullName.trim(),
         role: newUser.role,
-        active: true,
-        createdAt: new Date().toISOString()
+        adminTier: newUser.role === 'admin' ? 'secondary' : undefined,
+        permanentId,
+        dob: newUser.dob || undefined,
+        dobBs: newUser.dobBs || undefined,
+        phone: rawPhone ? `+977-${rawPhone}` : undefined,
+        address: newUser.address || undefined,
+        academicYear
       };
-      if (newUser.role === 'admin') {
-        userProfilePayload.adminTier = 'secondary';
-        userProfilePayload.adminId = generatedAdminId;
-        userProfilePayload.permanentAdminId = generatedAdminId;
-        userProfilePayload.staffId = generatedAdminId;
-      }
-      if (newUser.dob) userProfilePayload.dob = newUser.dob;
-      if (newUser.dobBs) userProfilePayload.dobBs = newUser.dobBs;
-      if (rawPhone) userProfilePayload.phone = `+977-${rawPhone}`;
-      if (newUser.address) userProfilePayload.address = newUser.address;
 
       if (newUser.role === 'student') {
         const cleanEmis = (newUser.emisNumber || '').trim();
-        userProfilePayload.permanentStudentId = generatedStudentId;
-        userProfilePayload.studentId = generatedStudentId;
-        userProfilePayload.emisNumber = cleanEmis;
-        userProfilePayload.studentEmis = cleanEmis;
-        userProfilePayload.class = newUser.class;
-        userProfilePayload.section = newUser.section || 'A';
-        userProfilePayload.rollNumber = newUser.rollNumber || '';
-        userProfilePayload.rollNo = newUser.rollNumber || '';
-        userProfilePayload.classAssignedYear = academicYear;
-        userProfilePayload.linkedTeacherId = newUser.linkedTeacherId || '';
-        userProfilePayload.guardianName = newUser.guardianName;
-        if (newUser.fatherName) userProfilePayload.fatherName = newUser.fatherName;
-        if (newUser.motherName) userProfilePayload.motherName = newUser.motherName;
-        userProfilePayload.caste = newUser.caste;
-        userProfilePayload.disability = newUser.disability;
-        userProfilePayload.gender = newUser.gender;
-        userProfilePayload.hasTransportation = newUser.hasTransportation || 'No';
-        userProfilePayload.transportRoute = newUser.transportRoute || '';
-        userProfilePayload.transportFee = newUser.hasTransportation === 'Yes' ? Number(newUser.transportFee || 0) : 0;
-        userProfilePayload.hasComputer = newUser.hasComputer || 'No';
-        userProfilePayload.computerFee = newUser.hasComputer === 'Yes' ? Number(newUser.computerFee || 0) : 0;
-        userProfilePayload.scholarshipStatus = newUser.scholarshipStatus;
-        if (newUser.scholarshipStatus === 'Provided') {
-          userProfilePayload.scholarshipAmount = Number(newUser.scholarshipAmount) || 0;
-        } else {
-          userProfilePayload.scholarshipAmount = 0;
-        }
+        Object.assign(createPayload, {
+          emisNumber: cleanEmis,
+          class: newUser.class,
+          section: newUser.section || 'A',
+          rollNumber: newUser.rollNumber || '',
+          linkedTeacherId: newUser.linkedTeacherId || '',
+          guardianName: newUser.guardianName,
+          fatherName: newUser.fatherName || '',
+          motherName: newUser.motherName || '',
+          caste: newUser.caste,
+          disability: newUser.disability,
+          gender: newUser.gender,
+          hasTransportation: newUser.hasTransportation || 'No',
+          transportRoute: newUser.transportRoute || '',
+          transportFee: newUser.hasTransportation === 'Yes' ? Number(newUser.transportFee || 0) : 0,
+          hasComputer: newUser.hasComputer || 'No',
+          computerFee: newUser.hasComputer === 'Yes' ? Number(newUser.computerFee || 0) : 0,
+          scholarshipStatus: newUser.scholarshipStatus,
+          scholarshipAmount: newUser.scholarshipStatus === 'Provided' ? (Number(newUser.scholarshipAmount) || 0) : 0
+        });
       } else if (newUser.role === 'teacher') {
-        userProfilePayload.permanentTeacherId = generatedTeacherId;
-        userProfilePayload.teacherId = generatedTeacherId;
-        userProfilePayload.staffId = generatedTeacherId;
-        userProfilePayload.primaryClassTeacher = newUser.primaryClassTeacher || newUser.class || '';
-        userProfilePayload.class = newUser.primaryClassTeacher || newUser.class || '';
-        userProfilePayload.mainSubject = newUser.mainSubject || '';
-        userProfilePayload.specialization = newUser.mainSubject || '';
-        userProfilePayload.qualification = newUser.qualification || '';
-        userProfilePayload.designation = newUser.designation || 'Teacher / Faculty';
-        userProfilePayload.department = newUser.department || 'Academics';
-        userProfilePayload.teachingAssignments = newUser.teachingAssignments || [];
-        userProfilePayload.assignedClasses = deriveLegacyAssignedClasses(newUser.teachingAssignments || [], newUser.primaryClassTeacher || newUser.class);
-        userProfilePayload.assignedSubjects = deriveLegacyAssignedSubjects(newUser.teachingAssignments || [], newUser.mainSubject);
+        Object.assign(createPayload, {
+          primaryClassTeacher: newUser.primaryClassTeacher || newUser.class || '',
+          mainSubject: newUser.mainSubject || '',
+          qualification: newUser.qualification || '',
+          designation: newUser.designation || 'Teacher / Faculty',
+          department: newUser.department || 'Academics',
+          teachingAssignments: newUser.teachingAssignments || [],
+          assignedClasses: deriveLegacyAssignedClasses(newUser.teachingAssignments || [], newUser.primaryClassTeacher || newUser.class),
+          assignedSubjects: deriveLegacyAssignedSubjects(newUser.teachingAssignments || [], newUser.mainSubject)
+        });
       }
 
-      // Use getFirestore with secondaryApp so the write is executed under the newly created user's own session
-      const { getFirestore: getFirestoreSecondary } = await import('firebase/firestore');
-      const secondaryDb = getFirestoreSecondary(secondaryApp, firebaseConfig.firestoreDatabaseId);
-      await setDoc(doc(secondaryDb, 'users', docId), userProfilePayload);
-      
+      const createRes = await fetch('/api/users/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`
+        },
+        body: JSON.stringify(createPayload)
+      });
+      const createData = await createRes.json().catch(() => ({}));
+      if (!createRes.ok || !createData.success || !createData.uid) {
+        throw new Error(createData.error || 'Failed to create user account via trusted server.');
+      }
+
+      const docId = createData.uid;
+      const authoritativePermanentId = createData.permanentId || permanentId;
+
       if (newUser.role === 'student') {
-        // Concurrency-safe automatic Academic Enrollment record creation
         await recordStudentEnrollment({
           studentUid: docId,
-          studentId: generatedStudentId,
+          studentId: authoritativePermanentId,
           emisNumber: (newUser.emisNumber || '').trim(),
           bsYear: getCurrentBSAcademicYear(academicYear),
           className: newUser.class,
@@ -1533,9 +1495,6 @@ export default function UserApprovals() {
           await generateInitialFee(docId, newUser.class, newUser.scholarshipStatus, Number(newUser.scholarshipAmount) || 0);
         }
       }
-      
-      // Immediately sign out the secondary auth so it can be used again cleanly
-      await secondaryAuth.signOut();
 
       setStatus({ 
         type: 'success', 
@@ -2156,7 +2115,7 @@ export default function UserApprovals() {
       </section>
 
       {/* View User Modal (Only for Teachers and Administrators; Students open dedicated full page) */}
-      {viewingUser && viewingUser.role !== 'student' && createPortal(
+      {viewingUser && (viewingUser.role as string) !== 'student' && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
             <div className={`p-6 relative text-white ${

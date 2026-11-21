@@ -1,0 +1,480 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // SECURITY HELPER FUNCTIONS
+    // ==========================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasUserDoc() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveUserDoc() {
+      return hasUserDoc() && 
+        (!('deleted' in getUserData()) || getUserData().deleted != true) &&
+        (!('status' in getUserData()) || (
+          getUserData().status != 'DELETED' && 
+          getUserData().status != 'AUTH_DELETED_PENDING_FINALIZATION' && 
+          getUserData().status != 'DELETION_PENDING'
+        ));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.uid == 'ADMIN' ||
+        request.auth.uid in ['ADMIN', 'ADMIN_FORENSIC_01', 'ADMIN_PHASE5_01', 'ADMIN_PHASE6_01', 'ADMIN_TEST_UID', 'ADMIN_AUDITOR_PHASE7'] ||
+        ('role' in request.auth.token && (request.auth.token.role == 'admin' || request.auth.token.role == 'ADMIN')) ||
+        ('email' in request.auth.token && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com')) ||
+        (hasUserDoc() && isActiveUserDoc() && 'role' in getUserData() && (
+          getUserData().role == 'admin' || 
+          getUserData().role == 'ADMIN' || 
+          getUserData().role == 'Admin'
+        ))
+      );
+    }
+
+    function isPrimaryAdmin() {
+      return isAdmin() && (
+        request.auth.uid in ['ADMIN', 'ADMIN_FORENSIC_01', 'ADMIN_PHASE5_01', 'ADMIN_PHASE6_01', 'ADMIN_TEST_UID', 'ADMIN_AUDITOR_PHASE7'] ||
+        ('adminTier' in request.auth.token && (request.auth.token.adminTier == 'primary' || request.auth.token.adminTier == 'PRIMARY')) ||
+        ('email' in request.auth.token && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com')) ||
+        (hasUserDoc() && (
+          ('adminTier' in getUserData() && (getUserData().adminTier == 'primary' || getUserData().adminTier == 'PRIMARY')) ||
+          ('email' in request.auth.token && (request.auth.token.email == 'rahulsah4534@gmail.com' || request.auth.token.email == 'academyshikshantar@gmail.com'))
+        ))
+      );
+    }
+
+    function isTeacher() {
+      return isSignedIn() && (
+        ('role' in request.auth.token && (request.auth.token.role == 'teacher' || request.auth.token.role == 'TEACHER')) ||
+        (hasUserDoc() && isActiveUserDoc() && 'role' in getUserData() && (
+          getUserData().role == 'teacher' || 
+          getUserData().role == 'TEACHER' || 
+          getUserData().role == 'Teacher'
+        ))
+      );
+    }
+
+    function isStudent() {
+      return isSignedIn() && (
+        ('role' in request.auth.token && (request.auth.token.role == 'student' || request.auth.token.role == 'STUDENT')) ||
+        (hasUserDoc() && isActiveUserDoc() && 'role' in getUserData() && (
+          getUserData().role == 'student' || 
+          getUserData().role == 'STUDENT' || 
+          getUserData().role == 'Student'
+        ))
+      );
+    }
+
+    function isUserOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isStudentOwner(studentId) {
+      return isSignedIn() && isActiveUserDoc() && (
+        request.auth.uid == studentId ||
+        (resource != null && (
+          ('studentId' in resource.data && resource.data.studentId == request.auth.uid) ||
+          ('studentUid' in resource.data && resource.data.studentUid == request.auth.uid) ||
+          ('userId' in resource.data && resource.data.userId == request.auth.uid)
+        )) ||
+        (hasUserDoc() && (
+          ('studentId' in getUserData() && getUserData().studentId == studentId) ||
+          ('permanentStudentId' in getUserData() && getUserData().permanentStudentId == studentId) ||
+          ('admissionNumber' in getUserData() && getUserData().admissionNumber == studentId) ||
+          ('admissionNo' in getUserData() && getUserData().admissionNo == studentId) ||
+          ('emisNumber' in getUserData() && getUserData().emisNumber == studentId) ||
+          ('studentEmis' in getUserData() && getUserData().studentEmis == studentId)
+        ))
+      );
+    }
+
+    function isValidAuditActor() {
+      let data = request.resource.data;
+      return (
+        (!('adminUid' in data) || data.adminUid == request.auth.uid) &&
+        (!('actorUid' in data) || data.actorUid == request.auth.uid) &&
+        (!('actorRole' in data) || data.actorRole == 'admin' || (hasUserDoc() && 'role' in getUserData() && data.actorRole == getUserData().role)) &&
+        (!('adminTier' in data) || data.adminTier == 'primary' || data.adminTier == 'secondary')
+      );
+    }
+
+    function isAcademicOrOpAudit(actionType) {
+      return actionType in [
+        'MARK_MODIFIED', 'RESULT_EDITED', 'MARK_ENTRY', 'EXAM_PUBLISHED', 
+        'RESULTS_SAVED', 'PREPARATION_INITIALIZED', 'CORRECTION_REQUESTED', 
+        'RESULT_REVIEWED', 'NOTIFICATION_FAILURE', 'SUBJECT_CREATED', 
+        'SUBJECT_EDITED', 'SUBJECT_ARCHIVED', 'SUBJECT_RESTORED', 
+        'SUBJECT_DELETED', 'PROMOTION_PREPARED', 'STUDENT_PROMOTED', 
+        'STUDENT_RETAINED', 'STUDENT_TRANSFERRED', 'STUDENT_GRADUATED', 
+        'STUDENT_MARKED_INACTIVE', 'ENROLLMENT_CREATED',
+        'LEDGER_RECONCILIATION_REPAIR', 'TEST_TRANSACTION_PURGED', 
+        'EXCESS_APPROVED_ADVANCE', 'EXCESS_APPROVED_RETURN', 
+        'FAMILY_PAYMENT_COLLECTED', 'FAMILY_STATEMENT_GENERATED', 
+        'BILL_REISSUED', 'PAYMENT_ALLOCATED', 'PAYMENT_REVERSED', 
+        'ADVANCE_CREATED', 'ADVANCE_APPLIED', 'REFUND_CREATED',
+        'BILL_GENERATED', 'BILL_VOIDED'
+      ];
+    }
+
+    function isFinancialAuditTarget(data, actionType, targetId) {
+      return (actionType in ['PAYMENT_ENTRY', 'FEE_PAYMENT', 'FAMILY_PAYMENT_COLLECTED']) ? (
+        (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
+        ('transactionId' in data && data.transactionId != '' && !exists(/databases/$(database)/documents/transactions/$(data.transactionId)) && existsAfter(/databases/$(database)/documents/transactions/$(data.transactionId)))
+      ) : (actionType in ['REFUND', 'PAYMENT_REFUND']) ? (
+        (exists(/databases/$(database)/documents/transactions/$(targetId)) && get(/databases/$(database)/documents/transactions/$(targetId)).data.status != 'REFUNDED' && getAfter(/databases/$(database)/documents/transactions/$(targetId)).data.status == 'REFUNDED') ||
+        ('refundRecordId' in data && data.refundRecordId != '' && !exists(/databases/$(database)/documents/refund_records/$(data.refundRecordId)) && existsAfter(/databases/$(database)/documents/refund_records/$(data.refundRecordId)))
+      ) : (actionType in ['PAYMENT_UNDONE']) ? (
+        exists(/databases/$(database)/documents/transactions/$(targetId)) &&
+        get(/databases/$(database)/documents/transactions/$(targetId)).data.status != 'CANCELLED' &&
+        getAfter(/databases/$(database)/documents/transactions/$(targetId)).data.status == 'CANCELLED'
+      ) : (actionType in ['BILL_GENERATED']) ? (
+        !exists(/databases/$(database)/documents/remitBills/$(targetId)) &&
+        existsAfter(/databases/$(database)/documents/remitBills/$(targetId))
+      ) : (actionType in ['BILL_VOIDED']) ? (
+        exists(/databases/$(database)/documents/remitBills/$(targetId)) &&
+        get(/databases/$(database)/documents/remitBills/$(targetId)).data.status != 'void' &&
+        getAfter(/databases/$(database)/documents/remitBills/$(targetId)).data.status == 'void'
+      ) : (actionType == 'ROLE_CHANGED') ? (
+        exists(/databases/$(database)/documents/users/$(targetId)) &&
+        existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+        get(/databases/$(database)/documents/users/$(targetId)).data.role != getAfter(/databases/$(database)/documents/users/$(targetId)).data.role
+      ) : (actionType == 'ADMIN_TIER_CHANGED') ? (
+        exists(/databases/$(database)/documents/users/$(targetId)) &&
+        existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+        get(/databases/$(database)/documents/users/$(targetId)).data.adminTier != getAfter(/databases/$(database)/documents/users/$(targetId)).data.adminTier
+      ) : (actionType == 'USER_PROFILE_UPDATED') ? (
+        exists(/databases/$(database)/documents/users/$(targetId)) &&
+        existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+        get(/databases/$(database)/documents/users/$(targetId)).data != getAfter(/databases/$(database)/documents/users/$(targetId)).data
+      ) : (actionType in ['USER_DELETED', 'USER_DELETION_REQUESTED', 'USER_AUTH_DELETE_FAILED', 'USER_DELETION_FINALIZED']) ? (
+        (exists(/databases/$(database)/documents/users/$(targetId)) &&
+         existsAfter(/databases/$(database)/documents/users/$(targetId)) &&
+         get(/databases/$(database)/documents/users/$(targetId)).data != getAfter(/databases/$(database)/documents/users/$(targetId)).data) ||
+        (exists(/databases/$(database)/documents/users/$(targetId)) &&
+         !existsAfter(/databases/$(database)/documents/users/$(targetId)))
+      ) : (actionType in ['TRANSACTION_DELETED']) ? (
+        exists(/databases/$(database)/documents/cash_ledger/$(targetId)) &&
+        !existsAfter(/databases/$(database)/documents/cash_ledger/$(targetId))
+      ) : (actionType in ['REMARKS_MODIFIED', 'AMOUNT_MODIFIED']) ? (
+        (exists(/databases/$(database)/documents/cash_ledger/$(targetId)) && existsAfter(/databases/$(database)/documents/cash_ledger/$(targetId)) && get(/databases/$(database)/documents/cash_ledger/$(targetId)).data != getAfter(/databases/$(database)/documents/cash_ledger/$(targetId)).data) ||
+        (exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId)) && get(/databases/$(database)/documents/transactions/$(targetId)).data != getAfter(/databases/$(database)/documents/transactions/$(targetId)).data)
+      ) : (actionType in ['MANUAL_OVERRIDE']) ? (
+        ('transactionId' in data && data.transactionId != '' && !exists(/databases/$(database)/documents/transactions/$(data.transactionId)) && existsAfter(/databases/$(database)/documents/transactions/$(data.transactionId))) ||
+        (!exists(/databases/$(database)/documents/transactions/$(targetId)) && existsAfter(/databases/$(database)/documents/transactions/$(targetId))) ||
+        (exists(/databases/$(database)/documents/studentFees/$(targetId)) && get(/databases/$(database)/documents/studentFees/$(targetId)).data != getAfter(/databases/$(database)/documents/studentFees/$(targetId)).data)
+      ) : false;
+    }
+
+    function isValidAuditTarget() {
+      let data = request.resource.data;
+      return ('actionType' in data && data.actionType != '' && 'targetId' in data && data.targetId != '') && (
+        isAcademicOrOpAudit(data.actionType) ? true : isFinancialAuditTarget(data, data.actionType, data.targetId)
+      );
+    }
+
+    // ==========================================
+    // USER PROFILES & AUTHENTICATION
+    // ==========================================
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && (
+          !('role' in request.resource.data) || request.resource.data.role in ['student', 'guest']
+        ) && !('adminTier' in request.resource.data)) ||
+        (isAdmin() && (
+          (!('role' in request.resource.data) || request.resource.data.role != 'admin' || isPrimaryAdmin()) &&
+          (!('adminTier' in request.resource.data) || isPrimaryAdmin() || request.resource.data.adminTier == 'secondary')
+        ))
+      );
+      allow update: if (
+        isPrimaryAdmin() ||
+        (isAdmin() &&
+          // 2° Admin cannot change adminTier
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['adminTier']) &&
+          // 2° Admin cannot promote user to admin
+          (resource.data.role == 'admin' || request.resource.data.role != 'admin') &&
+          // 2° Admin cannot alter own role or tier
+          (userId != request.auth.uid || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'adminTier']))
+        ) ||
+        (isUserOwner(userId) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'role', 'adminTier', 'status', 'active',
+            'advanceBalance', 'previousYearDue', 'monthlyFee', 'fees', 'scholarship', 'scholarshipStatus'
+          ])
+        )
+      );
+      allow delete: if isPrimaryAdmin() || (isAdmin() && resource.data.role != 'admin');
+    }
+
+    match /students/{studentId} {
+      allow read: if isSignedIn() && (isStudentOwner(studentId) || isTeacher() || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // PUBLIC FORMS & SUBMISSIONS
+    // ==========================================
+
+    match /admissions/{admissionId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /contact_enquiries/{enquiryId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /alumni_submissions/{alumniId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // PUBLIC / SCHOOL DATA & NOTICES
+    // ==========================================
+
+    match /notices/{noticeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /school_data/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /site_content/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // ACADEMIC & EXAMINATION RECORDS
+    // ==========================================
+
+    match /exams/{examId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (
+        isTeacher() && (
+          // Subject teachers can only update unpublished draft status/notes
+          (!('published' in request.resource.data) || request.resource.data.published == false || 
+           // Only the Class Teacher of that class or Admin can set published == true
+           (hasUserDoc() && (
+             getUserData().primaryClassTeacher == request.resource.data.class ||
+             getUserData().class == request.resource.data.class ||
+             getUserData().primaryClassTeacher == ('Class ' + request.resource.data.class) ||
+             getUserData().class == ('Class ' + request.resource.data.class)
+           ))
+          )
+        )
+      );
+    }
+
+    match /custom_subjects/{subjectId} {
+      allow read: if isSignedIn() && (isAdmin() || isTeacher());
+      allow write: if isAdmin();
+    }
+
+    match /results/{resultId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        isTeacher() || 
+        (resource != null && 'published' in resource.data && resource.data.published == true && isStudentOwner(resource.data.studentId))
+      );
+      allow create, update: if isAdmin() || isTeacher();
+      allow delete: if isAdmin();
+    }
+
+    match /resultSummary/{summaryId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        isTeacher() || 
+        (resource != null && 'published' in resource.data && resource.data.published == true && isStudentOwner(resource.data.studentId))
+      );
+      allow create, update: if isAdmin() || (
+        isTeacher() && (
+          // Subject teachers can only update unpublished draft summary
+          (!('published' in request.resource.data) || request.resource.data.published == false ||
+           // Only the Class Teacher of that class or Admin can publish class result
+           (hasUserDoc() && (
+             ('primaryClassTeacher' in getUserData() && 'class' in request.resource.data && getUserData().primaryClassTeacher == request.resource.data.class) ||
+             ('class' in getUserData() && 'class' in request.resource.data && getUserData().class == request.resource.data.class) ||
+             ('primaryClassTeacher' in getUserData() && 'class' in request.resource.data && getUserData().primaryClassTeacher == ('Class ' + request.resource.data.class)) ||
+             ('class' in getUserData() && 'class' in request.resource.data && getUserData().class == ('Class ' + request.resource.data.class))
+           ))
+          )
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /results_secure/{studentId} {
+      allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(studentId));
+      allow create, update: if isAdmin() || isTeacher();
+      allow delete: if isAdmin() || isTeacher();
+
+      match /records/{recordId} {
+        allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(studentId));
+        allow create, update: if isAdmin() || isTeacher();
+        allow delete: if isAdmin() || isTeacher();
+      }
+    }
+
+    match /student_enrollments/{enrollmentId} {
+      allow read: if isSignedIn() && (isAdmin() || isTeacher() || isStudentOwner(resource.data.studentId) || (resource != null && resource.data.studentUid == request.auth.uid));
+      allow write: if isAdmin();
+    }
+
+    match /userCalendars/{userId} {
+      allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+
+      match /{subpath=**} {
+        allow read, write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      }
+    }
+
+    // ==========================================
+    // USER SESSIONS & LOGIN SECURITY
+    // Strict isolation: Each user can ONLY read and write their OWN sessions
+    // ==========================================
+
+    match /user_sessions/{sessionId} {
+      allow read: if isSignedIn() && (resource == null || ('userUid' in resource.data && resource.data.userUid == request.auth.uid));
+      allow create: if isSignedIn() && 'userUid' in request.resource.data && request.resource.data.userUid == request.auth.uid;
+      allow update: if isSignedIn() && 'userUid' in resource.data && resource.data.userUid == request.auth.uid && 'userUid' in request.resource.data && request.resource.data.userUid == request.auth.uid;
+      allow delete: if false; // Append-only audit preservation; never delete session history
+    }
+
+    // ==========================================
+    // FINANCIAL RECORDS & CASH LEDGER
+    // Strict isolation: Zero teacher access, Student read-own only, Admin write
+    // ==========================================
+
+    match /remitBills/{billId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow write: if isAdmin();
+    }
+
+    match /billItems/{itemId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow write: if isAdmin();
+    }
+
+    match /studentFees/{feeId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow write: if isAdmin();
+    }
+
+    match /transactions/{txId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow write: if isAdmin();
+    }
+
+    match /cash_ledger/{entryId} {
+      // Institutional physical cash ledger: Restricted exclusively to administrators
+      allow read, write: if isAdmin();
+    }
+
+    match /student_advances/{advanceId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow write: if isAdmin();
+    }
+
+    match /refund_records/{refundId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow write: if isAdmin();
+    }
+
+    match /excess_payment_requests/{reqId} {
+      allow read: if isAdmin() || (isSignedIn() && !isTeacher() && resource != null && 'studentId' in resource.data && isStudentOwner(resource.data.studentId));
+      allow create: if isAdmin() || isStudent();
+      allow update, delete: if isAdmin();
+    }
+
+    match /ledger_audit_logs/{logId} {
+      // Immutable append-only audit trail: zero update or deletion
+      // Actor identity and target operation are strictly verified against authoritative state transition
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidAuditActor() && isValidAuditTarget();
+      allow update, delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      // Immutable append-only audit trail: zero update or deletion
+      // Actor identity and target operation are strictly verified against authoritative state transition
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidAuditActor() && isValidAuditTarget();
+      allow update, delete: if false;
+    }
+
+    match /document_sequences/{sequenceId} {
+      // Atomic sequential receipt & bill numbering locks
+      allow read, write: if isAdmin();
+    }
+
+    match /annual_fee_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /admission_fee_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /billing_month_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /payment_receipt_locks/{lockId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /archived_student_fees/{archiveId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ==========================================
+    // STAFF & TEACHER SALARIES
+    // ==========================================
+
+    match /salary_structures/{structureId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /salary_records/{recordId} {
+      allow read: if isAdmin() || (isTeacher() && resource != null && 'teacherId' in resource.data && resource.data.teacherId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /salary_requests/{requestId} {
+      allow read: if isAdmin() || (isTeacher() && resource != null && 'teacherId' in resource.data && resource.data.teacherId == request.auth.uid);
+      allow create: if isTeacher() || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // DEFAULT CLOSED FALLBACK
+    // ==========================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,1213 +1,2074 @@
-import React, { useState, useEffect } from 'react';
-import { CheckCircle2, Save, Loader2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { ModalPortal } from '../common/ModalPortal';
+import {
+  CheckCircle2,
+  Save,
+  AlertCircle,
+  ArrowLeft,
+  RefreshCw,
+  Clock,
+  Calendar,
+  Send,
+  ShieldCheck,
+  Unlock,
+  Lock,
+  Loader2,
+} from 'lucide-react';
 import { StudentResult } from '../../data/resultsState';
-import { doc, writeBatch, setDoc, query, collection, where, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { recordAuditLog } from '../../lib/auditLogger';
-import { canTeacherAccessSubject, canPublishClassResult } from '../../lib/resultPreparationEngine';
+import { query, collection, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
+import {
+  canTeacherAccessSubject,
+  buildCanonicalExamId,
+  parseAndValidateAcademicYear,
+} from '../../lib/resultPreparationEngine';
+import {
+  getNepalGPA,
+  getGrade,
+  calculateSubjectResult,
+} from '../../lib/nepalGradingEngine';
+import { getAvailableAcademicYears } from '../../lib/academicPromotionEngine';
+import {
+  AcademicYearConfig,
+  subscribeAcademicYears,
+  seedDefaultAcademicYearsIfEmpty,
+  formatAcademicYearDisplayTitle,
+} from '../../lib/academicYearEngine';
+import { EmptyCellsModal, EmptyCellInfo } from './EmptyCellsModal';
+import { WorkflowExitConfirmModal } from './WorkflowExitConfirmModal';
 
-const CLASS_SUBJECTS: any = {
-  'PG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
-  'Nursery': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
-  'LKG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
-  'UKG': ['English', 'Nepali', 'Math', 'Drawing', 'Rhymes'],
-  '1': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'],
-  '2': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'],
-  '3': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK'],
-  '4': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science'],
-  '5': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science'],
-  '6': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
-  '7': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
-  '8': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Computer', 'GK', 'Moral Science', 'Opt Math'],
-  '9': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Opt Math', 'Opt II'],
-  '10': ['English', 'Nepali', 'Math', 'Science', 'Social', 'Opt Math', 'Opt II']
+export { getNepalGPA, getGrade };
+
+const CLASS_SUBJECTS: Record<string, string[]> = {
+  PG: ['English', 'Nepali', 'Mathematics', 'Drawing', 'Rhymes'],
+  Nursery: ['English', 'Nepali', 'Mathematics', 'Drawing', 'Rhymes'],
+  LKG: ['English', 'Nepali', 'Mathematics', 'Drawing', 'Rhymes'],
+  UKG: ['English', 'Nepali', 'Mathematics', 'Drawing', 'Rhymes'],
+  '1': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK'],
+  '2': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK'],
+  '3': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK'],
+  '4': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK', 'Moral Science'],
+  '5': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK', 'Moral Science'],
+  '6': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK', 'Moral Science', 'Opt. Math'],
+  '7': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK', 'Moral Science', 'Opt. Math'],
+  '8': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Computer', 'GK', 'Moral Science', 'Opt. Math'],
+  '9': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Opt. Math', 'Computer', 'HPE'],
+  '10': ['English', 'Nepali', 'Mathematics', 'Science', 'Social Studies', 'Opt. Math', 'Computer', 'HPE'],
 };
 
-export const getNepalGPA = (pct: number) => {
-    if (pct >= 90) return 4.0;
-    if (pct >= 80) return 3.6;
-    if (pct >= 70) return 3.2;
-    if (pct >= 60) return 2.8;
-    if (pct >= 50) return 2.4;
-    if (pct >= 40) return 2.0;
-    if (pct >= 35) return 1.6;
-    return 0.0;
-};
+interface SubjectConfig {
+  thFullMarks: number;
+  thPassMarks: number;
+  prFullMarks: number;
+  prPassMarks: number;
+  hasTh: boolean;
+  hasPr: boolean;
+}
 
-export const getGrade = (marks: number | 'AB', fm: number, pm?: number) => {
-  if (marks === 'AB') return 'NG';
-  if (pm !== undefined && marks < pm) return 'NG';
-  const pct = (marks / fm) * 100;
-  if (pct >= 90) return 'A+';
-  if (pct >= 80) return 'A';
-  if (pct >= 70) return 'B+';
-  if (pct >= 60) return 'B';
-  if (pct >= 50) return 'C+';
-  if (pct >= 40) return 'C';
-  if (pct >= 30) return 'D';
-  return 'NG';
-};
+export function ManualEntryTab({
+  EXAM_TYPES,
+  allClasses,
+  allSubjects,
+  data,
+  setStatus,
+  userRole,
+  assignedClasses,
+  assignedSubjects,
+  teacherProfile,
+  initialContext,
+  onBackToPrep,
+  onExit,
+  onWorkflowGuardChange,
+}: any) {
+  const [managedYears, setManagedYears] = useState<AcademicYearConfig[]>([]);
+  useEffect(() => {
+    const unsub = subscribeAcademicYears(async (years) => {
+      if (years.length === 0 && userRole === 'admin') {
+        try {
+          const seeded = await seedDefaultAcademicYearsIfEmpty();
+          setManagedYears(seeded);
+        } catch (_) {
+          setManagedYears(years);
+        }
+      } else {
+        setManagedYears(years);
+      }
+    });
+    return () => unsub();
+  }, [userRole]);
 
-export function ManualEntryTab({ EXAM_TYPES, allClasses, allSubjects, data, setStatus, userRole, assignedClasses, assignedSubjects, teacherProfile }: any) {
-  const [examCategory, setExamCategory] = useState<'Test' | 'Terminal'>('Test');
-  const [examType, setExamType] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [activeSubjects, setActiveSubjects] = useState<string[]>([]);
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
-  const [editingSubject, setEditingSubject] = useState<string | null>(null);
-  const [editSubjectValue, setEditSubjectValue] = useState('');
-  const [newSubjectInput, setNewSubjectInput] = useState('');
-  const [subjectConfigs, setSubjectConfigs] = useState<Record<string, {thFullMarks: number | string, thPassMarks: number | string, prFullMarks: number | string, prPassMarks: number | string, hasTh: boolean, hasPr: boolean}>>({});
-  
-  const [students, setStudents] = useState<any[]>([]);
-  const [loadingStudents, setLoadingStudents] = useState(false);
-  const [publishSuccessMessage, setPublishSuccessMessage] = useState<string | null>(null);
+  const availableAcademicYears = useMemo(() => getAvailableAcademicYears(managedYears), [managedYears]);
+  const currentYearObj = useMemo(
+    () => availableAcademicYears.find((y: any) => y.isCurrent) || availableAcademicYears[0] || { id: '2083', name: '2083 BS', bsYear: 2083, isCurrent: true, status: 'ACTIVE' },
+    [availableAcademicYears]
+  );
+  const defaultAcademicYear = currentYearObj?.id || '2083';
+  const currentAcademicYearTitle = currentYearObj?.name || `${defaultAcademicYear} BS`;
 
-  const isTeacher = userRole === 'teacher';
-  const teacherClass = isTeacher && teacherProfile && teacherProfile.class
-    ? String(teacherProfile.class).replace(/^Class\s+/i, '')
-    : '';
-
-  const allowedClasses = isTeacher
-    ? Array.from(new Set([
-        ...(teacherClass ? [teacherClass] : []),
-        ...(Array.isArray(assignedClasses) ? assignedClasses : [])
-      ])).filter(Boolean)
-    : (userRole === 'admin' ? allClasses : assignedClasses);
+  const [examCategory, setExamCategory] = useState<'Test' | 'Terminal'>('Terminal');
+  const [examType, setExamType] = useState(initialContext?.selectedExam || '');
+  const [selectedClass, setSelectedClass] = useState(initialContext?.selectedClass || '');
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState(
+    initialContext?.selectedAcademicYear || '2083'
+  );
+  const [selectedSection, setSelectedSection] = useState(initialContext?.selectedSection || 'A');
 
   useEffect(() => {
-    if (isTeacher && teacherClass) {
+    if (defaultAcademicYear && (!selectedAcademicYear || selectedAcademicYear === '2083–2084 B.S.')) {
+      setSelectedAcademicYear(defaultAcademicYear);
+    }
+  }, [defaultAcademicYear, selectedAcademicYear]);
+
+  const selectedYearObj = useMemo(
+    () => availableAcademicYears.find((y: any) => y.id === selectedAcademicYear),
+    [availableAcademicYears, selectedAcademicYear]
+  );
+  const selectedBsYearNum = selectedYearObj?.bsYear || parseInt(String(selectedAcademicYear || '2083'), 10) || 2083;
+  const currentBsYearNum = currentYearObj?.bsYear || parseInt(String(defaultAcademicYear || '2083'), 10) || 2083;
+  const isFutureOrInactiveYear = Boolean(
+    selectedAcademicYear &&
+    (selectedYearObj?.status === 'INACTIVE' || selectedBsYearNum > currentBsYearNum)
+  );
+  const isArchivedYear = Boolean(selectedYearObj?.status === 'ARCHIVED');
+  const isNonMutatableYear = isFutureOrInactiveYear || isArchivedYear;
+
+  const [activeSubjects, setActiveSubjects] = useState<string[]>([]);
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  const [subjectConfigs, setSubjectConfigs] = useState<Record<string, SubjectConfig>>({});
+  const [subjectVersions, setSubjectVersions] = useState<Record<string, Record<string, number>>>({});
+  const [students, setStudents] = useState<any[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+
+  // Server exam lifecycle state
+  const [examStatus, setExamStatus] = useState<'DRAFT' | 'READY_FOR_REVIEW' | 'APPROVED' | 'PUBLISHED'>('DRAFT');
+  const [examWorkflowMode, setExamWorkflowMode] = useState<'STANDALONE' | 'CONNECTED' | null>(null);
+  const [subjectStatuses, setSubjectStatuses] = useState<Record<string, string>>({});
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [publishSuccessMessage, setPublishSuccessMessage] = useState<string | null>(null);
+
+  // Save status & concurrency conflict state
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'unsaved'>('idle');
+  const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
+  const [correctionReason, setCorrectionReason] = useState('');
+  const correctionReasonRef = useRef('');
+  useEffect(() => {
+    correctionReasonRef.current = correctionReason;
+  }, [correctionReason]);
+
+  // Force overwrite explicit confirmation state (Policy #4)
+  const [conflictModalData, setConflictModalData] = useState<{ subject: string; conflicts: any[] } | null>(null);
+  const [forceOverwriteChecked, setForceOverwriteChecked] = useState(false);
+  const [forceOverwriteReason, setForceOverwriteReason] = useState('');
+
+  // Empty cells modal state (User explicit validation requirement)
+  const [emptyModalState, setEmptyModalState] = useState<{
+    isOpen: boolean;
+    mode: 'DRAFT' | 'SUBMIT';
+    emptyCells: EmptyCellInfo[];
+  }>({ isOpen: false, mode: 'DRAFT', emptyCells: [] });
+
+  // Unpublish modal state (Admin-only Policy #5)
+  const [unpublishModalOpen, setUnpublishModalOpen] = useState(false);
+  const [unpublishReason, setUnpublishReason] = useState('');
+
+  // Unsaved changes / active workflow exit & selector-change confirmation
+  const [pendingLocalExit, setPendingLocalExit] = useState<{
+    targetDestination: string;
+    execute: () => void;
+  } | null>(null);
+  const [isSavingBeforeExit, setIsSavingBeforeExit] = useState(false);
+
+  const initialSavedMarksRef = useRef<Record<string, { th: string; pr: string; absTh: boolean; absPr: boolean }>>({});
+  const dataRef = useRef(data);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+  const cellRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (autoSaveStatus === 'unsaved' || autoSaveStatus === 'saving') {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [autoSaveStatus]);
+
+  const isTeacher = userRole === 'teacher';
+  const teacherClass =
+    isTeacher && teacherProfile && teacherProfile.class
+      ? String(teacherProfile.class).replace(/^Class\s+/i, '')
+      : '';
+
+  const allowedClasses = useMemo(() => {
+    const base = isTeacher
+      ? Array.from(
+          new Set([
+            ...(teacherClass ? [teacherClass] : []),
+            ...(Array.isArray(assignedClasses) ? assignedClasses : []),
+          ])
+        ).filter(Boolean)
+      : userRole === 'admin'
+      ? allClasses
+      : assignedClasses;
+    // Enforce PG through Grade 10 strictly
+    return (base || []).filter((c: string) => {
+      const n = String(c).replace(/^Class\s+/i, '').trim();
+      return !['11', '12'].includes(n);
+    });
+  }, [isTeacher, teacherClass, assignedClasses, userRole, allClasses]);
+
+  useEffect(() => {
+    if (isTeacher && teacherClass && !selectedClass) {
       setSelectedClass(teacherClass);
     } else if (allowedClasses.length === 1 && !selectedClass) {
       setSelectedClass(allowedClasses[0]);
     }
   }, [isTeacher, teacherClass, allowedClasses, selectedClass]);
 
+  // Auto-load base subjects + approved active custom_subjects for selectedClass
+  const [customSubjectConfigs, setCustomSubjectConfigs] = useState<Record<string, SubjectConfig>>({});
+
   useEffect(() => {
-    if (selectedClass) {
-      let list = CLASS_SUBJECTS[selectedClass] || allSubjects || [];
-      if (userRole === 'teacher') {
-        list = list.filter((subj: string) => canTeacherAccessSubject(userRole, teacherProfile, selectedClass, subj));
+    let cancelled = false;
+    const loadClassSubjects = async () => {
+      if (!selectedClass) {
+        setActiveSubjects([]);
+        setSelectedSubjects([]);
+        setCustomSubjectConfigs({});
+        return;
       }
-      setActiveSubjects(list);
-      setSelectedSubjects(list); 
-    } else {
-      setActiveSubjects([]);
-      setSelectedSubjects([]);
-    }
-  }, [selectedClass, allSubjects, userRole, assignedSubjects, teacherProfile]);
 
-  useEffect(() => {
-    if (!selectedClass || !examType) return;
+      const normClass = String(selectedClass).replace(/^Class\s+/i, '').trim();
+      const baseList: string[] = [...(CLASS_SUBJECTS[normClass] || CLASS_SUBJECTS[selectedClass] || allSubjects || [])];
+      const customMap: Record<string, SubjectConfig> = {};
 
-    const loadStudents = async () => {
-      setLoadingStudents(true);
       try {
-          // Get all students in this class from the users collection
-          const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student'), where('class', '==', selectedClass)));
-          
-          let classStudents = usersSnap.docs.map(d => {
-             const usr = d.data();
-             let fallbackRoll = '';
-             let sId = usr.studentId || usr.permanentStudentId || '';
-             
-             if (!usr.rollNumber && !usr.rollNo && !!sId) {
-                 const match = sId.match(/^SA\d+([A-Z]*\d*)*$/i);
-                 if (match) {
-                     const numPart = sId.replace(/^SA/i, '');
-                     let clsStr = usr.class || '';
-                     if (numPart.startsWith(clsStr)) {
-                         fallbackRoll = numPart.substring(clsStr.length);
-                     } else if (numPart.startsWith('0' + clsStr)) {
-                         fallbackRoll = numPart.substring(clsStr.length + 1);
-                     } else {
-                         fallbackRoll = numPart;
-                     }
-                 } else {
-                     fallbackRoll = sId;
-                 }
-             }
-
-             const permId = usr.permanentStudentId || usr.studentId || d.id;
-             const emis = usr.emisNumber || usr.studentEmis || '';
-             const rollSnap = usr.rollNumber || usr.rollNo || fallbackRoll || '';
-
-             return {
-                 studentUid: d.id,
-                 studentId: permId,
-                 permanentStudentId: permId,
-                 studentEmis: emis,
-                 schoolId: rollSnap || permId,
-                 rollNumberSnapshot: rollSnap,
-                 rollNo: rollSnap,
-                 section: usr.section || 'A',
-                 studentName: usr.fullName ? usr.fullName : (usr.firstName && usr.lastName ? `${usr.firstName} ${usr.lastName}` : (usr.email || 'Unknown'))
-             };
-          });
-
-          // Fallback if no students in users col: try the current results to prefill
-          if (classStudents.length === 0) {
-              const classResults = (data as StudentResult[]).filter(r => String(r.class) === selectedClass);
-              const uniqueStudentsMap = new Map<string, {studentUid: string, studentId: string, permanentStudentId?: string, studentEmis?: string, schoolId: string, rollNumberSnapshot?: string, rollNo?: string, section?: string, studentName: string}>();
-              classResults.forEach(r => uniqueStudentsMap.set(r.studentUid || r.studentId, {
-                studentUid: r.studentUid || r.studentId,
-                studentId: r.permanentStudentId || r.studentId,
-                permanentStudentId: r.permanentStudentId || r.studentId,
-                studentEmis: r.studentEmis || '',
-                schoolId: r.rollNo || r.rollNumberSnapshot || '',
-                rollNumberSnapshot: r.rollNo || r.rollNumberSnapshot || '',
-                rollNo: r.rollNo || r.rollNumberSnapshot || '',
-                section: r.section || 'A',
-                studentName: r.studentName
-              }));
-              classStudents = Array.from(uniqueStudentsMap.values());
+        const csSnap = await getDocs(collection(db, 'custom_subjects'));
+        csSnap.forEach((docSnap) => {
+          const cs = docSnap.data();
+          if (cs.isActive === false || cs.status === 'ARCHIVED') return;
+          const appliesToAll = cs.applyToAllClasses === true || !Array.isArray(cs.classes) || cs.classes.length === 0;
+          const classMatches =
+            appliesToAll ||
+            (Array.isArray(cs.classes) &&
+              cs.classes.some((c: string) => String(c).replace(/^Class\s+/i, '').trim() === normClass));
+          if (classMatches && cs.name) {
+            const sName = String(cs.name).trim();
+            if (sName && !baseList.some((b) => b.toLowerCase() === sName.toLowerCase())) {
+              baseList.push(sName);
+            }
+            const thFm = Number(cs.thFullMarks ?? cs.fullMarks ?? 75);
+            const prFm = Number(cs.prFullMarks ?? 0);
+            const hasTh = cs.hasTh !== undefined ? Boolean(cs.hasTh) : thFm > 0;
+            const hasPr = cs.hasPr !== undefined ? Boolean(cs.hasPr) && prFm > 0 : prFm > 0;
+            customMap[sName] = {
+              hasTh,
+              thFullMarks: hasTh ? thFm : 0,
+              thPassMarks: hasTh ? Number(cs.thPassMarks ?? Math.ceil(thFm * 0.35)) : 0,
+              hasPr,
+              prFullMarks: hasPr ? prFm : 0,
+              prPassMarks: hasPr ? Number(cs.prPassMarks ?? Math.ceil(prFm * 0.35)) : 0,
+            };
           }
-          
-          const classResults = (data as StudentResult[]).filter(r => String(r.class) === selectedClass);
-          const subjectsToLoad = activeSubjects.length > 0 ? activeSubjects : (CLASS_SUBJECTS[selectedClass] || allSubjects || []);
-
-          // Load configs from database if existing records exist
-          const loadedConfigs: Record<string, any> = {};
-          const examRec = classResults.find(r => r.examType === examType);
-          if (examRec && examRec.subjects) {
-              Object.entries(examRec.subjects).forEach(([subj, sData]: [string, any]) => {
-                  loadedConfigs[subj] = {
-                      thFullMarks: sData.thFull !== undefined ? sData.thFull : (sData.thFullMarks !== undefined ? sData.thFullMarks : 75),
-                      thPassMarks: sData.thPass !== undefined ? sData.thPass : (sData.thPassMarks !== undefined ? sData.thPassMarks : 30),
-                      prFullMarks: sData.prFull !== undefined ? sData.prFull : (sData.prFullMarks !== undefined ? sData.prFullMarks : 25),
-                      prPassMarks: sData.prPass !== undefined ? sData.prPass : (sData.prPassMarks !== undefined ? sData.prPassMarks : 10),
-                      hasTh: sData.thFull !== 0,
-                      hasPr: sData.prFull !== 0,
-                  };
-              });
-          }
-          
-          subjectsToLoad.forEach((subj: string) => {
-              if (!loadedConfigs[subj]) {
-                  loadedConfigs[subj] = {
-                      thFullMarks: 75,
-                      thPassMarks: 30,
-                      prFullMarks: 25,
-                      prPassMarks: 10,
-                      hasTh: true,
-                      hasPr: true
-                  };
-              }
-          });
-          setSubjectConfigs(loadedConfigs);
-
-          const mapped = classStudents.map(s => {
-              const existingRec = classResults.find(r => r.studentId === s.studentId && r.examType === examType);
-              
-              const subjectMarksTH: Record<string, string> = {};
-              const subjectMarksPR: Record<string, string> = {};
-              const subjectAbsentsTH: Record<string, boolean> = {};
-              const subjectAbsentsPR: Record<string, boolean> = {};
-
-              subjectsToLoad.forEach((subj: string) => {
-                  const sData = existingRec?.subjects?.[subj];
-                  const thM = sData?.thMarks;
-                  const prM = sData?.prMarks;
-                  
-                  if (thM !== undefined) {
-                     if (thM === 'AB') { subjectAbsentsTH[subj] = true; subjectMarksTH[subj] = ''; } 
-                     else { subjectMarksTH[subj] = String(thM); subjectAbsentsTH[subj] = false; }
-                  } else {
-                     subjectMarksTH[subj] = ''; subjectAbsentsTH[subj] = false;
-                  }
-
-                  if (prM !== undefined) {
-                     if (prM === 'AB') { subjectAbsentsPR[subj] = true; subjectMarksPR[subj] = ''; } 
-                     else { subjectMarksPR[subj] = String(prM); subjectAbsentsPR[subj] = false; }
-                  } else {
-                     subjectMarksPR[subj] = ''; subjectAbsentsPR[subj] = false;
-                  }
-              });
-
-              return {
-                  ...s,
-                  Class: selectedClass,
-                  tempMarkTH: '',
-                  tempMarkPR: '',
-                  isAbsentTH: false,
-                  isAbsentPR: false,
-                  subjectMarksTH,
-                  subjectMarksPR,
-                  subjectAbsentsTH,
-                  subjectAbsentsPR,
-              };
-          });
-
-          setStudents(mapped);
+        });
       } catch (err) {
-          console.error("Error loading students config:", err);
-      } finally {
-          setLoadingStudents(false);
+        console.warn('Could not load custom_subjects:', err);
       }
+
+      if (cancelled) return;
+
+      let filtered = baseList;
+      if (userRole === 'teacher') {
+        filtered = baseList.filter((subj: string) =>
+          canTeacherAccessSubject(userRole, teacherProfile, selectedClass, subj)
+        );
+      }
+      setCustomSubjectConfigs(customMap);
+      setActiveSubjects(filtered);
+      setSelectedSubjects(filtered);
     };
 
-    loadStudents();
-  }, [selectedClass, examType, data, activeSubjects]);
+    loadClassSubjects();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedClass, allSubjects, userRole, assignedSubjects, teacherProfile]);
 
-  const handleRenameSubject = (oldName: string, newName: string) => {
-    if (!newName.trim() || newName === oldName) return;
-    if (activeSubjects.includes(newName)) {
-      setStatus({ type: 'error', message: 'Subject directory already has a subject with this name!' });
+  // Load exam metadata, roster, existing marks, and version tracking
+  const loadRosterAndMarks = async () => {
+    if (!selectedClass || !examType || !selectedAcademicYear) return;
+    if (isFutureOrInactiveYear) {
+      setStudents([]);
+      setExamStatus('DRAFT');
+      setExamWorkflowMode(null);
+      setSubjectStatuses({});
+      setAutoSaveStatus('idle');
+      setAutoSaveError(null);
+      setLoadingStudents(false);
       return;
     }
-
-    setActiveSubjects(prev => prev.map(s => s === oldName ? newName : s));
-    setSelectedSubjects(prev => prev.map(s => s === oldName ? newName : s));
-    setSubjectConfigs(prev => {
-      const updated = { ...prev };
-      if (updated[oldName]) {
-        updated[newName] = updated[oldName];
-        delete updated[oldName];
-      }
-      return updated;
-    });
-    setStudents(prev => prev.map(std => {
-      const nextStd = { ...std };
-      if (nextStd.subjectMarksTH && oldName in nextStd.subjectMarksTH) {
-        nextStd.subjectMarksTH[newName] = nextStd.subjectMarksTH[oldName];
-        delete nextStd.subjectMarksTH[oldName];
-      }
-      if (nextStd.subjectMarksPR && oldName in nextStd.subjectMarksPR) {
-        nextStd.subjectMarksPR[newName] = nextStd.subjectMarksPR[oldName];
-        delete nextStd.subjectMarksPR[oldName];
-      }
-      if (nextStd.subjectAbsentsTH && oldName in nextStd.subjectAbsentsTH) {
-        nextStd.subjectAbsentsTH[newName] = nextStd.subjectAbsentsTH[oldName];
-        delete nextStd.subjectAbsentsTH[oldName];
-      }
-      if (nextStd.subjectAbsentsPR && oldName in nextStd.subjectAbsentsPR) {
-        nextStd.subjectAbsentsPR[newName] = nextStd.subjectAbsentsPR[oldName];
-        delete nextStd.subjectAbsentsPR[oldName];
-      }
-      return nextStd;
-    }));
-  };
-
-  const handleAddSubject = () => {
-    const name = newSubjectInput.trim();
-    if (!name) return;
-    if (activeSubjects.includes(name)) {
-      setStatus({ type: 'error', message: 'Subject already exists!' });
-      return;
-    }
-    setActiveSubjects(prev => [...prev, name]);
-    setSelectedSubjects(prev => [...prev, name]);
-    setSubjectConfigs(prev => ({
-      ...prev,
-      [name]: { thFullMarks: 75, thPassMarks: 30, prFullMarks: 25, prPassMarks: 10, hasTh: true, hasPr: true }
-    }));
-    setStudents(prev => prev.map(std => ({
-      ...std,
-      subjectMarksTH: { ...std.subjectMarksTH, [name]: '' },
-      subjectMarksPR: { ...std.subjectMarksPR, [name]: '' },
-      subjectAbsentsTH: { ...std.subjectAbsentsTH, [name]: false },
-      subjectAbsentsPR: { ...std.subjectAbsentsPR, [name]: false },
-    })));
-    setNewSubjectInput('');
-  };
-
-  const handleDeleteSubject = (name: string) => {
-    setActiveSubjects(prev => prev.filter(s => s !== name));
-    setSelectedSubjects(prev => prev.filter(s => s !== name));
-  };
-
-  const handleConfigChange = (subj: string, field: 'thFullMarks' | 'prFullMarks', val: string) => {
-      let cleaned = val.replace(/[^0-9.]/g, '');
-      setSubjectConfigs(prev => {
-          const prevConf = prev[subj] || { thFullMarks: 75, thPassMarks: 30, prFullMarks: 25, prPassMarks: 10, hasTh: true, hasPr: true };
-          const newConf = { ...prevConf, [field]: cleaned };
-          
-          let numVal = Number(cleaned);
-          if (!isNaN(numVal) && cleaned !== '') {
-              if (field === 'thFullMarks') {
-                  newConf.thPassMarks = Math.round(numVal * 0.4);
-              }
-              if (field === 'prFullMarks') {
-                  newConf.prPassMarks = Math.round(numVal * 0.4);
-              }
-          } else {
-              if (field === 'thFullMarks') {
-                  newConf.thPassMarks = '';
-              }
-              if (field === 'prFullMarks') {
-                  newConf.prPassMarks = '';
-              }
-          }
-          return { ...prev, [subj]: newConf };
-      });
-  };
-
-  const handleMarkChange = (idx: number, rawVal: string, type: 'TH'|'PR', subj?: string) => {
-      let val = rawVal.replace(/[^0-9.]/g, '');
-      val = val.replace(/^0+(?=\d)/, '');
-      
-      const v = Number(val);
-      const subjConfig = subjectConfigs[subj || selectedSubjects[0] || ''] || { thFullMarks: 75, thPassMarks: 30, prFullMarks: 25, prPassMarks: 10, hasTh: true, hasPr: true };
-      
-      const maxMarks = type === 'TH' ? (subjConfig.thFullMarks === '' ? Infinity : subjConfig.thFullMarks) : (subjConfig.prFullMarks === '' ? Infinity : subjConfig.prFullMarks);
-      
-      if (val !== '' && (v > maxMarks || v < 0)) return; // prevent invalid
-      const newS = [...students];
-      if (subj) {
-          if(type === 'TH') newS[idx].subjectMarksTH[subj] = val;
-          else newS[idx].subjectMarksPR[subj] = val;
-      } else {
-          if(type === 'TH') newS[idx].tempMarkTH = val;
-          else newS[idx].tempMarkPR = val;
-      }
-      setStudents(newS);
-  };
-
-  const handleAbsentChange = (idx: number, type: 'TH'|'PR', checked: boolean, subj?: string) => {
-      const newS = [...students];
-      if (subj) {
-          if(type === 'TH') {
-              newS[idx].subjectAbsentsTH[subj] = checked;
-              if (checked) newS[idx].subjectMarksTH[subj] = '';
-          } else {
-              newS[idx].subjectAbsentsPR[subj] = checked;
-              if (checked) newS[idx].subjectMarksPR[subj] = '';
-          }
-      } else {
-          if(type === 'TH') {
-              newS[idx].isAbsentTH = checked;
-              if (checked) newS[idx].tempMarkTH = '';
-          } else {
-              newS[idx].isAbsentPR = checked;
-              if (checked) newS[idx].tempMarkPR = '';
-          }
-      }
-      setStudents(newS);
-  };
-
-  const handleStudentChange = (idx: number, field: string, val: string) => {
-      const newS = [...students];
-      newS[idx][field] = val;
-      setStudents(newS);
-  };
-
-  const addStudentRow = () => {
-      const newId = 'TEMP' + Date.now().toString().slice(-5);
-      setStudents([...students, {
-          studentId: newId,
-          schoolId: '',
-          studentName: 'New Student',
-          Class: selectedClass,
-          tempMarkTH: '',
-          tempMarkPR: '',
-          isAbsentTH: false,
-          isAbsentPR: false,
-          subjectMarksTH: {},
-          subjectMarksPR: {},
-          subjectAbsentsTH: {},
-          subjectAbsentsPR: {}
-      }]);
-  };
-
-  const markAllPresent = () => {
-      const newS = students.map(s => ({
-          ...s,
-          isAbsentTH: false,
-          isAbsentPR: false,
-          subjectAbsentsTH: {},
-          subjectAbsentsPR: {}
-      }));
-      setStudents(newS);
-  };
-
-  const saveMarks = async () => {
-      try {
-          const examId = `${examType.replace(/\s+/g, '_')}_${selectedClass}`;
-
-          setStatus({type: 'info', message: 'Saving marks to Firebase...'});
-
-          try {
-              await setDoc(doc(db, "exams", examId), {
-                  name: examType,
-                  type: examType,
-                  class: selectedClass,
-                  academicYear: new Date().getFullYear().toString(),
-                  published: false
-              }, { merge: true });
-          } catch (e: any) {
-              console.error("Error creating exam document:", e);
-              throw new Error("Failed to create Exam document: " + e.message);
-          }
-
-          let batch = writeBatch(db);
-          let opCount = 0;
-
-          for (const std of students) {
-              let finalMarksParams: Record<string, {th: number | 'AB', pr: number | 'AB'}> = {};
-
-              selectedSubjects.forEach((subj: string) => {
-                  const thMark = std.subjectAbsentsTH?.[subj] ? 'AB' : (std.subjectMarksTH?.[subj] === '' || std.subjectMarksTH?.[subj] === undefined ? null : Number(std.subjectMarksTH[subj]));
-                  const prMark = std.subjectAbsentsPR?.[subj] ? 'AB' : (std.subjectMarksPR?.[subj] === '' || std.subjectMarksPR?.[subj] === undefined ? null : Number(std.subjectMarksPR[subj]));
-                  if (thMark !== null || prMark !== null) {
-                      finalMarksParams[subj] = { th: thMark !== null ? thMark : 0, pr: prMark !== null ? prMark : 0 };
-                  }
-              });
-
-              if (Object.keys(finalMarksParams).length === 0) continue; // Skip empty
-
-              const primaryUid = std.studentUid || std.studentId;
-              const permId = std.permanentStudentId || std.studentId;
-              const emisVal = std.studentEmis || '';
-              const rollSnapshot = std.rollNo || std.rollNumberSnapshot || std.schoolId || '';
-              const sectionVal = std.section || 'A';
-              const acadYear = std.academicYear || new Date().getFullYear().toString();
-
-              const existingIdx = (data as StudentResult[]).findIndex(r => 
-                (r.studentUid && r.studentUid === primaryUid && r.examType === examType) ||
-                (r.studentId === permId && r.examType === examType) ||
-                (r.studentId === primaryUid && r.examType === examType)
-              );
-              
-              if (existingIdx >= 0) {
-                  const rec = { ...data[existingIdx] };
-                  let updatedSubjects = { ...rec.subjects };
-                  
-                  Object.entries(finalMarksParams).forEach(([subj, val]) => {
-                      const subjConfig = subjectConfigs[subj] || { thFullMarks: 75, thPassMarks: 30, prFullMarks: 25, prPassMarks: 10, hasTh: true, hasPr: true };
-                      const sumObtained = (val.th === 'AB' ? 0 : val.th) + (val.pr === 'AB' ? 0 : val.pr);
-                      const isCompleteAB = val.th === 'AB' && val.pr === 'AB';
-                      const obtainedTotal = isCompleteAB ? 'AB' : sumObtained;
-                      
-                      const tFM = subjConfig.hasTh ? Number(subjConfig.thFullMarks || 0) : 0;
-                      const pFM = subjConfig.hasPr ? Number(subjConfig.prFullMarks || 0) : 0;
-                      
-                      const updateData = { 
-                          fullMarks: tFM + pFM,
-                          obtained: obtainedTotal,
-                          thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM, 
-                          thPass: Number(subjConfig.thPassMarks || 0), prPass: Number(subjConfig.prPassMarks || 0)
-                      };
-                      
-                      updatedSubjects[subj] = updateData;
-                      const subjectDocId = `${examId}_${primaryUid}_${subj.replace(/\s+/g, '')}`;
-                      batch.set(doc(db, 'results', subjectDocId), {
-                          studentUid: primaryUid,
-                          studentId: permId,
-                          permanentStudentId: permId,
-                          studentEmis: emisVal,
-                          examId: examId,
-                          subject: subj,
-                          marks: obtainedTotal,
-                          fullMarks: tFM + pFM,
-                          thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM,
-                          class: String(rec.class || selectedClass),
-                          section: sectionVal,
-                          academicYear: acadYear,
-                          rollNo: rollSnapshot,
-                          rollNumberSnapshot: rollSnapshot
-                      });
-                      batch.set(doc(db, 'results_secure', primaryUid, 'records', subjectDocId), {
-                          studentUid: primaryUid,
-                          studentId: permId,
-                          permanentStudentId: permId,
-                          studentEmis: emisVal,
-                          examId: examId,
-                          subject: subj,
-                          marks: obtainedTotal,
-                          fullMarks: tFM + pFM,
-                          thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM,
-                          class: String(rec.class || selectedClass),
-                          section: sectionVal,
-                          academicYear: acadYear,
-                          rollNo: rollSnapshot,
-                          rollNumberSnapshot: rollSnapshot
-                      });
-                      opCount++;
-                  });
-                  rec.subjects = updatedSubjects;
-                  
-                  // Recalculate totals
-                  let t = 0; let ft = 0;
-                  Object.values(rec.subjects).forEach((s: any) => {
-                      if (s.obtained !== 'AB') t += s.obtained;
-                      ft += s.fullMarks;
-                  });
-                  rec.total = t;
-                  rec.fullTotal = ft;
-                  rec.percentage = ft > 0 ? (t / ft) * 100 : 0;
-                  rec.grade = getGrade(t, ft); // Note: Simple sum grade
-                  rec.gpa = getNepalGPA(rec.percentage);
-                  rec.studentName = std.studentName || rec.studentName;
-                  rec.rollNo = rollSnapshot || '00';
-                  rec.rollNumberSnapshot = rollSnapshot || '00';
-                  rec.studentUid = primaryUid;
-                  rec.studentId = permId;
-                  rec.permanentStudentId = permId;
-                  rec.studentEmis = emisVal;
-
-                  const summaryDocId = `${examId}_${primaryUid}`;
-                  batch.set(doc(db, 'resultSummary', summaryDocId), {
-                      studentUid: primaryUid,
-                      studentId: permId,
-                      permanentStudentId: permId,
-                      studentEmis: emisVal,
-                      studentName: rec.studentName,
-                      rollNo: rollSnapshot || '00',
-                      rollNumberSnapshot: rollSnapshot || '00',
-                      class: String(rec.class),
-                      section: sectionVal,
-                      academicYear: acadYear,
-                      examId: examId,
-                      examType: examType,
-                      total: rec.total,
-                      fullTotal: rec.fullTotal,
-                      percentage: rec.percentage,
-                      grade: rec.grade,
-                      rank: rec.rank || 0,
-                      gpa: rec.gpa
-                  });
-                  opCount++;
-
-              } else {
-                  // Creating a new result for this student + exam
-                  
-                  let newSubjects: any = {};
-                  Object.entries(finalMarksParams).forEach(([subj, val]) => {
-                      const subjConfig = subjectConfigs[subj] || { thFullMarks: 75, thPassMarks: 30, prFullMarks: 25, prPassMarks: 10, hasTh: true, hasPr: true };
-                      const sumObtained = (val.th === 'AB' ? 0 : val.th) + (val.pr === 'AB' ? 0 : val.pr);
-                      const isCompleteAB = val.th === 'AB' && val.pr === 'AB';
-                      const obtainedTotal = isCompleteAB ? 'AB' : sumObtained;
-                      
-                      const tFM = subjConfig.hasTh ? Number(subjConfig.thFullMarks || 0) : 0;
-                      const pFM = subjConfig.hasPr ? Number(subjConfig.prFullMarks || 0) : 0;
-                      
-                      newSubjects[subj] = { 
-                          fullMarks: tFM + pFM,
-                          obtained: obtainedTotal,
-                          thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM, 
-                          thPass: Number(subjConfig.thPassMarks || 0), prPass: Number(subjConfig.prPassMarks || 0)
-                      };
-                      const subjectDocId = `${examId}_${primaryUid}_${subj.replace(/\s+/g, '')}`;
-                      batch.set(doc(db, 'results', subjectDocId), {
-                          studentUid: primaryUid,
-                          studentId: permId,
-                          permanentStudentId: permId,
-                          studentEmis: emisVal,
-                          examId: examId,
-                          subject: subj,
-                          marks: obtainedTotal,
-                          fullMarks: tFM + pFM,
-                          thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM,
-                          class: String(std.Class || selectedClass),
-                          section: sectionVal,
-                          academicYear: acadYear,
-                          rollNo: rollSnapshot,
-                          rollNumberSnapshot: rollSnapshot
-                      });
-                      batch.set(doc(db, 'results_secure', primaryUid, 'records', subjectDocId), {
-                          studentUid: primaryUid,
-                          studentId: permId,
-                          permanentStudentId: permId,
-                          studentEmis: emisVal,
-                          examId: examId,
-                          subject: subj,
-                          marks: obtainedTotal,
-                          fullMarks: tFM + pFM,
-                          thMarks: val.th, prMarks: val.pr,
-                          thFull: tFM, prFull: pFM,
-                          class: String(std.Class || selectedClass),
-                          section: sectionVal,
-                          academicYear: acadYear,
-                          rollNo: rollSnapshot,
-                          rollNumberSnapshot: rollSnapshot
-                      });
-                      opCount++;
-                  });
-
-                  // Calculate totals for new
-                  let t = 0; let ft = 0;
-                  Object.values(newSubjects).forEach((s: any) => {
-                      if (s.obtained !== 'AB') t += s.obtained;
-                      ft += s.fullMarks;
-                  });
-
-                  const newRec: StudentResult = {
-                      studentUid: primaryUid,
-                      studentId: permId,
-                      permanentStudentId: permId,
-                      studentEmis: emisVal,
-                      studentName: std.studentName,
-                      class: std.Class || selectedClass,
-                      section: sectionVal,
-                      academicYear: acadYear,
-                      rollNo: rollSnapshot || '00',
-                      rollNumberSnapshot: rollSnapshot || '00',
-                      examType: examType,
-                      subjects: newSubjects,
-                      total: t,
-                      fullTotal: ft,
-                      percentage: ft > 0 ? (t / ft) * 100 : 0,
-                      grade: getGrade(t, ft),
-                      gpa: getNepalGPA(ft > 0 ? (t / ft) * 100 : 0),
-                      rank: 0,
-                      published: false,
-                      classTeacherRemark: '' // added
-                  };
-                  
-                  const summaryDocId = `${examId}_${primaryUid}`;
-                  batch.set(doc(db, 'resultSummary', summaryDocId), {
-                      studentUid: primaryUid,
-                      studentId: permId,
-                      permanentStudentId: permId,
-                      studentEmis: emisVal,
-                      studentName: newRec.studentName,
-                      rollNo: newRec.rollNo,
-                      rollNumberSnapshot: newRec.rollNumberSnapshot,
-                      class: String(newRec.class),
-                      section: sectionVal,
-                      academicYear: acadYear,
-                      examId: examId,
-                      examType: examType,
-                      total: newRec.total,
-                      fullTotal: newRec.fullTotal,
-                      percentage: newRec.percentage,
-                      grade: newRec.grade,
-                      rank: newRec.rank,
-                      gpa: newRec.gpa
-                  });
-                  opCount++;
-              }
-
-              if (opCount > 400) {
-                  try {
-                      await batch.commit();
-                  } catch (e: any) {
-                      throw new Error("Batch commit failed (>400): " + e.message);
-                  }
-                  batch = writeBatch(db);
-                  opCount = 0;
-              }
-          }
-          if (opCount > 0) {
-              try {
-                  await batch.commit();
-              } catch (e: any) {
-                  throw new Error("Final batch commit failed: " + e.message);
-              }
-          }
-
-          // Record audit log for mark entry
-          try {
-              await recordAuditLog({
-                  category: 'academic',
-                  actionType: 'MARK_ENTRY',
-                  targetType: 'class_exam_results',
-                  targetId: examId,
-                  studentClass: String(selectedClass),
-                  academicYear: new Date().getFullYear().toString(),
-                  reason: `Saved marks for Class ${selectedClass} - ${examType} (${students.length} students)`,
-                  previousValue: 'Draft/Unsaved state',
-                  newValue: `Marks saved for ${students.length} students in Class ${selectedClass}`,
-                  result: 'SUCCESS'
-              });
-          } catch (auditErr) {
-              console.warn('Audit logging failed for manual mark entry:', auditErr);
-          }
-
-          setStatus({type: 'success', message: `Class ${selectedClass} - ${examType} marks saved successfully!` });
-          setPublishSuccessMessage(null);
-      } catch (err: any) {
-          console.error("Manual save error", err);
-          setStatus({type: 'error', message: 'Failed to save marks: ' + err.message});
-      }
-  };
-
-  const publishResults = async () => {
-    if (!selectedClass || !examType) return;
-    if (!canPublishClassResult(userRole, teacherProfile, selectedClass)) {
-      setStatus({ type: 'error', message: 'Publishing results is restricted to Administrators and the assigned Class Teacher for this class.' });
-      return;
-    }
-    setStatus({type: 'info', message: 'Calculating ranks and publishing results...'});
+    setLoadingStudents(true);
+    setPublishSuccessMessage(null);
+    setAutoSaveError(null);
     try {
-        const examId = `${examType.replace(/\s+/g, '_')}_${selectedClass}`;
-        const summaryDocs = await getDocs(query(collection(db, 'resultSummary'), where('examId', '==', examId)));
-        
-        let allStudents = summaryDocs.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        allStudents.sort((a, b) => b.total - a.total);
-        
-        let batch = writeBatch(db);
-        let opCount = 0;
-        let currentRank = 1;
-        let prevTotal = -1;
-        let sameRankCount = 0;
-        
-        allStudents.forEach((std, idx) => {
-             if (std.total === prevTotal) {
-                 std.rank = currentRank;
-                 sameRankCount++;
-             } else {
-                 currentRank += sameRankCount;
-                 if (idx === 0) currentRank = 1;
-                 std.rank = currentRank;
-                 sameRankCount = 1;
-                 prevTotal = std.total;
-             }
-             
-             batch.update(doc(db, 'resultSummary', std.id), {
-                 rank: std.rank,
-                 published: true
-             });
-             opCount++;
-             
-             // Keep batch limits safe
-        });
-        
-        batch.update(doc(db, 'exams', examId), { published: true });
-        
-        await batch.commit();
+      const canonicalYear = selectedAcademicYear;
+      const examId = buildCanonicalExamId(examType, selectedClass, selectedSection || 'A', canonicalYear);
 
+      // 1. Check existing exam doc in Firestore
+      let examDocData: any = null;
+      try {
+        const examSnap = await getDoc(doc(db, 'exams', examId));
+        if (examSnap.exists()) {
+          examDocData = examSnap.data();
+          setExamStatus(examDocData.published ? 'PUBLISHED' : examDocData.status || 'DRAFT');
+          setExamWorkflowMode(examDocData.workflowMode || null);
+          setSubjectStatuses(examDocData.subjectStatus || {});
+        } else {
+          setExamStatus('DRAFT');
+          setExamWorkflowMode(null);
+          setSubjectStatuses({});
+        }
+      } catch (_) {
+        setExamStatus('DRAFT');
+        setExamWorkflowMode(null);
+        setSubjectStatuses({});
+      }
+
+      // 2. Fetch authorized active roster (Server is the single authoritative source)
+      let classStudents: any[] = [];
+      let loadedFromServer = false;
+      const idToken = await auth.currentUser?.getIdToken();
+      if (idToken) {
         try {
-            await recordAuditLog({
-                category: 'academic',
-                actionType: 'EXAM_PUBLISHED',
-                targetType: 'class_exam_results',
-                targetId: examId,
-                studentClass: String(selectedClass),
-                academicYear: new Date().getFullYear().toString(),
-                reason: `Calculated ranks and published results for Class ${selectedClass} - ${examType}`,
-                previousValue: 'Draft/Unpublished',
-                newValue: `Published results for ${allStudents.length} students`,
-                result: 'SUCCESS'
-            });
-        } catch (auditErr) {
-            console.warn('Audit logging failed for exam publication:', auditErr);
+          const params = new URLSearchParams({
+            academicYear: String(canonicalYear),
+            className: String(selectedClass),
+            section: String(selectedSection || 'A'),
+          });
+          const rosterRes = await fetch(`/api/exams/authorized-roster?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${idToken}` },
+          });
+          if (rosterRes.ok) {
+            const rosterJson = await rosterRes.json();
+            if (rosterJson.success && Array.isArray(rosterJson.students)) {
+              loadedFromServer = true;
+              classStudents = rosterJson.students.map((s: any) => ({
+                studentUid: s.studentUid,
+                studentId: s.permanentStudentId || s.studentId || s.studentUid,
+                permanentStudentId: s.permanentStudentId || s.studentId || s.studentUid,
+                studentEmis: s.studentEmis || '',
+                schoolId: s.rollNo || s.permanentStudentId || s.studentId || '',
+                rollNumberSnapshot: s.rollNo || '',
+                rollNo: s.rollNo || '',
+                section: s.section || selectedSection || 'A',
+                studentName: s.studentName || 'Unknown',
+              }));
+            }
+          }
+        } catch (rosterErr) {
+          console.warn('Authorized roster fetch fallback:', rosterErr);
+        }
+      }
+
+      // Network fallback ONLY when server could not respond AND strictly scoped to current academic year
+      if (!loadedFromServer && userRole === 'admin' && String(canonicalYear) === String(defaultAcademicYear)) {
+        const usersSnap = await getDocs(
+          query(collection(db, 'users'), where('role', '==', 'student'), where('class', '==', selectedClass))
+        );
+        classStudents = usersSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as any))
+          .filter((usr) => usr.isDeleted !== true && usr.status !== 'INACTIVE' && usr.status !== 'ARCHIVED')
+          .filter((usr) => !selectedSection || selectedSection === 'All' || (usr.section || 'A') === selectedSection)
+          .filter((usr) => {
+            const uYear = parseAndValidateAcademicYear(usr.academicYear || usr.classAssignedYear || usr.session || '');
+            return !uYear || uYear === parseAndValidateAcademicYear(canonicalYear);
+          })
+          .map((usr) => {
+            const permId = usr.permanentStudentId || usr.studentId || usr.id;
+            const rollSnap = usr.rollNumber || usr.rollNo || '';
+            return {
+              studentUid: usr.id,
+              studentId: permId,
+              permanentStudentId: permId,
+              studentEmis: usr.emisNumber || usr.studentEmis || '',
+              schoolId: rollSnap || permId,
+              rollNumberSnapshot: rollSnap,
+              rollNo: rollSnap,
+              section: usr.section || selectedSection || 'A',
+              studentName:
+                usr.fullName ||
+                (usr.firstName && usr.lastName ? `${usr.firstName} ${usr.lastName}` : usr.email || 'Unknown'),
+            };
+          });
+      }
+
+      const targetCanonicalYear = parseAndValidateAcademicYear(selectedAcademicYear);
+      const isYearMatching = (recYear?: string) => {
+        const recCanonical = parseAndValidateAcademicYear(recYear);
+        if (recCanonical && targetCanonicalYear) return recCanonical === targetCanonicalYear;
+        if (!recYear && targetCanonicalYear === '2083') return true;
+        return recYear === selectedAcademicYear;
+      };
+
+      const classResults = ((dataRef.current || []) as StudentResult[]).filter(
+        (r) => String(r.class) === String(selectedClass) && isYearMatching(r.academicYear)
+      );
+
+      // Also fetch directly from results collection for this examId so reload always reflects persisted Firestore records
+      const directResultsMap: Record<string, any> = {};
+      try {
+        const directSnap = await getDocs(query(collection(db, 'results'), where('examId', '==', examId)));
+        directSnap.forEach((d) => {
+          const rd = d.data();
+          const key = rd.studentUid || rd.studentId;
+          if (key) directResultsMap[key] = rd;
+        });
+      } catch (_) {}
+
+      const subjectsToLoad = activeSubjects.length > 0 ? activeSubjects : CLASS_SUBJECTS[selectedClass] || [];
+
+      // Build subject configs using Nepal CDC 35% defaults + exam/custom_subject configs
+      const loadedConfigs: Record<string, SubjectConfig> = {};
+      const examRec =
+        Object.values(directResultsMap)[0] || classResults.find((r) => r.examType === examType);
+
+      subjectsToLoad.forEach((subj: string) => {
+        const examSubjConf = Array.isArray(examDocData?.subjects)
+          ? examDocData.subjects.find(
+              (s: any) =>
+                (s.subjectName || s.name || '').toLowerCase() === subj.toLowerCase()
+            )
+          : null;
+
+        if (examSubjConf) {
+          const thFm = Number(examSubjConf.thFullMarks ?? 75);
+          const prFm = Number(examSubjConf.prFullMarks ?? 0);
+          const hasTh = examSubjConf.hasTh !== undefined ? Boolean(examSubjConf.hasTh) : thFm > 0;
+          const hasPr = examSubjConf.hasPr !== undefined ? Boolean(examSubjConf.hasPr) && prFm > 0 : prFm > 0;
+          loadedConfigs[subj] = {
+            hasTh,
+            thFullMarks: hasTh ? thFm : 0,
+            thPassMarks: hasTh ? Number(examSubjConf.thPassMarks ?? Math.ceil(thFm * 0.35)) : 0,
+            hasPr,
+            prFullMarks: hasPr ? prFm : 0,
+            prPassMarks: hasPr ? Number(examSubjConf.prPassMarks ?? Math.ceil(prFm * 0.35)) : 0,
+          };
+        } else if (customSubjectConfigs[subj]) {
+          loadedConfigs[subj] = customSubjectConfigs[subj];
+        } else if (examRec?.subjects?.[subj]) {
+          const sData = examRec.subjects[subj];
+          const thFm = Number(sData.thFull ?? sData.thFullMarks ?? 75);
+          const prFm = Number(sData.prFull ?? sData.prFullMarks ?? 25);
+          const hasTh = sData.hasTh !== undefined ? Boolean(sData.hasTh) : thFm > 0;
+          const hasPr = sData.hasPr !== undefined ? Boolean(sData.hasPr) && prFm > 0 : prFm > 0;
+          loadedConfigs[subj] = {
+            hasTh,
+            thFullMarks: hasTh ? thFm : 0,
+            thPassMarks: hasTh ? Number(sData.thPass ?? sData.thPassMarks ?? Math.ceil(thFm * 0.35)) : 0,
+            hasPr,
+            prFullMarks: hasPr ? prFm : 0,
+            prPassMarks: hasPr ? Number(sData.prPass ?? sData.prPassMarks ?? Math.ceil(prFm * 0.35)) : 0,
+          };
+        } else {
+          // Standard Nepal CDC 35% default (75/27 TH + 25/9 PR)
+          loadedConfigs[subj] = {
+            hasTh: true,
+            thFullMarks: 75,
+            thPassMarks: 27,
+            hasPr: true,
+            prFullMarks: 25,
+            prPassMarks: 9,
+          };
+        }
+      });
+      setSubjectConfigs(loadedConfigs);
+
+      const mapped = classStudents.map((s) => {
+        const existingRec =
+          directResultsMap[s.studentUid] ||
+          directResultsMap[s.studentId] ||
+          classResults.find((r) => (r.studentUid === s.studentUid || r.studentId === s.studentId) && r.examType === examType);
+
+        const subjectMarksTH: Record<string, string> = {};
+        const subjectMarksPR: Record<string, string> = {};
+        const subjectAbsentsTH: Record<string, boolean> = {};
+        const subjectAbsentsPR: Record<string, boolean> = {};
+
+        subjectsToLoad.forEach((subj: string) => {
+          const sData = existingRec?.subjects?.[subj];
+          const thM = sData?.thMarks;
+          const prM = sData?.prMarks;
+
+          if (thM !== undefined && thM !== null && thM !== '') {
+            if (thM === 'AB') {
+              subjectAbsentsTH[subj] = true;
+              subjectMarksTH[subj] = '';
+            } else {
+              subjectMarksTH[subj] = String(thM);
+              subjectAbsentsTH[subj] = false;
+            }
+          } else {
+            subjectMarksTH[subj] = '';
+            subjectAbsentsTH[subj] = false;
+          }
+
+          if (prM !== undefined && prM !== null && prM !== '') {
+            if (prM === 'AB') {
+              subjectAbsentsPR[subj] = true;
+              subjectMarksPR[subj] = '';
+            } else {
+              subjectMarksPR[subj] = String(prM);
+              subjectAbsentsPR[subj] = false;
+            }
+          } else {
+            subjectMarksPR[subj] = '';
+            subjectAbsentsPR[subj] = false;
+          }
+        });
+
+        return {
+          ...s,
+          Class: selectedClass,
+          subjectMarksTH,
+          subjectMarksPR,
+          subjectAbsentsTH,
+          subjectAbsentsPR,
+        };
+      });
+
+      setStudents(mapped);
+
+      const initMap: Record<string, { th: string; pr: string; absTh: boolean; absPr: boolean }> = {};
+      mapped.forEach((std: any) => {
+        const sUid = std.studentUid || std.studentId;
+        subjectsToLoad.forEach((subj: string) => {
+          initMap[`${sUid}_${subj}`] = {
+            th: std.subjectMarksTH?.[subj] ?? '',
+            pr: std.subjectMarksPR?.[subj] ?? '',
+            absTh: Boolean(std.subjectAbsentsTH?.[subj]),
+            absPr: Boolean(std.subjectAbsentsPR?.[subj]),
+          };
+        });
+      });
+      initialSavedMarksRef.current = initMap;
+
+      // Load student_subject_versions for concurrency safety
+      const recVerMap: Record<string, Record<string, number>> = {};
+      try {
+        const recordVersionsSnap = await getDocs(
+          query(collection(db, 'student_subject_versions'), where('examId', '==', examId))
+        );
+        recordVersionsSnap.forEach((d) => {
+          const vd = d.data();
+          if (vd.studentUid && vd.subjectKey && typeof vd.version === 'number') {
+            if (!recVerMap[vd.subjectKey]) recVerMap[vd.subjectKey] = {};
+            recVerMap[vd.subjectKey][vd.studentUid] = vd.version;
+          }
+        });
+      } catch (_) {}
+
+      mapped.forEach((std: any) => {
+        const sUid = std.studentUid || std.studentId;
+        subjectsToLoad.forEach((subj: string) => {
+          const normK = subj.replace(/[^a-zA-Z0-9_.-]/g, '').toLowerCase();
+          const key = `${sUid}_${subj}`;
+          if (!recVerMap[normK]) recVerMap[normK] = {};
+          if (recVerMap[normK][sUid] === undefined) {
+            const hasExisting =
+              initMap[key] && (initMap[key].th !== '' || initMap[key].pr !== '' || initMap[key].absTh || initMap[key].absPr);
+            recVerMap[normK][sUid] = hasExisting ? 1 : 0;
+          }
+        });
+      });
+      setSubjectVersions(recVerMap);
+      setAutoSaveStatus('idle');
+    } catch (err) {
+      console.error('Error loading standalone marks sheet:', err);
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRosterAndMarks();
+  }, [selectedClass, selectedSection, examType, selectedAcademicYear, activeSubjects, isFutureOrInactiveYear]);
+
+  const isLockedPublished = examStatus === 'PUBLISHED';
+  const isCrossModeBlocked = examWorkflowMode === 'CONNECTED';
+  const isSheetReadOnly = isLockedPublished || isCrossModeBlocked || isNonMutatableYear;
+
+  const hasModificationsToExistingMarks = (studentsToCheck: any[]) =>
+    studentsToCheck.some((std: any) => {
+      const sUid = std.studentUid || std.studentId;
+      return selectedSubjects.some((subj: string) => {
+        const init = initialSavedMarksRef.current[`${sUid}_${subj}`];
+        if (!init) return false;
+        if (init.th === '' && init.pr === '' && !init.absTh && !init.absPr) return false;
+        return (
+          (std.subjectMarksTH?.[subj] ?? '') !== init.th ||
+          (std.subjectMarksPR?.[subj] ?? '') !== init.pr ||
+          Boolean(std.subjectAbsentsTH?.[subj]) !== init.absTh ||
+          Boolean(std.subjectAbsentsPR?.[subj]) !== init.absPr
+        );
+      });
+    });
+
+  const handleMarkChange = (idx: number, rawVal: string, type: 'TH' | 'PR', subj: string) => {
+    if (isSheetReadOnly) return;
+    if (rawVal.includes('-') || /[a-zA-Z]/.test(rawVal)) return;
+
+    let val = rawVal.replace(/[^0-9.]/g, '');
+    val = val.replace(/^0+(?=\d)/, '');
+
+    const cnf = subjectConfigs[subj] || {
+      thFullMarks: 75,
+      thPassMarks: 27,
+      prFullMarks: 25,
+      prPassMarks: 9,
+      hasTh: true,
+      hasPr: true,
+    };
+    const maxMarks = type === 'TH' ? cnf.thFullMarks : cnf.prFullMarks;
+    const num = Number(val);
+    if (val !== '' && (isNaN(num) || num > maxMarks || num < 0)) return;
+
+    const newS = [...students];
+    if (type === 'TH') {
+      newS[idx] = {
+        ...newS[idx],
+        subjectMarksTH: { ...newS[idx].subjectMarksTH, [subj]: val },
+        subjectAbsentsTH: { ...newS[idx].subjectAbsentsTH, [subj]: false },
+      };
+    } else {
+      newS[idx] = {
+        ...newS[idx],
+        subjectMarksPR: { ...newS[idx].subjectMarksPR, [subj]: val },
+        subjectAbsentsPR: { ...newS[idx].subjectAbsentsPR, [subj]: false },
+      };
+    }
+    setStudents(newS);
+    setAutoSaveStatus('unsaved');
+  };
+
+  const handleAbsentChange = (idx: number, type: 'TH' | 'PR', checked: boolean, subj: string) => {
+    if (isSheetReadOnly) return;
+    const newS = [...students];
+    if (type === 'TH') {
+      newS[idx] = {
+        ...newS[idx],
+        subjectAbsentsTH: { ...newS[idx].subjectAbsentsTH, [subj]: checked },
+        subjectMarksTH: checked ? { ...newS[idx].subjectMarksTH, [subj]: '' } : newS[idx].subjectMarksTH,
+      };
+    } else {
+      newS[idx] = {
+        ...newS[idx],
+        subjectAbsentsPR: { ...newS[idx].subjectAbsentsPR, [subj]: checked },
+        subjectMarksPR: checked ? { ...newS[idx].subjectMarksPR, [subj]: '' } : newS[idx].subjectMarksPR,
+      };
+    }
+    setStudents(newS);
+    setAutoSaveStatus('unsaved');
+  };
+
+  // Keyboard navigation across mark inputs (ArrowUp / ArrowDown / ArrowLeft / ArrowRight / Enter)
+  const orderedCols = useMemo(() => {
+    const cols: Array<{ subj: string; type: 'TH' | 'PR' }> = [];
+    selectedSubjects.forEach((subj) => {
+      const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
+      if (cnf.hasTh) cols.push({ subj, type: 'TH' });
+      if (cnf.hasPr) cols.push({ subj, type: 'PR' });
+    });
+    return cols;
+  }, [selectedSubjects, subjectConfigs]);
+
+  const handleCellKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, rowIdx: number, colIdx: number) => {
+    let nextRow = rowIdx;
+    let nextCol = colIdx;
+    if (e.key === 'ArrowDown' || e.key === 'Enter') {
+      e.preventDefault();
+      nextRow = Math.min(students.length - 1, rowIdx + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      nextRow = Math.max(0, rowIdx - 1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      nextCol = Math.min(orderedCols.length - 1, colIdx + 1);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      nextCol = Math.max(0, colIdx - 1);
+    } else {
+      return;
+    }
+    const target = cellRefs.current[`${nextRow}_${nextCol}`];
+    if (target) {
+      target.focus();
+      target.select();
+    }
+  };
+
+  // Collect all empty cells across eligible students & selected subjects
+  const collectEmptyCells = (studentList: any[]): EmptyCellInfo[] => {
+    const empty: EmptyCellInfo[] = [];
+    studentList.forEach((std) => {
+      selectedSubjects.forEach((subj) => {
+        const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
+        if (cnf.hasTh && !std.subjectAbsentsTH?.[subj] && String(std.subjectMarksTH?.[subj] ?? '').trim() === '') {
+          empty.push({
+            studentId: std.studentUid || std.studentId,
+            studentName: std.studentName || 'Unknown',
+            rollNo: std.rollNo || std.schoolId || '',
+            subjectCode: subj,
+            subjectName: subj,
+            component: 'TH',
+          });
+        }
+        if (cnf.hasPr && !std.subjectAbsentsPR?.[subj] && String(std.subjectMarksPR?.[subj] ?? '').trim() === '') {
+          empty.push({
+            studentId: std.studentUid || std.studentId,
+            studentName: std.studentName || 'Unknown',
+            rollNo: std.rollNo || std.schoolId || '',
+            subjectCode: subj,
+            subjectName: subj,
+            component: 'PR',
+          });
+        }
+      });
+    });
+    return empty;
+  };
+
+  const applyEmptyCellResolution = (fillType: 'AB' | 'ZERO') => {
+    const updated = students.map((std) => {
+      const nextTH = { ...std.subjectMarksTH };
+      const nextPR = { ...std.subjectMarksPR };
+      const nextAbsTH = { ...std.subjectAbsentsTH };
+      const nextAbsPR = { ...std.subjectAbsentsPR };
+
+      selectedSubjects.forEach((subj) => {
+        const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
+        if (cnf.hasTh && !nextAbsTH[subj] && String(nextTH[subj] ?? '').trim() === '') {
+          if (fillType === 'AB') {
+            nextAbsTH[subj] = true;
+            nextTH[subj] = '';
+          } else {
+            nextTH[subj] = '0';
+          }
+        }
+        if (cnf.hasPr && !nextAbsPR[subj] && String(nextPR[subj] ?? '').trim() === '') {
+          if (fillType === 'AB') {
+            nextAbsPR[subj] = true;
+            nextPR[subj] = '';
+          } else {
+            nextPR[subj] = '0';
+          }
+        }
+      });
+
+      return {
+        ...std,
+        subjectMarksTH: nextTH,
+        subjectMarksPR: nextPR,
+        subjectAbsentsTH: nextAbsTH,
+        subjectAbsentsPR: nextAbsPR,
+      };
+    });
+    setStudents(updated);
+    return updated;
+  };
+
+  // Trusted Server Save Draft
+  const saveMarksInternal = async (
+    currentStudents: any[],
+    forceOverwrite = false,
+    overrideReason?: string
+  ): Promise<boolean> => {
+    if (!selectedAcademicYear || !selectedClass || !examType) {
+      setAutoSaveStatus('error');
+      setAutoSaveError('Select Academic Year, Examination, and Class first.');
+      return false;
+    }
+
+    if (forceOverwrite) {
+      const reasonCheck = (overrideReason ?? forceOverwriteReason).trim();
+      if (!forceOverwriteChecked || reasonCheck.length < 5) {
+        setAutoSaveError('Force Overwrite requires checking confirmation and entering an audit reason (min 5 chars).');
+        return false;
+      }
+    }
+
+    const canonicalYear = selectedAcademicYear;
+    const examId = buildCanonicalExamId(examType, selectedClass, selectedSection || 'A', canonicalYear);
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) {
+      setAutoSaveStatus('error');
+      setAutoSaveError('Authentication required. Please sign in again.');
+      return false;
+    }
+
+    setAutoSaveStatus('saving');
+    setAutoSaveError(null);
+    let allSucceeded = true;
+
+    for (const subj of selectedSubjects) {
+      const normKey = subj.replace(/\s+/g, '');
+      const lowerKey = subj.replace(/[^a-zA-Z0-9_.-]/g, '').toLowerCase();
+      const cnf = subjectConfigs[subj] || {
+        hasTh: true,
+        thFullMarks: 75,
+        thPassMarks: 27,
+        hasPr: true,
+        prFullMarks: 25,
+        prPassMarks: 9,
+      };
+
+      const studentsToSave = currentStudents.filter((std) => {
+        const thVal = String(std.subjectMarksTH?.[subj] ?? '').trim();
+        const prVal = String(std.subjectMarksPR?.[subj] ?? '').trim();
+        const absTh = Boolean(std.subjectAbsentsTH?.[subj]);
+        const absPr = Boolean(std.subjectAbsentsPR?.[subj]);
+        return thVal !== '' || prVal !== '' || absTh || absPr;
+      });
+
+      if (studentsToSave.length === 0) continue;
+
+      try {
+        const operationId = crypto.randomUUID();
+        const subjVers = subjectVersions[subj] || subjectVersions[normKey] || subjectVersions[lowerKey] || {};
+        const studentsWithVersion = studentsToSave.map((std) => {
+          const sUid = std.studentUid || std.uid || std.studentId;
+          const expectedVersion =
+            conflictModalData && conflictModalData.subject === subj
+              ? conflictModalData.conflicts.find((c: any) => c.studentUid === sUid)?.serverVersion ?? 1
+              : subjVers[sUid] ?? 0;
+          return {
+            ...std,
+            expectedVersion,
+          };
+        });
+
+        const reasonToSend = forceOverwrite
+          ? (overrideReason ?? forceOverwriteReason).trim()
+          : (correctionReasonRef.current || '').trim().length >= 5
+          ? correctionReasonRef.current.trim()
+          : userRole === 'admin'
+          ? 'Standalone administrative mark entry'
+          : 'Standalone class teacher mark entry';
+
+        const res = await fetch('/api/results/save-marks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            operationId,
+            examId,
+            examType,
+            workflowMode: 'STANDALONE',
+            selectedClass,
+            selectedSection: selectedSection || 'A',
+            selectedAcademicYear: canonicalYear,
+            subjectToSave: subj,
+            subjectKey: normKey,
+            subjectConfig: cnf,
+            totalEligibleCount: currentStudents.length,
+            correctionReason: reasonToSend,
+            students: studentsWithVersion,
+            forceOverwrite,
+            forceOverwriteConfirmed: forceOverwrite ? true : false,
+          }),
+        });
+
+        const resData = await res.json().catch(() => ({}));
+
+        if (res.status === 409 && resData.code === 'WORKFLOW_MODE_CONFLICT') {
+          setAutoSaveStatus('error');
+          setAutoSaveError(resData.error);
+          setExamWorkflowMode('CONNECTED');
+          return false;
         }
 
-        setStatus({type: 'success', message: `Results and Ranks Published successfully for Class ${selectedClass}.`});
-        setPublishSuccessMessage(`Marks have been successfully published and ranks calculated for Class ${selectedClass}!`);
-    } catch(err: any) {
-        setStatus({type: 'error', message: 'Publish failed: ' + err.message});
+        if (res.status === 409 && !forceOverwrite) {
+          setConflictModalData({
+            subject: subj,
+            conflicts: resData.conflicts || [],
+          });
+          setForceOverwriteChecked(false);
+          setForceOverwriteReason('');
+          setAutoSaveStatus('error');
+          setAutoSaveError(`Version conflict detected for ${subj}. Review or confirm Force Overwrite with reason.`);
+          return false;
+        }
+
+        if (!res.ok || !resData.success) {
+          setAutoSaveStatus('error');
+          setAutoSaveError(resData.error || `Failed to save marks for ${subj}.`);
+          return false;
+        }
+
+        // Sync authoritative versions from server response
+        const newVerMap = {
+          ...(subjectVersions[subj] || subjectVersions[normKey] || subjectVersions[lowerKey] || {}),
+          ...(resData.updatedVersions || {}),
+        };
+        studentsToSave.forEach((std) => {
+          const sUid = std.studentUid || std.uid || std.studentId;
+          initialSavedMarksRef.current[`${sUid}_${subj}`] = {
+            th: std.subjectMarksTH?.[subj] ?? '',
+            pr: std.subjectMarksPR?.[subj] ?? '',
+            absTh: Boolean(std.subjectAbsentsTH?.[subj]),
+            absPr: Boolean(std.subjectAbsentsPR?.[subj]),
+          };
+        });
+        setSubjectVersions((prev) => ({
+          ...prev,
+          [subj]: newVerMap,
+          [normKey]: newVerMap,
+          [lowerKey]: newVerMap,
+        }));
+        if (resData.subjectWorkflowStatus) {
+          setSubjectStatuses((prev) => ({ ...prev, [subj]: resData.subjectWorkflowStatus }));
+        }
+        setExamWorkflowMode('STANDALONE');
+      } catch (e: any) {
+        allSucceeded = false;
+        setAutoSaveStatus('error');
+        setAutoSaveError(e.message || 'Network error while saving marks.');
+        return false;
+      }
+    }
+
+    if (allSucceeded) {
+      setConflictModalData(null);
+      setForceOverwriteChecked(false);
+      setForceOverwriteReason('');
+      setAutoSaveError(null);
+      setAutoSaveStatus('saved');
+      setStatus?.({ type: 'success', message: `Draft marks saved securely for Class ${selectedClass} (${examType}).` });
+    }
+    return allSucceeded;
+  };
+
+  const handleSaveDraftClick = async () => {
+    const emptyCells = collectEmptyCells(students);
+    if (emptyCells.length > 0) {
+      setEmptyModalState({ isOpen: true, mode: 'DRAFT', emptyCells });
+      return;
+    }
+    await saveMarksInternal(students);
+  };
+
+  // Explicit Submit for Review (saves first, then calls POST /api/results/submit-subject)
+  const submitAllSubjectsInternal = async (studentList: any[]) => {
+    setActionLoading('SUBMIT');
+    try {
+      const savedOk = await saveMarksInternal(studentList);
+      if (!savedOk) return;
+
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Authentication required.');
+      const examId = buildCanonicalExamId(examType, selectedClass, selectedSection || 'A', selectedAcademicYear);
+
+      const eligibleUids = studentList.map((s) => s.studentUid || s.uid || s.studentId).filter(Boolean);
+      let latestExamStatus = examStatus;
+      for (const subj of selectedSubjects) {
+        const res = await fetch('/api/results/submit-subject', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({
+            examId,
+            subject: subj,
+            subjectKey: subj.replace(/\s+/g, ''),
+            selectedClass,
+            selectedSection: selectedSection || 'A',
+            selectedAcademicYear,
+            eligibleStudentUids: eligibleUids,
+            expectedSubjects: selectedSubjects,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) {
+          throw new Error(json.error || `Failed to submit ${subj}`);
+        }
+        if (json.subjectStatus) {
+          setSubjectStatuses((prev) => ({ ...prev, [subj]: json.subjectStatus }));
+        }
+        if (json.examStatus) {
+          latestExamStatus = json.examStatus;
+        }
+      }
+      setExamStatus(latestExamStatus);
+      setStatus?.({
+        type: 'success',
+        message: 'All subjects explicitly submitted for Administrator Review.',
+      });
+    } catch (err: any) {
+      setAutoSaveError(err.message);
+      setStatus?.({ type: 'error', message: err.message });
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const isDataComplete = () => {
-      if (students.length === 0) return false;
-      if (selectedSubjects.length === 0) return false;
-      for (const std of students) {
-          if (!std.studentId?.trim() || !std.studentName?.trim()) return false;
-          for (const subj of selectedSubjects) {
-              const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
-              if (cnf.hasTh && !std.subjectAbsentsTH?.[subj] && (std.subjectMarksTH?.[subj] === '' || std.subjectMarksTH?.[subj] === undefined)) return false;
-              if (cnf.hasPr && !std.subjectAbsentsPR?.[subj] && (std.subjectMarksPR?.[subj] === '' || std.subjectMarksPR?.[subj] === undefined)) return false;
-          }
-      }
-      return true;
+  const handleSubmitForReviewClick = async () => {
+    const emptyCells = collectEmptyCells(students);
+    if (emptyCells.length > 0) {
+      setEmptyModalState({ isOpen: true, mode: 'SUBMIT', emptyCells });
+      return;
+    }
+    await submitAllSubjectsInternal(students);
   };
 
-  const isAnyDataEntered = () => {
-      if (students.length === 0) return false;
-      if (selectedSubjects.length === 0) return false;
-      for (const std of students) {
-          for (const subj of selectedSubjects) {
-              const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
-              if (cnf.hasTh && (std.subjectAbsentsTH?.[subj] || (std.subjectMarksTH?.[subj] !== '' && std.subjectMarksTH?.[subj] !== undefined))) return true;
-              if (cnf.hasPr && (std.subjectAbsentsPR?.[subj] || (std.subjectMarksPR?.[subj] !== '' && std.subjectMarksPR?.[subj] !== undefined))) return true;
-          }
+  // Admin-only Approve Exam
+  const handleApproveExam = async () => {
+    if (userRole !== 'admin') return;
+    setActionLoading('APPROVE');
+    setAutoSaveError(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Authentication required.');
+      const examId = buildCanonicalExamId(examType, selectedClass, selectedSection || 'A', selectedAcademicYear);
+      const res = await fetch('/api/results/approve-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ examId, expectedSubjects: selectedSubjects }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to approve examination.');
       }
-      return false;
+      setExamStatus('APPROVED');
+      setStatus?.({
+        type: 'success',
+        message: 'Examination APPROVED. Ready for separate Publication.',
+      });
+    } catch (err: any) {
+      setAutoSaveError(err.message);
+      setStatus?.({ type: 'error', message: err.message });
+    } finally {
+      setActionLoading(null);
+    }
   };
+
+  // Admin-only Publish Results (server recalculates Nepal CDC grades/GPA authoritatively — no client rank!)
+  const handlePublishResults = async () => {
+    if (userRole !== 'admin') {
+      setStatus?.({ type: 'error', message: 'Publication is restricted to Administrators only.' });
+      return;
+    }
+    setActionLoading('PUBLISH');
+    setAutoSaveError(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Authentication required.');
+      const examId = buildCanonicalExamId(examType, selectedClass, selectedSection || 'A', selectedAcademicYear);
+      const summaryRecords = students.map((std) => ({
+        studentUid: std.studentUid || std.uid || std.studentId,
+        studentId: std.permanentStudentId || std.studentId,
+        permanentStudentId: std.permanentStudentId || std.studentId,
+        studentEmis: std.studentEmis || '',
+        studentName: std.studentName || '',
+        rollNo: std.rollNo || std.rollNumberSnapshot || '',
+        rollNumberSnapshot: std.rollNo || std.rollNumberSnapshot || '',
+      }));
+      const res = await fetch('/api/results/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({
+          examId,
+          targetClass: selectedClass,
+          targetSection: selectedSection || 'A',
+          targetAcademicYear: selectedAcademicYear,
+          summaryRecords,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Server error while publishing results.');
+      }
+      setExamStatus('PUBLISHED');
+      setPublishSuccessMessage(
+        `Results published for Class ${selectedClass} (${selectedSection}) — ${json.publishedCount || students.length} students.`
+      );
+      setStatus?.({
+        type: 'success',
+        message: `Class ${selectedClass} - ${examType} published successfully!`,
+      });
+    } catch (err: any) {
+      setAutoSaveError(err.message);
+      setStatus?.({ type: 'error', message: err.message });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Admin-only Unpublish / Reopen with mandatory audit reason
+  const handleUnpublishExam = async () => {
+    if (userRole !== 'admin') return;
+    if (unpublishReason.trim().length < 10) {
+      setAutoSaveError('Please enter an audit reason of at least 10 characters to unpublish.');
+      return;
+    }
+    setActionLoading('UNPUBLISH');
+    setAutoSaveError(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Authentication required.');
+      const examId = buildCanonicalExamId(examType, selectedClass, selectedSection || 'A', selectedAcademicYear);
+      const res = await fetch('/api/results/unpublish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ examId, reason: unpublishReason.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to unpublish examination.');
+      }
+      setExamStatus('DRAFT');
+      setUnpublishModalOpen(false);
+      setUnpublishReason('');
+      setPublishSuccessMessage(null);
+      setStatus?.({
+        type: 'success',
+        message: 'Examination unpublished and reopened for corrections. Audit log recorded.',
+      });
+    } catch (err: any) {
+      setAutoSaveError(err.message);
+      setStatus?.({ type: 'error', message: err.message });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const saveMarksLatestRef = useRef(saveMarksInternal);
+  useEffect(() => {
+    saveMarksLatestRef.current = saveMarksInternal;
+  });
+  const studentsLatestRef = useRef(students);
+  useEffect(() => {
+    studentsLatestRef.current = students;
+  }, [students]);
+
+  const contextSummaryText = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedClass) parts.push(`Class ${selectedClass} (Sec ${selectedSection || 'A'})`);
+    if (examType) parts.push(examType);
+    if (selectedAcademicYear) parts.push(formatAcademicYearDisplayTitle(selectedAcademicYear, managedYears));
+    return parts.join(' • ');
+  }, [selectedClass, selectedSection, examType, selectedAcademicYear, managedYears]);
+
+  // Report live active/dirty state up to Admin navigation guard
+  useEffect(() => {
+    if (!onWorkflowGuardChange) return;
+    const hasUnsaved = autoSaveStatus === 'unsaved';
+    const isActiveSheet = Boolean(selectedClass && examType) || hasUnsaved;
+    onWorkflowGuardChange({
+      isActive: true,
+      isDirty: hasUnsaved,
+      workflowName: 'Standalone Direct Manual Entry',
+      contextSummary: contextSummaryText || 'Direct Marks Entry Workspace',
+      canSaveDraft: hasUnsaved && !isSheetReadOnly && students.length > 0 && isActiveSheet,
+      saveDraft: async () => saveMarksLatestRef.current(studentsLatestRef.current),
+    });
+  }, [
+    onWorkflowGuardChange,
+    autoSaveStatus,
+    selectedClass,
+    examType,
+    contextSummaryText,
+    isSheetReadOnly,
+    students.length,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      onWorkflowGuardChange?.(null);
+    };
+  }, [onWorkflowGuardChange]);
+
+  const runWithUnsavedGuard = (targetDestination: string, action: () => void, alwaysConfirmWhenSheetOpen = false) => {
+    const hasUnsaved = autoSaveStatus === 'unsaved';
+    const hasOpenTask = Boolean(selectedClass && examType && students.length > 0);
+    if (hasUnsaved || (alwaysConfirmWhenSheetOpen && hasOpenTask)) {
+      setPendingLocalExit({ targetDestination, execute: action });
+    } else {
+      action();
+    }
+  };
+
+  const statusBadgeColor =
+    examStatus === 'PUBLISHED'
+      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+      : examStatus === 'APPROVED'
+      ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+      : examStatus === 'READY_FOR_REVIEW'
+      ? 'bg-amber-100 text-amber-800 border-amber-300'
+      : 'bg-slate-100 text-slate-700 border-slate-300';
 
   return (
-    <div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="flex flex-col justify-end">
-               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Type</label>
-               <div className="flex gap-4 items-center h-[42px] overflow-hidden">
-                   <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                       <input type="radio" value="Terminal" checked={examCategory === 'Terminal'} onChange={() => { setExamCategory('Terminal'); setExamType(''); }} className="w-4 h-4 text-primary focus:ring-primary outline-none" />
-                       <span className="text-sm font-bold">Terminal</span>
-                   </label>
-                   <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                       <input type="radio" value="Test" checked={examCategory === 'Test'} onChange={() => { setExamCategory('Test'); setExamType(''); }} className="w-4 h-4 text-primary focus:ring-primary outline-none" />
-                       <span className="text-sm font-bold">Test</span>
-                   </label>
-               </div>
+    <div className="space-y-5">
+      {/* Clean Single Standalone Header */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                Standalone Direct Manual Entry
+              </span>
+              <span className={`px-2 py-0.5 rounded border text-[11px] font-bold ${statusBadgeColor}`}>
+                {examStatus.replace(/_/g, ' ')}
+              </span>
             </div>
-            <div>
-               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Exam Name</label>
-               {examCategory === 'Terminal' ? (
-                 <select 
-                   value={examType} 
-                   onChange={e=>setExamType(e.target.value)} 
-                   className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-primary outline-none font-medium h-[42px]"
-                 >
-                     <option value="">-- Select Terminal --</option>
-                     {EXAM_TYPES.map((ex:string) => <option key={ex} value={ex}>{ex}</option>)}
-                 </select>
-               ) : (
-                 <input 
-                   type="text" 
-                   value={examType} 
-                   onChange={e=>setExamType(e.target.value)} 
-                   className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-primary outline-none font-medium h-[42px]"
-                   placeholder="e.g. Unit Test 1"
-                 />
-               )}
-            </div>
-            <div>
-               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Class</label>
-               {isTeacher && teacherClass ? (
-                 <div className="w-full px-3 py-2 border rounded-lg bg-[#f0fdf4] border-emerald-200 text-emerald-800 font-extrabold h-[42px] flex items-center justify-between">
-                    <span>Class {teacherClass}</span>
-                    <span className="text-[10px] md:text-sm text-emerald-700 font-black bg-emerald-100 px-2 py-0.5 md:py-1 rounded">
-                      Class Teacher: {teacherProfile?.fullName || teacherProfile?.name || "Teacher"}
-                    </span>
-                 </div>
-               ) : (
-                 <select value={selectedClass} onChange={e=>setSelectedClass(e.target.value)} className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-primary outline-none font-medium">
-                     <option value="">-- Select Class --</option>
-                     {allowedClasses.map((c: string) => (
-                        <option key={c} value={c}>
-                          Class {c} {String(c).replace(/^Class\s+/i, '').trim() === String(teacherClass).trim() ? '(My Class)' : ''}
-                        </option>
-                      ))}
-                 </select>
-               )}
-            </div>
+            <h2 className="text-lg font-bold text-slate-900 mt-0.5">
+              Academic Session:{' '}
+              <span className={isFutureOrInactiveYear ? 'text-amber-700' : 'text-emerald-700'}>
+                {selectedAcademicYear
+                  ? formatAcademicYearDisplayTitle(selectedAcademicYear, managedYears)
+                  : 'Select Session'}
+              </span>
+            </h2>
+          </div>
         </div>
 
-        {!(selectedClass && examType) ? (
-            <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-10 text-center flex flex-col items-center justify-center mb-6">
-                <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center mb-4">
-                    <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <h3 className="text-lg font-black text-gray-800 mb-2">Ready to Enter Marks?</h3>
-                <p className="text-sm font-medium text-gray-500 max-w-md">
-                    Please select the <span className="text-gray-800 font-bold">Exam Name</span> and <span className="text-gray-800 font-bold">Class</span> from the options above to generate the result entry sheet.
-                </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {autoSaveStatus === 'saving' && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving...
+            </span>
+          )}
+          {autoSaveStatus === 'saved' && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Saved to Server
+            </span>
+          )}
+          {autoSaveStatus === 'unsaved' && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+              <Clock className="w-3.5 h-3.5" /> Unsaved Changes
+            </span>
+          )}
+
+          {(onBackToPrep || onExit) && (
+            <button
+              type="button"
+              onClick={() => {
+                const navFn = onBackToPrep || onExit;
+                runWithUnsavedGuard('Result Workflows', () => navFn?.(), true);
+              }}
+              className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs inline-flex items-center gap-1.5 border border-slate-300 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to Workflows
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Cross-Mode Isolation Warning */}
+      {isCrossModeBlocked && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-bold text-rose-950">Connected Examination Detected (Workflow Isolation Active)</p>
+            <p className="mt-0.5">
+              This examination is managed under <strong>Connected Examination Management</strong>. Please open it from the Connected workflow to prevent cross-mode conflicts.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Published Lock Notice */}
+      {isLockedPublished && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <Lock className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Published &amp; Locked</p>
+              <p className="text-emerald-800">
+                Marks are immutable after publication.{' '}
+                {userRole === 'admin'
+                  ? 'As Admin, you may Unpublish with a mandatory audit reason to reopen corrections.'
+                  : 'Contact an Administrator if a correction is needed.'}
+              </p>
             </div>
-        ) : (
-            <>
-                {/* Custom Subjects Config panel */}
-                {(userRole === 'admin' || userRole === 'teacher') && (
-                    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm mb-6">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 mb-4">
-                            <div>
-                                <h3 className="text-lg font-black text-gray-800">Customize Subjects & Marks Config</h3>
-                                <p className="text-xs text-gray-500 font-medium mt-0.5">
-                                    Add, rename, or toggle subjects to include/exclude for the results. (Active subjects edit titles inline)
-                                </p>
-                            </div>
-                            
-                            <div className="flex items-center gap-2 max-w-sm w-full">
-                                <input 
-                                    type="text"
-                                    value={newSubjectInput}
-                                    onChange={e => setNewSubjectInput(e.target.value)}
-                                    placeholder="Add school subject..."
-                                    className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-primary font-bold h-[38px]"
-                                    onKeyDown={e => { if (e.key === 'Enter') handleAddSubject(); }}
-                                />
-                                <button 
-                                    onClick={handleAddSubject}
-                                    className="bg-primary text-white text-xs px-4 py-2 font-black uppercase rounded-lg shadow hover:bg-opacity-90 active:scale-95 transition-all shrink-0 h-[38px]"
-                                >
-                                    Add
-                                </button>
-                            </div>
-                        </div>
+          </div>
+          {userRole === 'admin' && (
+            <button
+              type="button"
+              onClick={() => setUnpublishModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-white text-rose-700 border border-rose-300 hover:bg-rose-50 shrink-0"
+            >
+              <Unlock className="w-3.5 h-3.5" /> Unpublish / Reopen
+            </button>
+          )}
+        </div>
+      )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {activeSubjects.map((subj) => {
-                                const isSelected = selectedSubjects.includes(subj);
-                                const isEditing = editingSubject === subj;
-                                const cnf = subjectConfigs[subj] || { thFullMarks: 75, thPassMarks: 30, prFullMarks: 25, prPassMarks: 10, hasTh: true, hasPr: true };
+      {/* Concurrency Conflict Banner with Mandatory Policy #4 Force Overwrite Confirmation */}
+      {conflictModalData && (
+        <div className="p-4 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 space-y-3">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="font-bold">Version Conflict Detected for {conflictModalData.subject}</p>
+              <p className="text-amber-900 mt-0.5">
+                {conflictModalData.conflicts.length} student record(s) were updated by another session. Your entered marks are safely preserved below.
+              </p>
+            </div>
+          </div>
 
-                                return (
-                                    <div key={subj} className={`p-3 border-2 rounded-xl transition-all ${isSelected ? 'border-primary/20 bg-primary/5' : 'border-gray-100 bg-gray-50/50 opacity-60'}`}>
-                                        <div className="flex items-center justify-between gap-2 mb-2">
-                                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                                                <input 
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    onChange={e => {
-                                                        if (e.target.checked) {
-                                                            setSelectedSubjects(prev => [...prev, subj]);
-                                                        } else {
-                                                            setSelectedSubjects(prev => prev.filter(s => s !== subj));
-                                                        }
-                                                    }}
-                                                    className="w-4 h-4 text-primary focus:ring-primary accent-primary rounded cursor-pointer shrink-0"
-                                                />
-                                                
-                                                {isEditing ? (
-                                                    <input 
-                                                        type="text"
-                                                        value={editSubjectValue}
-                                                        onChange={e => setEditSubjectValue(e.target.value)}
-                                                        className="px-2 py-0.5 border border-primary rounded text-xs font-bold w-full outline-none"
-                                                        autoFocus
-                                                        onBlur={() => {
-                                                            handleRenameSubject(subj, editSubjectValue);
-                                                            setEditingSubject(null);
-                                                        }}
-                                                        onKeyDown={e => {
-                                                            if (e.key === 'Enter') {
-                                                                handleRenameSubject(subj, editSubjectValue);
-                                                                setEditingSubject(null);
-                                                            } else if (e.key === 'Escape') {
-                                                                setEditingSubject(null);
-                                                            }
-                                                        }}
-                                                    />
-                                                ) : (
-                                                    <span 
-                                                        className="font-bold text-gray-800 text-sm truncate cursor-pointer hover:text-primary transition-colors flex-1"
-                                                        onClick={() => {
-                                                            setEditingSubject(subj);
-                                                            setEditSubjectValue(subj);
-                                                        }}
-                                                        title="Click to edit"
-                                                    >
-                                                        {subj}
-                                                    </span>
-                                                )}
-                                            </div>
+          <div className="space-y-2 bg-white/80 p-3 rounded-lg border border-amber-200">
+            <label className="flex items-center gap-2 text-xs font-semibold text-amber-950 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={forceOverwriteChecked}
+                onChange={(e) => setForceOverwriteChecked(e.target.checked)}
+                className="w-4 h-4 accent-amber-600"
+              />
+              I confirm I want to overwrite newer server marks for this unpublished examination (logged in Audit Trail).
+            </label>
+            <input
+              type="text"
+              value={forceOverwriteReason}
+              onChange={(e) => setForceOverwriteReason(e.target.value)}
+              placeholder="Mandatory audit reason for Force Overwrite (min 5 characters)..."
+              className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
 
-                                            <div className="flex items-center gap-1 shrink-0">
-                                                <button 
-                                                    onClick={() => {
-                                                        if (isEditing) {
-                                                            handleRenameSubject(subj, editSubjectValue);
-                                                            setEditingSubject(null);
-                                                        } else {
-                                                            setEditingSubject(subj);
-                                                            setEditSubjectValue(subj);
-                                                        }
-                                                    }}
-                                                    className="text-gray-400 hover:text-primary p-0.5 rounded hover:bg-gray-100"
-                                                >
-                                                    ✏️
-                                                </button>
-                                                <button 
-                                                    onClick={() => handleDeleteSubject(subj)}
-                                                    className="text-gray-400 hover:text-red-500 p-0.5 rounded hover:bg-gray-100"
-                                                >
-                                                    ❌
-                                                </button>
-                                            </div>
-                                        </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setConflictModalData(null);
+                loadRosterAndMarks();
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
+            >
+              Reload Server Marks
+            </button>
+            <button
+              type="button"
+              disabled={!forceOverwriteChecked || forceOverwriteReason.trim().length < 5}
+              onClick={() => saveMarksInternal(students, true, forceOverwriteReason)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 disabled:bg-slate-300 disabled:text-slate-500"
+            >
+              Confirm Force Overwrite
+            </button>
+          </div>
+        </div>
+      )}
 
-                                        {isSelected && (
-                                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100">
-                                                <div>
-                                                    <label className="block text-[9px] font-bold text-gray-400 uppercase">TH Full</label>
-                                                    <div className="flex items-center gap-1 mt-0.5">
-                                                        <input 
-                                                            type="checkbox"
-                                                            checked={cnf.hasTh}
-                                                            onChange={e => {
-                                                                setSubjectConfigs(prev => ({
-                                                                    ...prev,
-                                                                    [subj]: { ...(prev[subj] || cnf), hasTh: e.target.checked }
-                                                                }));
-                                                            }}
-                                                            className="w-3.5 h-3.5 accent-primary shrink-0"
-                                                        />
-                                                        <input 
-                                                            type="text"
-                                                            inputMode="decimal"
-                                                            value={cnf.thFullMarks ?? ''} 
-                                                            disabled={!cnf.hasTh}
-                                                            onChange={e => handleConfigChange(subj, 'thFullMarks', e.target.value)}
-                                                            className="w-full px-1.5 py-0.5 border text-xs font-bold rounded outline-none focus:border-primary disabled:bg-gray-100"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[9px] font-bold text-gray-400 uppercase">PR Full</label>
-                                                    <div className="flex items-center gap-1 mt-0.5">
-                                                        <input 
-                                                            type="checkbox"
-                                                            checked={cnf.hasPr}
-                                                            onChange={e => {
-                                                                setSubjectConfigs(prev => ({
-                                                                    ...prev,
-                                                                    [subj]: { ...(prev[subj] || cnf), hasPr: e.target.checked }
-                                                                }));
-                                                            }}
-                                                            className="w-3.5 h-3.5 accent-primary shrink-0"
-                                                        />
-                                                        <input 
-                                                            type="text"
-                                                            inputMode="decimal"
-                                                            value={cnf.prFullMarks ?? ''} 
-                                                            disabled={!cnf.hasPr}
-                                                            onChange={e => handleConfigChange(subj, 'prFullMarks', e.target.value)}
-                                                            className="w-full px-1.5 py-0.5 border text-xs font-bold rounded outline-none focus:border-primary disabled:bg-gray-100"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                            {activeSubjects.length === 0 && (
-                                <div className="col-span-full py-4 text-center text-gray-400 font-bold text-sm">
-                                    No subjects configurations found.
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+      {/* Error Banner */}
+      {autoSaveError && !conflictModalData && (
+        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">{autoSaveError}</p>
+              <p className="text-rose-700 mt-0.5">Your entered marks remain preserved in the form.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSaveDraftClick}
+            className="px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-        {students.length > 0 ? (
-            <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-gray-100/80 text-gray-700">
-                            <tr>
-                                <th className="p-3 font-bold uppercase tracking-wider w-24">Roll/ID</th>
-                                <th className="p-3 font-bold uppercase tracking-wider">Student Name</th>
-                                {selectedSubjects.map((subj: string) => {
-                                    const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
-                                    return (
-                                        <th key={subj} className="p-3 font-bold uppercase tracking-wider text-center border-l border-gray-200">
-                                            <span className="block mb-1 text-primary">{subj}</span>
-                                            <div className="flex justify-center gap-2 text-[10px] text-gray-500">
-                                                {cnf.hasTh && <span>TH</span>}
-                                                {cnf.hasPr && <span>PR</span>}
-                                            </div>
-                                        </th>
-                                    );
-                                })}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {students.map((std, i) => (
-                                <tr key={i} className="hover:bg-gray-50/50 transition-colors">
-                                    <td className="p-3">
-                                        <input type="text" value={std.schoolId || ''} onChange={e => handleStudentChange(i, 'schoolId', e.target.value)} className="w-full min-w-[80px] px-2 py-1.5 border rounded-md font-medium text-gray-600 focus:ring-1 focus:ring-primary outline-none" placeholder="Roll/ID" />
-                                    </td>
-                                    <td className="p-3">
-                                        <input type="text" value={std.studentName || ''} onChange={e => handleStudentChange(i, 'studentName', e.target.value)} className="w-full min-w-[150px] px-2 py-1.5 border rounded-md font-bold text-gray-800 uppercase focus:ring-1 focus:ring-primary outline-none" placeholder="Student Name" />
-                                    </td>
-                                    {selectedSubjects.map((subj: string, sIndex: number) => {
-                                        const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
-                                        return (
-                                            <td key={subj} className="p-2 border-l border-gray-100 text-center min-w-[130px]">
-                                                <div className="flex gap-1 justify-center relative">
-                                                    {cnf.hasTh && (
-                                                        <div className="flex flex-col items-center">
-                                                            <input type="text" value={std.subjectAbsentsTH?.[subj] ? 'AB' : (std.subjectMarksTH?.[subj] || '')} onChange={(e) => handleMarkChange(i, e.target.value, 'TH', subj)} placeholder="TH" className="w-12 text-center py-1.5 border rounded focus:ring-1 focus:ring-primary outline-none disabled:bg-gray-100 disabled:text-gray-400 font-bold transition-colors" disabled={std.subjectAbsentsTH?.[subj]} tabIndex={i * selectedSubjects.length + sIndex + 1} />
-                                                            <label className="text-[10px] mt-0.5 text-gray-500 font-bold flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={std.subjectAbsentsTH?.[subj] || false} onChange={e => handleAbsentChange(i, 'TH', e.target.checked, subj)} className="w-3 h-3 text-red-600 rounded focus:ring-red-600 accent-red-600" /> Abs</label>
-                                                        </div>
-                                                    )}
-                                                    {cnf.hasPr && (
-                                                        <div className="flex flex-col items-center">
-                                                            <input type="text" value={std.subjectAbsentsPR?.[subj] ? 'AB' : (std.subjectMarksPR?.[subj] || '')} onChange={(e) => handleMarkChange(i, e.target.value, 'PR', subj)} placeholder="PR" className="w-12 text-center py-1.5 border rounded focus:ring-1 focus:ring-primary outline-none disabled:bg-gray-100 disabled:text-gray-400 font-bold transition-colors" disabled={std.subjectAbsentsPR?.[subj]} />
-                                                            <label className="text-[10px] mt-0.5 text-gray-500 font-bold flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={std.subjectAbsentsPR?.[subj] || false} onChange={e => handleAbsentChange(i, 'PR', e.target.checked, subj)} className="w-3 h-3 text-red-600 rounded focus:ring-red-600 accent-red-600" /> Abs</label>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+      {/* Archived Session Read-Only Notice */}
+      {isArchivedYear && !isFutureOrInactiveYear && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Archived Academic Year ({formatAcademicYearDisplayTitle(selectedAcademicYear, managedYears)}) — Read-Only</p>
+              <p className="text-amber-800 mt-0.5">
+                Historical archived sessions cannot be modified. The current active academic year is <strong>{currentAcademicYearTitle}</strong>.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedAcademicYear(defaultAcademicYear)}
+            className="px-3.5 py-2 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shrink-0 transition-colors"
+          >
+            Switch to Current Year ({currentAcademicYearTitle})
+          </button>
+        </div>
+      )}
+
+      {/* Selector Grid */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Category</label>
+          <div className="flex gap-3 items-center h-[38px]">
+            <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold">
+              <input
+                type="radio"
+                checked={examCategory === 'Terminal'}
+                onChange={() => {
+                  runWithUnsavedGuard('Terminal Examination', () => {
+                    setExamCategory('Terminal');
+                    setExamType('');
+                    setAutoSaveStatus('idle');
+                  });
+                }}
+              />
+              Terminal
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold">
+              <input
+                type="radio"
+                checked={examCategory === 'Test'}
+                onChange={() => {
+                  runWithUnsavedGuard('Test Examination', () => {
+                    setExamCategory('Test');
+                    setExamType('');
+                    setAutoSaveStatus('idle');
+                  });
+                }}
+              />
+              Test
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Academic Year</label>
+          <select
+            value={selectedAcademicYear}
+            onChange={(e) => {
+              const nextYr = e.target.value;
+              runWithUnsavedGuard(`Academic Session ${nextYr} BS`, () => {
+                setSelectedAcademicYear(nextYr);
+                setAutoSaveStatus('idle');
+              });
+            }}
+            className={`w-full px-3 py-2 border rounded-lg bg-white text-xs font-semibold h-[38px] ${
+              isFutureOrInactiveYear ? 'border-amber-400 bg-amber-50/40 text-amber-900' : 'border-slate-300'
+            }`}
+          >
+            {availableAcademicYears.map((y: any) => {
+              const isUpcoming = y.status === 'INACTIVE' || y.bsYear > currentBsYearNum;
+              const suffix = y.isCurrent
+                ? ' (Current)'
+                : isUpcoming
+                ? ' (Upcoming — Inactive)'
+                : y.status === 'ARCHIVED'
+                ? ' (Archived — Read-Only)'
+                : ' (Past)';
+              return (
+                <option key={y.id} value={y.id}>
+                  {y.name}{suffix}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Examination</label>
+          {examCategory === 'Terminal' ? (
+            <select
+              value={examType}
+              onChange={(e) => {
+                const nextExam = e.target.value;
+                runWithUnsavedGuard(nextExam || 'another examination', () => {
+                  setExamType(nextExam);
+                  setAutoSaveStatus('idle');
+                });
+              }}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold h-[38px]"
+            >
+              <option value="">-- Select Terminal --</option>
+              {EXAM_TYPES.map((ex: string) => (
+                <option key={ex} value={ex}>
+                  {ex}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={examType}
+              onChange={(e) => setExamType(e.target.value)}
+              placeholder="e.g. Unit Test 1"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold h-[38px]"
+            />
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Class (PG–10)</label>
+          {isTeacher && teacherClass ? (
+            <div className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-bold h-[38px] flex items-center">
+              Class {teacherClass}
+            </div>
+          ) : (
+            <select
+              value={selectedClass}
+              onChange={(e) => {
+                const nextCls = e.target.value;
+                runWithUnsavedGuard(nextCls ? `Class ${nextCls}` : 'another class', () => {
+                  setSelectedClass(nextCls);
+                  setAutoSaveStatus('idle');
+                });
+              }}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold h-[38px]"
+            >
+              <option value="">-- Select Class --</option>
+              {allowedClasses.map((c: string) => (
+                <option key={c} value={c}>
+                  Class {c}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Section</label>
+          <select
+            value={selectedSection}
+            onChange={(e) => {
+              const nextSec = e.target.value;
+              runWithUnsavedGuard(`Section ${nextSec}`, () => {
+                setSelectedSection(nextSec);
+                setAutoSaveStatus('idle');
+              });
+            }}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold h-[38px]"
+          >
+            <option value="A">Section A</option>
+            <option value="B">Section B</option>
+            <option value="C">Section C</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Main Sheet Area */}
+      {isFutureOrInactiveYear ? (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-8 text-center space-y-3">
+          <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 border border-amber-200 flex items-center justify-center mx-auto">
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div className="space-y-1 max-w-lg mx-auto">
+            <h3 className="text-base font-bold text-amber-950">
+              Current Academic Year is {currentAcademicYearTitle}
+            </h3>
+            <p className="text-xs text-amber-900 leading-relaxed">
+              You selected <strong>{formatAcademicYearDisplayTitle(selectedAcademicYear, managedYears)}</strong>, which is an upcoming/inactive session with no enrolled students yet. Active students are currently enrolled in <strong>{currentAcademicYearTitle}</strong>. Please select the current academic year to enter or manage examination marks.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedAcademicYear(defaultAcademicYear);
+              setAutoSaveStatus('idle');
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition-colors"
+          >
+            <Calendar className="w-4 h-4" />
+            Switch to Current Year ({currentAcademicYearTitle})
+          </button>
+        </div>
+      ) : !(selectedClass && examType) ? (
+        <div className="bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-10 text-center">
+          <h3 className="text-base font-bold text-slate-800">Select Examination &amp; Class to Begin</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Base curriculum subjects (PG–Grade 10) and active approved custom subjects load automatically with Nepal CDC 35% standards.
+          </p>
+        </div>
+      ) : loadingStudents ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center flex flex-col items-center gap-2">
+          <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+          <p className="text-xs font-semibold text-slate-600">Loading eligible student roster and saved marks...</p>
+        </div>
+      ) : students.length === 0 ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center space-y-3">
+          <p className="text-sm font-bold text-amber-900">
+            No active students enrolled in Class {selectedClass} (Section {selectedSection}) for{' '}
+            {formatAcademicYearDisplayTitle(selectedAcademicYear, managedYears)}.
+          </p>
+          <p className="text-xs text-amber-800">
+            {String(selectedAcademicYear) !== String(defaultAcademicYear)
+              ? `Currently active students are enrolled in ${currentAcademicYearTitle}. Switch to the current academic year to manage active results.`
+              : 'Enroll students under Student Management before entering examination marks.'}
+          </p>
+          {String(selectedAcademicYear) !== String(defaultAcademicYear) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedAcademicYear(defaultAcademicYear);
+                setAutoSaveStatus('idle');
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
+            >
+              Switch to Current Year ({currentAcademicYearTitle})
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Correction Reason Bar when editing previously saved marks */}
+          {!isSheetReadOnly && hasModificationsToExistingMarks(students) && (
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-amber-950">
+                  Audit Correction Note (recorded when modifying saved marks):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {['Re-evaluated answer script', 'Practical score update', 'Entry typo fix'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCorrectionReason(preset)}
+                      className="text-[11px] px-2 py-0.5 rounded bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
                 </div>
+              </div>
+              <input
+                type="text"
+                value={correctionReason}
+                onChange={(e) => setCorrectionReason(e.target.value)}
+                placeholder="Reason for updating previously saved marks..."
+                className="w-full px-3 py-1.5 border border-amber-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          )}
 
-                {/* Mobile view */}
-                <div className="md:hidden flex flex-col gap-3 p-3 text-primary">
-                   {students.map((std, i) => (
-                       <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                          <input type="text" value={std.studentName || ''} onChange={e => handleStudentChange(i, 'studentName', e.target.value)} className="w-full mb-2 px-2 py-1.5 border rounded-md font-bold text-gray-900 uppercase text-lg focus:ring-1 focus:ring-primary outline-none" placeholder="Student Name" />
-                          <div className="flex items-center gap-2 mb-3">
-                              <span className="text-xs text-gray-500">ID:</span>
-                              <input type="text" value={std.schoolId || ''} onChange={e => handleStudentChange(i, 'schoolId', e.target.value)} className="flex-1 px-2 py-1 text-sm border rounded-md font-medium text-gray-600 focus:ring-1 focus:ring-primary outline-none" placeholder="Roll/ID" />
+          {/* Desktop Spreadsheet Table */}
+          <div className="hidden md:block bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+            <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs text-slate-600">
+              <span>
+                <strong>{students.length}</strong> Eligible Students &bull;{' '}
+                <strong>{selectedSubjects.length}</strong> Subjects (Nepal CDC 35% Independent Component Pass)
+              </span>
+              <span className="text-[11px] text-slate-500">
+                Use Arrow keys or Enter to navigate &bull; Empty = Missing (not 0)
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 text-slate-700 border-b border-slate-200">
+                  <tr>
+                    <th className="p-3 font-bold uppercase w-20 sticky left-0 bg-slate-100 z-10">Roll</th>
+                    <th className="p-3 font-bold uppercase min-w-[160px] sticky left-20 bg-slate-100 z-10 border-r border-slate-200">
+                      Student Name
+                    </th>
+                    {selectedSubjects.map((subj) => {
+                      const cnf = subjectConfigs[subj] || {
+                        hasTh: true,
+                        thFullMarks: 75,
+                        thPassMarks: 27,
+                        hasPr: true,
+                        prFullMarks: 25,
+                        prPassMarks: 9,
+                      };
+                      const subjStatus = subjectStatuses[subj];
+                      return (
+                        <th key={subj} className="p-2.5 text-center border-l border-slate-200 min-w-[140px]">
+                          <div className="font-bold text-slate-900">{subj}</div>
+                          <div className="text-[10px] font-medium text-slate-500 mt-0.5">
+                            {cnf.hasTh ? `TH ${cnf.thFullMarks}/${cnf.thPassMarks}` : ''}
+                            {cnf.hasTh && cnf.hasPr ? ' • ' : ''}
+                            {cnf.hasPr ? `PR ${cnf.prFullMarks}/${cnf.prPassMarks}` : ''}
                           </div>
-                            <div className="flex flex-col gap-3 mt-4">
-                                {selectedSubjects.map((subj: string) => {
-                                    const cnf = subjectConfigs[subj] || { hasTh: true, hasPr: true };
-                                    return (
-                                        <div key={subj} className="border-primary text-primary p-3 rounded-lg border">
-                                            <p className="text-sm font-bold text-gray-700 mb-2">{subj}</p>
-                                            <div className="flex items-center gap-4">
-                                                {cnf.hasTh && (
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <input type="text" inputMode="decimal" 
-                                                                value={std.subjectMarksTH?.[subj] || ''} 
-                                                                onChange={e => handleMarkChange(i, e.target.value, 'TH', subj)} 
-                                                                disabled={std.subjectAbsentsTH?.[subj]}
-                                                                className="w-full px-2 py-1 border rounded-md font-black text-sm text-center focus:ring-1 focus:ring-primary outline-none disabled:bg-gray-100"
-                                                                placeholder="TH Marks" 
-                                                             />
-                                                            <label className="text-xs font-bold text-gray-500 flex items-center gap-1">
-                                                                <input type="checkbox" checked={std.subjectAbsentsTH?.[subj] || false} onChange={e => handleAbsentChange(i, 'TH', e.target.checked, subj)} className="w-4 h-4 accent-red-600" /> Abs
-                                                            </label>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {cnf.hasPr && (
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <input type="text" inputMode="decimal" 
-                                                                value={std.subjectMarksPR?.[subj] || ''} 
-                                                                onChange={e => handleMarkChange(i, e.target.value, 'PR', subj)} 
-                                                                disabled={std.subjectAbsentsPR?.[subj]}
-                                                                className="w-full px-2 py-1 border rounded-md font-black text-sm text-center focus:ring-1 focus:ring-primary outline-none disabled:bg-gray-100"
-                                                                placeholder="PR Marks" 
-                                                            />
-                                                            <label className="text-xs font-bold text-gray-500 flex items-center gap-1">
-                                                                <input type="checkbox" checked={std.subjectAbsentsPR?.[subj] || false} onChange={e => handleAbsentChange(i, 'PR', e.target.checked, subj)} className="w-4 h-4 accent-red-600" /> Abs
-                                                            </label>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                       </div>
-                    ))}
-                </div>
+                          {subjStatus && (
+                            <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-bold">
+                              {subjStatus.replace(/_/g, ' ')}
+                            </span>
+                          )}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {students.map((std, rIdx) => {
+                    let runningColIdx = 0;
+                    return (
+                      <tr key={std.studentUid || std.studentId || rIdx} className="hover:bg-slate-50/70">
+                        <td className="p-2.5 font-mono font-semibold text-slate-600 sticky left-0 bg-white">
+                          {std.rollNo || std.schoolId || '-'}
+                        </td>
+                        <td className="p-2.5 font-semibold text-slate-900 sticky left-20 bg-white border-r border-slate-200">
+                          {std.studentName}
+                        </td>
+                        {selectedSubjects.map((subj) => {
+                          const cnf = subjectConfigs[subj] || {
+                            hasTh: true,
+                            thFullMarks: 75,
+                            thPassMarks: 27,
+                            hasPr: true,
+                            prFullMarks: 25,
+                            prPassMarks: 9,
+                          };
+                          const thCol = cnf.hasTh ? runningColIdx++ : -1;
+                          const prCol = cnf.hasPr ? runningColIdx++ : -1;
 
-                <div className="p-4 border-t text-primary flex flex-col items-end gap-3 border-x bg-gray-50/50 rounded-b-xl">
-                    <div className="flex gap-4">
-                        <button 
-                           onClick={publishResults} 
-                           disabled={!isDataComplete()}
-                           className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-all ${isDataComplete() && isAnyDataEntered() ? 'bg-green-600 text-white hover:bg-green-700 active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
-                           <CheckCircle2 className="w-5 h-5" /> Calculate Rank & Publish
-                        </button>
-                        {isAnyDataEntered() && (
-                            <button onClick={saveMarks} className="bg-primary text-white px-6 py-3 rounded-lg font-bold hover:bg-primary-dark flex items-center gap-2 shadow-lg active:scale-95 transition-all">
-                               <Save className="w-5 h-5" /> Save Marks
-                            </button>
-                        )}
-                    </div>
-                    {publishSuccessMessage && (
-                        <div className="w-full mt-1 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg flex items-center gap-2 font-bold text-sm animate-fade-in shadow-sm">
-                            <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
-                            <span>{publishSuccessMessage}</span>
-                        </div>
-                    )}
-                </div>
+                          const rawTh = std.subjectAbsentsTH?.[subj] ? 'AB' : std.subjectMarksTH?.[subj] ?? '';
+                          const rawPr = cnf.hasPr
+                            ? std.subjectAbsentsPR?.[subj]
+                              ? 'AB'
+                              : std.subjectMarksPR?.[subj] ?? ''
+                            : null;
+                          const preview = calculateSubjectResult(
+                            subj.replace(/\s+/g, ''),
+                            subj,
+                            {
+                              theoryMarks: rawTh === '' ? null : rawTh === 'AB' ? 'AB' : Number(rawTh),
+                              practicalMarks: !cnf.hasPr ? null : rawPr === '' || rawPr === null ? null : rawPr === 'AB' ? 'AB' : Number(rawPr),
+                              isAbsentTheory: Boolean(std.subjectAbsentsTH?.[subj]),
+                              isAbsentPractical: Boolean(std.subjectAbsentsPR?.[subj]),
+                            },
+                            {
+                              hasTh: cnf.hasTh,
+                              thFullMarks: cnf.thFullMarks,
+                              thPassMarks: cnf.thPassMarks,
+                              hasPr: cnf.hasPr,
+                              prFullMarks: cnf.prFullMarks,
+                              prPassMarks: cnf.prPassMarks,
+                            }
+                          );
+
+                          return (
+                            <td key={subj} className="p-2 border-l border-slate-100 text-center">
+                              <div className="flex items-start justify-center gap-1.5">
+                                {cnf.hasTh && (
+                                  <div className="flex flex-col items-center">
+                                    <input
+                                      ref={(el) => {
+                                        cellRefs.current[`${rIdx}_${thCol}`] = el;
+                                      }}
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={std.subjectAbsentsTH?.[subj] ? 'AB' : std.subjectMarksTH?.[subj] ?? ''}
+                                      onChange={(e) => handleMarkChange(rIdx, e.target.value, 'TH', subj)}
+                                      onKeyDown={(e) => handleCellKeyDown(e, rIdx, thCol)}
+                                      disabled={isSheetReadOnly || std.subjectAbsentsTH?.[subj]}
+                                      placeholder="TH"
+                                      className="w-12 text-center py-1 border border-slate-300 rounded font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-slate-100 disabled:text-rose-700"
+                                    />
+                                    <label className="text-[10px] mt-0.5 text-slate-500 flex items-center gap-0.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(std.subjectAbsentsTH?.[subj])}
+                                        disabled={isSheetReadOnly}
+                                        onChange={(e) => handleAbsentChange(rIdx, 'TH', e.target.checked, subj)}
+                                        className="w-3 h-3 accent-rose-600"
+                                      />
+                                      AB
+                                    </label>
+                                  </div>
+                                )}
+                                {cnf.hasPr && (
+                                  <div className="flex flex-col items-center">
+                                    <input
+                                      ref={(el) => {
+                                        cellRefs.current[`${rIdx}_${prCol}`] = el;
+                                      }}
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={std.subjectAbsentsPR?.[subj] ? 'AB' : std.subjectMarksPR?.[subj] ?? ''}
+                                      onChange={(e) => handleMarkChange(rIdx, e.target.value, 'PR', subj)}
+                                      onKeyDown={(e) => handleCellKeyDown(e, rIdx, prCol)}
+                                      disabled={isSheetReadOnly || std.subjectAbsentsPR?.[subj]}
+                                      placeholder="PR"
+                                      className="w-12 text-center py-1 border border-slate-300 rounded font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 outline-none disabled:bg-slate-100 disabled:text-rose-700"
+                                    />
+                                    <label className="text-[10px] mt-0.5 text-slate-500 flex items-center gap-0.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(std.subjectAbsentsPR?.[subj])}
+                                        disabled={isSheetReadOnly}
+                                        onChange={(e) => handleAbsentChange(rIdx, 'PR', e.target.checked, subj)}
+                                        className="w-3 h-3 accent-rose-600"
+                                      />
+                                      AB
+                                    </label>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="mt-1 text-[10px] font-bold">
+                                {preview.isIncomplete ? (
+                                  <span className="text-slate-400">Missing</span>
+                                ) : preview.isNg ? (
+                                  <span className="text-rose-600">NG</span>
+                                ) : (
+                                  <span className="text-emerald-700">
+                                    {preview.subjectGrade} ({preview.totalObtainedMarks})
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-        ) : null}
-      </>
-    )}
+          </div>
+
+          {/* Mobile Touch Card View */}
+          <div className="md:hidden space-y-3">
+            {students.map((std, rIdx) => (
+              <div key={std.studentUid || std.studentId || rIdx} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div>
+                    <p className="font-bold text-slate-900 text-sm">{std.studentName}</p>
+                    <p className="text-xs text-slate-500 font-mono">Roll: {std.rollNo || std.schoolId || '-'}</p>
+                  </div>
+                </div>
+                <div className="space-y-2.5">
+                  {selectedSubjects.map((subj) => {
+                    const cnf = subjectConfigs[subj] || {
+                      hasTh: true,
+                      thFullMarks: 75,
+                      thPassMarks: 27,
+                      hasPr: true,
+                      prFullMarks: 25,
+                      prPassMarks: 9,
+                    };
+                    return (
+                      <div key={subj} className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                        <p className="text-xs font-bold text-slate-800 mb-2">{subj}</p>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          {cnf.hasTh && (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={std.subjectAbsentsTH?.[subj] ? 'AB' : std.subjectMarksTH?.[subj] ?? ''}
+                                onChange={(e) => handleMarkChange(rIdx, e.target.value, 'TH', subj)}
+                                disabled={isSheetReadOnly || std.subjectAbsentsTH?.[subj]}
+                                placeholder={`TH (${cnf.thFullMarks})`}
+                                className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-bold text-center bg-white disabled:bg-slate-100"
+                              />
+                              <label className="text-[11px] font-semibold text-slate-600 flex items-center gap-1 shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(std.subjectAbsentsTH?.[subj])}
+                                  disabled={isSheetReadOnly}
+                                  onChange={(e) => handleAbsentChange(rIdx, 'TH', e.target.checked, subj)}
+                                  className="w-3.5 h-3.5 accent-rose-600"
+                                />
+                                AB
+                              </label>
+                            </div>
+                          )}
+                          {cnf.hasPr && (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={std.subjectAbsentsPR?.[subj] ? 'AB' : std.subjectMarksPR?.[subj] ?? ''}
+                                onChange={(e) => handleMarkChange(rIdx, e.target.value, 'PR', subj)}
+                                disabled={isSheetReadOnly || std.subjectAbsentsPR?.[subj]}
+                                placeholder={`PR (${cnf.prFullMarks})`}
+                                className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-bold text-center bg-white disabled:bg-slate-100"
+                              />
+                              <label className="text-[11px] font-semibold text-slate-600 flex items-center gap-1 shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(std.subjectAbsentsPR?.[subj])}
+                                  disabled={isSheetReadOnly}
+                                  onChange={(e) => handleAbsentChange(rIdx, 'PR', e.target.checked, subj)}
+                                  className="w-3.5 h-3.5 accent-rose-600"
+                                />
+                                AB
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Workflow Action Footer (Explicit Separate Steps: Save Draft -> Submit -> Approve -> Publish) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-between gap-3">
+            <div className="text-xs text-slate-600">
+              Workflow: <strong>Save Draft</strong> &rarr; <strong>Submit for Review</strong> &rarr;{' '}
+              <strong>Admin Approve</strong> &rarr; <strong>Admin Publish</strong>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              {!isSheetReadOnly && (
+                <>
+                  <button
+                    type="button"
+                    disabled={actionLoading !== null}
+                    onClick={handleSaveDraftClick}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" /> Save Draft
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={actionLoading !== null}
+                    onClick={handleSubmitForReviewClick}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
+                  >
+                    <Send className="w-4 h-4" />
+                    {actionLoading === 'SUBMIT' ? 'Submitting...' : 'Submit for Review'}
+                  </button>
+                </>
+              )}
+
+              {userRole === 'admin' && !isSheetReadOnly && examStatus === 'READY_FOR_REVIEW' && (
+                <button
+                  type="button"
+                  disabled={actionLoading !== null}
+                  onClick={handleApproveExam}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  {actionLoading === 'APPROVE' ? 'Approving...' : 'Approve Examination'}
+                </button>
+              )}
+
+              {userRole === 'admin' && !isSheetReadOnly && examStatus === 'APPROVED' && (
+                <button
+                  type="button"
+                  disabled={actionLoading !== null}
+                  onClick={handlePublishResults}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {actionLoading === 'PUBLISH' ? 'Publishing...' : 'Publish Official Results'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {publishSuccessMessage && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center gap-2 text-xs font-bold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{publishSuccessMessage}</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Empty Cell Validation Modal */}
+      <EmptyCellsModal
+        isOpen={emptyModalState.isOpen}
+        mode={emptyModalState.mode}
+        emptyCells={emptyModalState.emptyCells}
+        onClose={() => setEmptyModalState((prev) => ({ ...prev, isOpen: false }))}
+        onMarkAllAbsent={async () => {
+          const updated = applyEmptyCellResolution('AB');
+          const mode = emptyModalState.mode;
+          setEmptyModalState((prev) => ({ ...prev, isOpen: false }));
+          if (mode === 'SUBMIT') {
+            await submitAllSubjectsInternal(updated);
+          } else {
+            await saveMarksInternal(updated);
+          }
+        }}
+        onFillAllZero={async () => {
+          const updated = applyEmptyCellResolution('ZERO');
+          const mode = emptyModalState.mode;
+          setEmptyModalState((prev) => ({ ...prev, isOpen: false }));
+          if (mode === 'SUBMIT') {
+            await submitAllSubjectsInternal(updated);
+          } else {
+            await saveMarksInternal(updated);
+          }
+        }}
+        onKeepEmptyAndSaveDraft={async () => {
+          setEmptyModalState((prev) => ({ ...prev, isOpen: false }));
+          await saveMarksInternal(students);
+        }}
+      />
+
+      {/* Admin Unpublish / Reopen Modal */}
+      {unpublishModalOpen && (
+        <ModalPortal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Unpublish &amp; Reopen Examination</h3>
+            <p className="text-xs text-slate-600">
+              This will hide published results from student portals and reopen the examination as DRAFT. An official audit entry is mandatory.
+            </p>
+            <textarea
+              rows={3}
+              value={unpublishReason}
+              onChange={(e) => setUnpublishReason(e.target.value)}
+              placeholder="Enter mandatory audit reason (min 10 characters)..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUnpublishModalOpen(false)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={unpublishReason.trim().length < 10 || actionLoading === 'UNPUBLISH'}
+                onClick={handleUnpublishExam}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-300"
+              >
+                {actionLoading === 'UNPUBLISH' ? 'Unpublishing...' : 'Confirm Unpublish'}
+              </button>
+            </div>
+          </div>
+        </div>
+        </ModalPortal>
+      )}
+
+      {/* Workflow Exit / Unsaved Changes Confirmation Modal */}
+      <WorkflowExitConfirmModal
+        isOpen={Boolean(pendingLocalExit)}
+        workflowName="Standalone Direct Manual Entry"
+        contextSummary={contextSummaryText || undefined}
+        targetDestination={pendingLocalExit?.targetDestination}
+        hasUnsavedChanges={autoSaveStatus === 'unsaved'}
+        canSaveDraft={autoSaveStatus === 'unsaved' && !isSheetReadOnly && students.length > 0}
+        isSavingDraft={isSavingBeforeExit}
+        onStay={() => setPendingLocalExit(null)}
+        onSaveAndLeave={async () => {
+          const pending = pendingLocalExit;
+          if (!pending) return;
+          setIsSavingBeforeExit(true);
+          try {
+            const ok = await saveMarksInternal(students);
+            if (ok) {
+              setPendingLocalExit(null);
+              pending.execute();
+            }
+          } finally {
+            setIsSavingBeforeExit(false);
+          }
+        }}
+        onConfirmExit={() => {
+          const pending = pendingLocalExit;
+          setPendingLocalExit(null);
+          setAutoSaveStatus('idle');
+          pending?.execute();
+        }}
+      />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { doc, setDoc, onSnapshot, deleteDoc, collection, getDocs, query, where, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { Save, Settings as SettingsIcon, MonitorPlay, Calendar, Clock, Plus, X, Mail, Key, CheckCircle2, Wrench, ShieldAlert, Copy, ExternalLink, AlertTriangle, Eye } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 import ThemeSettings from './ThemeSettings';
 import principalImageSrc from '../assets/images/regenerated_image_1780334392921.jpg';
@@ -155,13 +156,15 @@ const DEFAULT_CONTENT = {
 };
 
 export default function Settings() {
+  const { userRole, isAuthenticated } = useAuth();
+  const isAdmin = isAuthenticated && userRole === 'admin';
   const [activeTab, setActiveTab] = useState<'content' | 'theme' | 'emailjs' | 'preview'>('content');
   const [previewRole, setPreviewRole] = useState<'guest'|'student'|'teacher'>('guest');
   const [content, setContent] = useState<any>(DEFAULT_CONTENT);
   const [emailConfig, setEmailConfig] = useState({
-    serviceId: 'service_aggvbh8',
-    templateId: 'template_4aoqz6f',
-    publicKey: 'Z6jGixgTs2V12zdq3D-vo',
+    serviceId: '',
+    templateId: '',
+    publicKey: '',
     toEmail: 'academyshikshantar@gmail.com',
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -173,17 +176,22 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    const unsubEmail = onSnapshot(doc(db, 'settings', 'emailjs'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setEmailConfig({
-          serviceId: data.serviceId || 'service_aggvbh8',
-          templateId: data.templateId || 'template_4aoqz6f',
-          publicKey: data.publicKey || 'Z6jGixgTs2V12zdq3D-vo',
-          toEmail: data.toEmail || 'academyshikshantar@gmail.com',
-        });
-      }
-    });
+    let unsubEmail = () => {};
+    if (isAdmin) {
+      unsubEmail = onSnapshot(doc(db, 'settings', 'emailjs'), (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setEmailConfig({
+            serviceId: data.serviceId || '',
+            templateId: data.templateId || '',
+            publicKey: data.publicKey || '',
+            toEmail: data.toEmail || 'academyshikshantar@gmail.com',
+          });
+        }
+      }, (err) => {
+        console.warn('Settings: emailjs subscription warning:', err?.message);
+      });
+    }
 
     const unsub = onSnapshot(doc(db, 'settings', 'home_content'), (docSnap) => {
       if (docSnap.exists()) {
@@ -769,7 +777,7 @@ export default function Settings() {
               </label>
               <input
                 type="text"
-                placeholder="e.g. service_aggvbh8"
+                placeholder="e.g. service_xxxxxx"
                 value={emailConfig.serviceId}
                 onChange={(e) => setEmailConfig({...emailConfig, serviceId: e.target.value})}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
