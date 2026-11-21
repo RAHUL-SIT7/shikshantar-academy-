@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { FieldValue } from 'firebase-admin/firestore';
-import { applyCorsAndSecurityHeaders, getSmtpTransportConfig, getVercelAdminDb, isSmtpAuthError, verifyVercelCaller } from '../_lib/auth';
+import { applyCorsAndSecurityHeaders, getSmtpTransportConfig, getVercelAdminDb, isSmtpAuthError, verifyVercelCaller } from '../../_lib/auth';
 
 const BS_CALENDAR_DATA: Record<number, number[]> = {
   2060: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],

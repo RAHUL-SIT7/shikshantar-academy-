@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { applyCorsAndSecurityHeaders, ensureFirebaseAdmin, getVercelAdminDb, verifyVercelCaller } from '../_lib/auth';
+import { applyCorsAndSecurityHeaders, ensureFirebaseAdmin, getVercelAdminDb, verifyVercelCaller } from '../../_lib/auth';
 
 export default async function handler(req: any, res: any) {
   applyCorsAndSecurityHeaders(req, res, 'POST, OPTIONS');

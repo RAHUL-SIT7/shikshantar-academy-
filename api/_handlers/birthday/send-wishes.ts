@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { applyCorsAndSecurityHeaders, getSmtpTransportConfig, verifyVercelCaller } from '../_lib/auth';
+import { applyCorsAndSecurityHeaders, getSmtpTransportConfig, verifyVercelCaller } from '../../_lib/auth';
 
 export default async function handler(req: any, res: any) {
   applyCorsAndSecurityHeaders(req, res, 'POST, OPTIONS');

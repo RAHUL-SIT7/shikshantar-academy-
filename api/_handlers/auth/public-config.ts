@@ -1,4 +1,4 @@
-import { applyCorsAndSecurityHeaders } from '../_lib/auth';
+import { applyCorsAndSecurityHeaders } from '../../_lib/auth';
 
 export default async function handler(req: any, res: any) {
   applyCorsAndSecurityHeaders(req, res, 'GET, OPTIONS');

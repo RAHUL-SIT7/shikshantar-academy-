@@ -15,3 +15,6 @@ _checkpoint_*
 public/phase2_*.zip
 public/PHASE_2_*.zip
 public/phase2_*.patch
+public/assets/aistudio/Screenshot_*.png
+public/assets/aistudio/Screen_Recording_*
+public/assets/aistudio/Paste_*

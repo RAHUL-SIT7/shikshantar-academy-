@@ -5,7 +5,7 @@ import {
   getVercelAdminDb,
   getSmtpTransportConfig,
   resolveResultNotificationRecipientEmail
-} from '../_lib/auth';
+} from '../../_lib/auth';
 
 export default async function handler(req: any, res: any) {
   applyCorsAndSecurityHeaders(req, res, 'POST, OPTIONS');
