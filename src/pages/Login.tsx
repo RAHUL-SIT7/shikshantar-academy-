@@ -222,7 +222,13 @@ export default function Login({ setIsAuthenticated }: { setIsAuthenticated?: (va
           return;
         }
         if (!precheckRes.ok || precheckData.allowed !== true) {
-          setError(precheckData.error || 'Cloudflare Turnstile security verification failed. Please verify again.');
+          if (precheckData.error) {
+            setError(precheckData.error);
+          } else if (precheckRes.status >= 500) {
+            setError(`Login security service is temporarily unavailable (HTTP ${precheckRes.status}). Please wait a few seconds and try again.`);
+          } else {
+            setError('Cloudflare Turnstile security verification failed. Please verify again.');
+          }
           resetLoginTurnstile();
           setLoading(false);
           return;

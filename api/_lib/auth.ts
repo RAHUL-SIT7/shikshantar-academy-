@@ -33,6 +33,59 @@ function loadFirebaseConfig() {
   };
 }
 
+export function getFirebaseAdminCredential(): admin.credential.Credential | undefined {
+  const rawServiceAccount = String(
+    process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_KEY || ''
+  ).trim();
+  if (rawServiceAccount) {
+    try {
+      const jsonText = rawServiceAccount.startsWith('{')
+        ? rawServiceAccount
+        : Buffer.from(rawServiceAccount, 'base64').toString('utf8');
+      const parsed = JSON.parse(jsonText);
+      if (parsed && typeof parsed === 'object' && parsed.private_key && parsed.client_email) {
+        parsed.private_key = String(parsed.private_key).replace(/\\n/g, '\n');
+        return admin.credential.cert(parsed);
+      }
+    } catch (err) {
+      console.error('[FIREBASE] Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY:', err);
+    }
+  }
+
+  const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim();
+  const privateKey = String(process.env.FIREBASE_PRIVATE_KEY || '').trim();
+  if (clientEmail && privateKey) {
+    const fbConfig = loadFirebaseConfig();
+    return admin.credential.cert({
+      projectId: fbConfig.projectId,
+      clientEmail,
+      privateKey: privateKey.replace(/\\n/g, '\n'),
+    });
+  }
+
+  return undefined;
+}
+
+export function isFirestoreCredentialUnavailableError(err: any): boolean {
+  const msg = String(err?.message || err || '');
+  const code = String(err?.code || '');
+  return (
+    code === '7' ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('Could not load the default credentials') ||
+    msg.includes('Could not refresh access token') ||
+    msg.includes('Unable to detect a Project Id') ||
+    msg.includes('Metadata server') ||
+    msg.includes('metadata.google.internal') ||
+    msg.includes('UNAUTHENTICATED') ||
+    msg.includes('invalid_grant') ||
+    msg.includes('Failed to retrieve') ||
+    msg.includes('GOOGLE_APPLICATION_CREDENTIALS') ||
+    msg.includes('DECODER routines') ||
+    msg.includes('ENOTFOUND')
+  );
+}
+
 export function ensureFirebaseAdmin() {
   const fbConfig = loadFirebaseConfig();
   if (process.env.USE_FIREBASE_EMULATOR === 'true') {
@@ -48,9 +101,12 @@ export function ensureFirebaseAdmin() {
   }
   delete process.env.GOOGLE_CLOUD_QUOTA_PROJECT;
   if (!admin.apps.length) {
-    admin.initializeApp({
-      projectId: fbConfig.projectId
-    });
+    const credential = getFirebaseAdminCredential();
+    admin.initializeApp(
+      credential
+        ? { credential, projectId: fbConfig.projectId }
+        : { projectId: fbConfig.projectId }
+    );
   }
   return fbConfig;
 }
@@ -103,6 +159,42 @@ export interface VerifiedCaller {
   rawToken: string;
 }
 
+export function hasValidFirebaseIdTokenFormat(token: string): boolean {
+  if (!token || typeof token !== 'string' || token.startsWith('mock_token_')) {
+    return false;
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3 || !parts[0] || !parts[1]) {
+    return false;
+  }
+
+  let header: Record<string, any>;
+  try {
+    const parsed = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    if (!parsed || typeof parsed !== 'object') return false;
+    header = parsed;
+  } catch {
+    return false;
+  }
+
+  const isAuthEmulator =
+    process.env.USE_FIREBASE_EMULATOR === 'true' ||
+    Boolean(process.env.FIREBASE_AUTH_EMULATOR_HOST);
+
+  const hasProdKidAndAlg =
+    header.alg === 'RS256' &&
+    typeof header.kid === 'string' &&
+    header.kid.trim().length > 0 &&
+    parts[2].length > 0;
+
+  if (isAuthEmulator) {
+    return header.alg === 'none' || hasProdKidAndAlg;
+  }
+
+  return hasProdKidAndAlg;
+}
+
 export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCaller | null> {
   const authHeader = req.headers?.authorization || '';
   if (!authHeader.startsWith('Bearer ')) {
@@ -111,12 +203,12 @@ export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCa
   }
 
   const token = authHeader.split('Bearer ')[1]?.trim();
-  if (!token || token.startsWith('mock_token_')) {
-    res.status(401).json({ error: 'Unauthorized: Invalid authentication token format.' });
+  ensureFirebaseAdmin();
+  if (!token || !hasValidFirebaseIdTokenFormat(token)) {
+    res.status(401).json({ error: 'Unauthorized: Invalid, expired, or malformed authentication token.' });
     return null;
   }
 
-  ensureFirebaseAdmin();
   let decoded: admin.auth.DecodedIdToken;
   try {
     decoded = await admin.auth().verifyIdToken(token, true);
@@ -219,13 +311,15 @@ export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCa
   };
 }
 
+let ephemeralCaptchaHmacSecret = '';
+
 export function getCaptchaHmacSecret(): string {
   const configured = (process.env.CAPTCHA_HMAC_SECRET || process.env.IMPACT_TOKEN_SECRET || '').trim();
   if (configured) return configured;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Server configuration error: CAPTCHA_HMAC_SECRET environment variable is required in production.');
+  if (!ephemeralCaptchaHmacSecret) {
+    ephemeralCaptchaHmacSecret = crypto.randomBytes(32).toString('hex');
   }
-  return 'dev_captcha_secret_shikshantar_2083_local_only';
+  return ephemeralCaptchaHmacSecret;
 }
 
 export function createSignedChallenge() {
@@ -306,6 +400,16 @@ export function issueSignedVerificationToken(challengeId: string, kind: 'challen
   return Buffer.from(JSON.stringify({ kind, challengeId, nonce, issuedAt, expiresAt, sig })).toString('base64url');
 }
 
+const memoryUsedTurnstileTokens = new Map<string, number>();
+
+function pruneMemoryTurnstileTokens(nowMs: number) {
+  if (memoryUsedTurnstileTokens.size < 500) return;
+  const cutoff = nowMs - 15 * 60 * 1000;
+  for (const [k, ts] of memoryUsedTurnstileTokens.entries()) {
+    if (ts < cutoff) memoryUsedTurnstileTokens.delete(k);
+  }
+}
+
 const CLOUDFLARE_TEST_SECRET = '1x0000000000000000000000000000000AA';
 
 export async function verifyTurnstileToken(
@@ -321,19 +425,32 @@ export async function verifyTurnstileToken(
   }
 
   const cleanToken = turnstileToken.trim();
-  const secretKey = (process.env.TURNSTILE_SECRET_KEY || CLOUDFLARE_TEST_SECRET).trim();
+  const rawSecret = String(process.env.TURNSTILE_SECRET_KEY || '').trim().replace(/^["']|["']$/g, '').trim();
+  const secretKey = rawSecret || CLOUDFLARE_TEST_SECRET;
   const isCloudflareStaticDummyTestToken =
     secretKey === CLOUDFLARE_TEST_SECRET && cleanToken === 'XXXX.DUMMY.TOKEN.XXXX';
   const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
   const usedRef = db.collection('used_turnstile_tokens').doc(`ts_${tokenHash}`);
+  let useMemoryReplayStore = false;
 
   // Pre-check replay before calling external Siteverify
   // Cloudflare's official test keypair (1x0000...AA) always emits static dummy token 'XXXX.DUMMY.TOKEN.XXXX'.
   // Skip Firestore single-use replay storage ONLY for that official test dummy token under the test secret.
   if (!isCloudflareStaticDummyTestToken) {
-    const preSnap = await usedRef.get();
-    if (preSnap.exists) {
+    if (memoryUsedTurnstileTokens.has(tokenHash)) {
       return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+    }
+    try {
+      const preSnap = await usedRef.get();
+      if (preSnap.exists) {
+        return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+      }
+    } catch (err) {
+      if (isFirestoreCredentialUnavailableError(err)) {
+        useMemoryReplayStore = true;
+      } else {
+        throw err;
+      }
     }
   }
 
@@ -359,7 +476,18 @@ export async function verifyTurnstileToken(
       const formParams = new URLSearchParams();
       formParams.append('secret', secretKey);
       formParams.append('response', cleanToken);
-      if (remoteIp) formParams.append('remoteip', remoteIp);
+      const cleanIp = String(remoteIp || '').trim().replace(/^::ffff:/i, '');
+      const isPrivateOrLocalIp =
+        !cleanIp ||
+        cleanIp === '::1' ||
+        cleanIp === 'localhost' ||
+        cleanIp.startsWith('127.') ||
+        cleanIp.startsWith('10.') ||
+        cleanIp.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(cleanIp);
+      if (cleanIp && !isPrivateOrLocalIp) {
+        formParams.append('remoteip', cleanIp);
+      }
 
       const verifyRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST',
@@ -372,10 +500,29 @@ export async function verifyTurnstileToken(
       siteverifyHostname = String(verifyData?.hostname || '');
 
       if (!siteverifySuccess) {
+        const codes: string[] = Array.isArray(verifyData?.['error-codes'])
+          ? verifyData['error-codes'].map((c: any) => String(c))
+          : [];
+        if (codes.includes('invalid-input-secret') || codes.includes('missing-input-secret')) {
+          return {
+            valid: false,
+            statusCode: 500,
+            error: 'Cloudflare Turnstile server secret key is misconfigured. Please verify TURNSTILE_SECRET_KEY.'
+          };
+        }
+        if (codes.includes('timeout-or-duplicate')) {
+          return {
+            valid: false,
+            statusCode: 400,
+            error: 'Cloudflare Turnstile verification expired or already used. Please click Reset and verify again.'
+          };
+        }
         return {
           valid: false,
           statusCode: 400,
-          error: 'Cloudflare Turnstile verification rejected. Please complete the challenge again.'
+          error: codes.length
+            ? `Cloudflare Turnstile verification rejected (${codes.join(', ')}). Please complete the challenge again.`
+            : 'Cloudflare Turnstile verification rejected. Please complete the challenge again.'
         };
       }
 
@@ -397,21 +544,41 @@ export async function verifyTurnstileToken(
 
   // Atomically claim single-use Turnstile token in Firestore (real tokens & emulator test tokens)
   if (!isCloudflareStaticDummyTestToken) {
-    const claimed = await db.runTransaction(async (txn) => {
-      const snap = await txn.get(usedRef);
-      if (snap.exists) return false;
-      txn.set(usedRef, {
-        tokenHash,
-        action: siteverifyAction || expectedAction || 'submit',
-        hostname: siteverifyHostname || 'localhost',
-        usedAtMs: nowMs,
-        usedAt: new Date(nowMs).toISOString()
-      });
-      return true;
-    });
+    if (useMemoryReplayStore) {
+      pruneMemoryTurnstileTokens(nowMs);
+      if (memoryUsedTurnstileTokens.has(tokenHash)) {
+        return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+      }
+      memoryUsedTurnstileTokens.set(tokenHash, nowMs);
+    } else {
+      try {
+        const claimed = await db.runTransaction(async (txn) => {
+          const snap = await txn.get(usedRef);
+          if (snap.exists) return false;
+          txn.set(usedRef, {
+            tokenHash,
+            action: siteverifyAction || expectedAction || 'submit',
+            hostname: siteverifyHostname || 'localhost',
+            usedAtMs: nowMs,
+            usedAt: new Date(nowMs).toISOString()
+          });
+          return true;
+        });
 
-    if (!claimed) {
-      return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+        if (!claimed) {
+          return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+        }
+      } catch (err) {
+        if (isFirestoreCredentialUnavailableError(err)) {
+          pruneMemoryTurnstileTokens(nowMs);
+          if (memoryUsedTurnstileTokens.has(tokenHash)) {
+            return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+          }
+          memoryUsedTurnstileTokens.set(tokenHash, nowMs);
+        } else {
+          throw err;
+        }
+      }
     }
   }
 
@@ -472,16 +639,31 @@ export async function consumeVerificationToken(
 
     const tokenId = crypto.createHash('sha256').update(parsedSignedToken.sig).digest('hex');
     const replayRef = db.collection('used_captcha_challenges').doc(`tok_${tokenId}`);
-    const consumed = await db.runTransaction(async (txn) => {
-      const snap = await txn.get(replayRef);
-      if (snap.exists) return false;
-      txn.set(replayRef, {
-        challengeId: parsedSignedToken.challengeId,
-        usedAtMs: nowMs,
-        usedAt: new Date(nowMs).toISOString()
+    let consumed = false;
+    try {
+      consumed = await db.runTransaction(async (txn) => {
+        const snap = await txn.get(replayRef);
+        if (snap.exists) return false;
+        txn.set(replayRef, {
+          challengeId: parsedSignedToken.challengeId,
+          usedAtMs: nowMs,
+          usedAt: new Date(nowMs).toISOString()
+        });
+        return true;
       });
-      return true;
-    });
+    } catch (err) {
+      if (isFirestoreCredentialUnavailableError(err)) {
+        pruneMemoryTurnstileTokens(nowMs);
+        if (memoryUsedTurnstileTokens.has(tokenId)) {
+          consumed = false;
+        } else {
+          memoryUsedTurnstileTokens.set(tokenId, nowMs);
+          consumed = true;
+        }
+      } else {
+        throw err;
+      }
+    }
 
     if (!consumed) {
       return { valid: false, statusCode: 409, error: 'Security verification token has already been used (replay rejected).' };

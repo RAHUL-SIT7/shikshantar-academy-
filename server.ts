@@ -1,13 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import admin from 'firebase-admin';
 import { getApps, getApp, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
 import {
   BOOTSTRAP_OWNER_EMAIL,
@@ -20,13 +17,37 @@ import {
   getEffectiveNowMs,
   getSmtpTransportConfig,
   isSmtpAuthError,
-  resolveResultNotificationRecipientEmail
-} from './api/_lib/auth';
+  resolveResultNotificationRecipientEmail,
+  getFirebaseAdminCredential,
+  isFirestoreCredentialUnavailableError,
+  hasValidFirebaseIdTokenFormat
+} from './api/_lib/auth.js';
+
+function loadServerFirebaseConfig(): { projectId: string; firestoreDatabaseId: string } {
+  try {
+    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    }
+  } catch {
+    // Fallback to environment variables
+  }
+  return {
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'project-4b410c97-a152-49e7-940',
+    firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || 'ai-studio-2507c181-4e37-4730-b71a-25b639c27e22'
+  };
+}
+
+const firebaseConfig = loadServerFirebaseConfig();
 
 export function getAdminApp() {
-  return getApps().length > 0
-    ? getApp()
-    : initializeApp({ projectId: firebaseConfig.projectId });
+  if (getApps().length > 0) return getApp();
+  const credential = getFirebaseAdminCredential();
+  return initializeApp(
+    credential
+      ? { credential, projectId: firebaseConfig.projectId }
+      : { projectId: firebaseConfig.projectId }
+  );
 }
 
 export function getAdminDb() {
@@ -47,16 +68,13 @@ import {
   getTerminalAvailability,
   computeSubjectWorkflowStatus,
   filterEligibleStudentsFromRaw
-} from './src/lib/resultPreparationEngine';
+} from './src/lib/resultPreparationEngine.js';
 import {
   calculateSubjectResult,
   calculateAggregateResult,
   validateMarkValue
-} from './src/lib/nepalGradingEngine';
-import { normalizeClass, getClassConfiguredSubjects, resolveSubjectTeachersForClass, generateAssignmentKey } from './src/lib/teacherAssignmentEngine';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+} from './src/lib/nepalGradingEngine.js';
+import { normalizeClass, getClassConfiguredSubjects, resolveSubjectTeachersForClass, generateAssignmentKey } from './src/lib/teacherAssignmentEngine.js';
 
 try {
   if (process.env.USE_FIREBASE_EMULATOR === 'true') {
@@ -72,9 +90,12 @@ try {
   }
   delete process.env.GOOGLE_CLOUD_QUOTA_PROJECT;
   if (!admin.apps.length) {
-    admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
+    const credential = getFirebaseAdminCredential();
+    admin.initializeApp(
+      credential
+        ? { credential, projectId: firebaseConfig.projectId }
+        : { projectId: firebaseConfig.projectId }
+    );
   }
   console.log('Firebase Admin initialized successfully.');
 } catch (error) {
@@ -627,8 +648,8 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     }
 
     const token = authHeader.split('Bearer ')[1]?.trim();
-    if (!token || token.startsWith('mock_token_')) {
-      res.status(401).json({ error: 'Unauthorized: Invalid or rejected Bearer token.' });
+    if (!token || !hasValidFirebaseIdTokenFormat(token)) {
+      res.status(401).json({ error: 'Unauthorized: Invalid, expired, or malformed authentication token.' });
       return null;
     }
 
@@ -647,8 +668,7 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
       if (isHostProjectIamLookupError) {
         try {
           decoded = await admin.auth().verifyIdToken(token, false);
-        } catch (innerErr: any) {
-          console.warn('[SECURITY] Token cryptographic verification failed:', innerErr?.message || innerErr);
+        } catch {
           res.status(401).json({
             error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
           });
@@ -656,7 +676,6 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
         }
       } else {
         const isRevoked = err?.code === 'auth/id-token-revoked';
-        console.warn('[SECURITY] Token verification failed:', msg);
         res.status(401).json({
           error: isRevoked
             ? 'Unauthorized: Session token has been revoked. Please sign in again.'
@@ -899,7 +918,10 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
 
   // Public non-secret client config (provides runtime Turnstile Site Key even if Vite static build omitted it)
   app.get('/api/auth/public-config', rateLimiter(120, 60000), (_req: Request, res: Response) => {
-    const publicSiteKey = String(process.env.VITE_TURNSTILE_SITE_KEY || process.env.TURNSTILE_SITE_KEY || '').trim();
+    const publicSiteKey = String(process.env.VITE_TURNSTILE_SITE_KEY || process.env.TURNSTILE_SITE_KEY || '')
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .trim();
     return res.status(200).json({
       turnstileSiteKey: publicSiteKey
     });
@@ -983,6 +1005,8 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     60 * 60 * 1000   // Tier 4+: max 60 minutes (never permanent lockout)
   ];
 
+  const memoryLoginLimits = new Map<string, Record<string, any>>();
+
   app.post('/api/auth/login-precheck', rateLimiter(60, 60000), async (req: Request, res: Response) => {
     try {
       const { identifier, verificationToken, turnstileToken, action } = req.body || {};
@@ -999,13 +1023,23 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
       const acctKey = `login_acct_${crypto.createHash('sha256').update(normIdentifier).digest('hex').slice(0, 32)}`;
       const ipKey = `login_ip_${crypto.createHash('sha256').update(clientIp).digest('hex').slice(0, 32)}`;
 
-      const [acctSnap, ipSnap] = await Promise.all([
-        db.collection('security_rate_limits').doc(acctKey).get(),
-        db.collection('security_rate_limits').doc(ipKey).get()
-      ]);
-
-      const acctData = acctSnap.exists ? (acctSnap.data() || {}) : {};
-      const ipData = ipSnap.exists ? (ipSnap.data() || {}) : {};
+      let acctData: Record<string, any> = {};
+      let ipData: Record<string, any> = {};
+      try {
+        const [acctSnap, ipSnap] = await Promise.all([
+          db.collection('security_rate_limits').doc(acctKey).get(),
+          db.collection('security_rate_limits').doc(ipKey).get()
+        ]);
+        acctData = acctSnap.exists ? (acctSnap.data() || {}) : {};
+        ipData = ipSnap.exists ? (ipSnap.data() || {}) : {};
+      } catch (dbErr) {
+        if (isFirestoreCredentialUnavailableError(dbErr)) {
+          acctData = memoryLoginLimits.get(acctKey) || {};
+          ipData = memoryLoginLimits.get(ipKey) || {};
+        } else {
+          throw dbErr;
+        }
+      }
 
       const acctLockedUntil = Number(acctData.lockedUntilMs || 0);
       const ipLockedUntil = Number(ipData.lockedUntilMs || 0);
@@ -1081,27 +1115,49 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
         const caller = await verifyUserAuth(req, res);
         if (!caller) return;
 
-        const lockResult = await db.runTransaction(async (txn) => {
-          const acctSnap = await txn.get(acctRef);
-          const acctData = acctSnap.exists ? (acctSnap.data() || {}) : {};
-          const curAcctLocked = Number(acctData.lockedUntilMs || 0);
-          if (curAcctLocked > nowMs) {
-            return {
-              locked: true,
-              lockedUntilMs: curAcctLocked
-            };
-          }
+        let lockResult = { locked: false, lockedUntilMs: 0 };
+        try {
+          lockResult = await db.runTransaction(async (txn) => {
+            const acctSnap = await txn.get(acctRef);
+            const acctData = acctSnap.exists ? (acctSnap.data() || {}) : {};
+            const curAcctLocked = Number(acctData.lockedUntilMs || 0);
+            if (curAcctLocked > nowMs) {
+              return {
+                locked: true,
+                lockedUntilMs: curAcctLocked
+              };
+            }
 
-          txn.set(acctRef, {
-            identifierHash: acctKey,
-            consecutiveFailures: 0,
-            cooldownTier: 0,
-            lockedUntilMs: 0,
-            lastSuccessAtMs: nowMs,
-            updatedAt: new Date(nowMs).toISOString()
-          }, { merge: true });
-          return { locked: false, lockedUntilMs: 0 };
-        });
+            txn.set(acctRef, {
+              identifierHash: acctKey,
+              consecutiveFailures: 0,
+              cooldownTier: 0,
+              lockedUntilMs: 0,
+              lastSuccessAtMs: nowMs,
+              updatedAt: new Date(nowMs).toISOString()
+            }, { merge: true });
+            return { locked: false, lockedUntilMs: 0 };
+          });
+        } catch (dbErr) {
+          if (isFirestoreCredentialUnavailableError(dbErr)) {
+            const acctData = memoryLoginLimits.get(acctKey) || {};
+            const curAcctLocked = Number(acctData.lockedUntilMs || 0);
+            if (curAcctLocked > nowMs) {
+              lockResult = { locked: true, lockedUntilMs: curAcctLocked };
+            } else {
+              memoryLoginLimits.set(acctKey, {
+                identifierHash: acctKey,
+                consecutiveFailures: 0,
+                cooldownTier: 0,
+                lockedUntilMs: 0,
+                lastSuccessAtMs: nowMs
+              });
+              lockResult = { locked: false, lockedUntilMs: 0 };
+            }
+          } else {
+            throw dbErr;
+          }
+        }
 
         if (lockResult.locked) {
           const retryAfterSeconds = Math.ceil((lockResult.lockedUntilMs - nowMs) / 1000);
@@ -1124,23 +1180,21 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
       }
 
       // Record failed password attempt atomically
-      const lockStatus = await db.runTransaction(async (txn) => {
-        const [acctSnap, ipSnap] = await Promise.all([txn.get(acctRef), txn.get(ipRef)]);
-        const acctData = acctSnap.exists ? (acctSnap.data() || {}) : {};
-        const ipData = ipSnap.exists ? (ipSnap.data() || {}) : {};
-
+      const computeNextLock = (acctData: Record<string, any>, ipData: Record<string, any>) => {
         const curAcctLocked = Number(acctData.lockedUntilMs || 0);
         if (curAcctLocked > nowMs) {
           return {
+            alreadyLocked: true,
             locked: true,
             justLocked: false,
             cooldownTier: Number(acctData.cooldownTier || 1),
             consecutiveFailures: Number(acctData.consecutiveFailures || LOGIN_MAX_FAILED_ATTEMPTS),
-            lockedUntilMs: curAcctLocked
+            lockedUntilMs: curAcctLocked,
+            ipFailures: Number(ipData.consecutiveFailures || 0),
+            ipLockedUntilMs: Number(ipData.lockedUntilMs || 0)
           };
         }
 
-        // If a previous cooldown expired and user fails again, increment from threshold boundary to trigger next progressive tier
         const prevFailures = curAcctLocked > 0 && curAcctLocked <= nowMs
           ? Math.max(LOGIN_MAX_FAILED_ATTEMPTS - 1, Number(acctData.consecutiveFailures || 0))
           : Number(acctData.consecutiveFailures || 0);
@@ -1158,37 +1212,76 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
         }
 
         const prevIpLocked = Number(ipData.lockedUntilMs || 0);
-        const rawIpFailures = prevIpLocked > 0 && prevIpLocked <= nowMs ? 1 : Number(ipData.consecutiveFailures || 0) + 1;
-        const ipFailures = rawIpFailures;
+        const ipFailures = prevIpLocked > 0 && prevIpLocked <= nowMs ? 1 : Number(ipData.consecutiveFailures || 0) + 1;
         const ipLockedUntilMs = ipFailures >= LOGIN_IP_LOCK_THRESHOLD
           ? nowMs + LOGIN_COOLDOWN_TIERS_MS[0]
           : (prevIpLocked > nowMs ? prevIpLocked : 0);
 
-        txn.set(acctRef, {
-          identifierHash: acctKey,
-          consecutiveFailures: nextFailures,
-          cooldownTier: nextTier,
-          lockedUntilMs,
-          lastFailureAtMs: nowMs,
-          updatedAt: new Date(nowMs).toISOString()
-        }, { merge: true });
-
-        txn.set(ipRef, {
-          ipHash: ipKey,
-          consecutiveFailures: ipFailures,
-          lockedUntilMs: ipLockedUntilMs,
-          lastFailureAtMs: nowMs,
-          updatedAt: new Date(nowMs).toISOString()
-        }, { merge: true });
-
         return {
+          alreadyLocked: false,
           locked: lockedUntilMs > nowMs,
           justLocked,
           cooldownTier: nextTier,
           consecutiveFailures: nextFailures,
-          lockedUntilMs
+          lockedUntilMs,
+          ipFailures,
+          ipLockedUntilMs
         };
-      });
+      };
+
+      let lockStatus: { locked: boolean; justLocked: boolean; cooldownTier: number; consecutiveFailures: number; lockedUntilMs: number };
+      try {
+        lockStatus = await db.runTransaction(async (txn) => {
+          const [acctSnap, ipSnap] = await Promise.all([txn.get(acctRef), txn.get(ipRef)]);
+          const acctData = acctSnap.exists ? (acctSnap.data() || {}) : {};
+          const ipData = ipSnap.exists ? (ipSnap.data() || {}) : {};
+          const calc = computeNextLock(acctData, ipData);
+          if (calc.alreadyLocked) return calc;
+
+          txn.set(acctRef, {
+            identifierHash: acctKey,
+            consecutiveFailures: calc.consecutiveFailures,
+            cooldownTier: calc.cooldownTier,
+            lockedUntilMs: calc.lockedUntilMs,
+            lastFailureAtMs: nowMs,
+            updatedAt: new Date(nowMs).toISOString()
+          }, { merge: true });
+
+          txn.set(ipRef, {
+            ipHash: ipKey,
+            consecutiveFailures: calc.ipFailures,
+            lockedUntilMs: calc.ipLockedUntilMs,
+            lastFailureAtMs: nowMs,
+            updatedAt: new Date(nowMs).toISOString()
+          }, { merge: true });
+
+          return calc;
+        });
+      } catch (dbErr) {
+        if (isFirestoreCredentialUnavailableError(dbErr)) {
+          const acctData = memoryLoginLimits.get(acctKey) || {};
+          const ipData = memoryLoginLimits.get(ipKey) || {};
+          const calc = computeNextLock(acctData, ipData);
+          if (!calc.alreadyLocked) {
+            memoryLoginLimits.set(acctKey, {
+              identifierHash: acctKey,
+              consecutiveFailures: calc.consecutiveFailures,
+              cooldownTier: calc.cooldownTier,
+              lockedUntilMs: calc.lockedUntilMs,
+              lastFailureAtMs: nowMs
+            });
+            memoryLoginLimits.set(ipKey, {
+              ipHash: ipKey,
+              consecutiveFailures: calc.ipFailures,
+              lockedUntilMs: calc.ipLockedUntilMs,
+              lastFailureAtMs: nowMs
+            });
+          }
+          lockStatus = calc;
+        } else {
+          throw dbErr;
+        }
+      }
 
       if (lockStatus.locked) {
         const retryAfterSeconds = Math.ceil((lockStatus.lockedUntilMs - nowMs) / 1000);
@@ -7380,7 +7473,7 @@ https://www.shikshantaracademy.edu.np/`;
     setInterval(processNotificationOutbox, 30000);
   }
 
-  if (!options?.skipVite) {
+  if (!options?.skipVite && !process.env.VERCEL) {
     const isProduction = process.env.NODE_ENV === 'production';
     const distPath = path.join(process.cwd(), 'dist');
     const distIndexHtml = path.join(distPath, 'index.html');
@@ -7391,6 +7484,8 @@ https://www.shikshantaracademy.edu.np/`;
         res.sendFile(distIndexHtml);
       });
     } else {
+      const viteModuleName = 'vite';
+      const { createServer: createViteServer } = await import(viteModuleName);
       const vite = await createViteServer({
         server: {
           middlewareMode: true,

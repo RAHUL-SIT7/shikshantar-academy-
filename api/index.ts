@@ -1,70 +1,93 @@
-import { applyCorsAndSecurityHeaders } from './_lib/auth';
-import auditLogHandler from './_handlers/audit/log';
-import authHeartbeatHandler from './_handlers/auth/heartbeat';
-import authLogoutHandler from './_handlers/auth/logout';
-import authLogoutOtherSessionsHandler from './_handlers/auth/logout-other-sessions';
-import authPublicConfigHandler from './_handlers/auth/public-config';
-import authRecordLoginHandler from './_handlers/auth/record-login';
-import authRevokeSessionHandler from './_handlers/auth/revoke-session';
-import authVerifyCaptchaHandler from './_handlers/auth/verify-captcha';
-import birthdaySendWishesHandler from './_handlers/birthday/send-wishes';
-import publicSubmitAdmissionHandler from './_handlers/public/submit-admission';
-import publicSubmitAlumniHandler from './_handlers/public/submit-alumni';
-import publicSubmitEnquiryHandler from './_handlers/public/submit-enquiry';
-import resultsSendPublicationEmailsHandler from './_handlers/results/send-publication-emails';
-import usersCreateHandler from './_handlers/users/create';
+import { createApp } from '../server.js';
 
-type RouteHandler = (req: any, res: any) => Promise<any> | any;
+let appPromise: Promise<any> | null = null;
 
-const ROUTES: Record<string, RouteHandler> = {
-  'audit/log': auditLogHandler,
-  'auth/heartbeat': authHeartbeatHandler,
-  'auth/logout': authLogoutHandler,
-  'auth/logout-other-sessions': authLogoutOtherSessionsHandler,
-  'auth/public-config': authPublicConfigHandler,
-  'auth/record-login': authRecordLoginHandler,
-  'auth/revoke-session': authRevokeSessionHandler,
-  'auth/verify-captcha': authVerifyCaptchaHandler,
-  'auth/verify-turnstile': authVerifyCaptchaHandler,
-  'birthday/send-wishes': birthdaySendWishesHandler,
-  'public/submit-admission': publicSubmitAdmissionHandler,
-  'public/submit-alumni': publicSubmitAlumniHandler,
-  'public/submit-enquiry': publicSubmitEnquiryHandler,
-  'results/send-publication-emails': resultsSendPublicationEmailsHandler,
-  'users/create': usersCreateHandler,
-};
-
-function resolveApiRoute(req: any): string {
-  const rawQueryRoute = req?.query?.__route;
-  if (typeof rawQueryRoute === 'string' && rawQueryRoute.trim()) {
-    return rawQueryRoute.replace(/^\/+|\/+$/g, '').replace(/^api\//i, '');
+function getExpressApp() {
+  if (!appPromise) {
+    appPromise = createApp({ skipVite: true, skipOutboxWorker: true });
   }
-  if (Array.isArray(rawQueryRoute) && rawQueryRoute.length > 0) {
-    return rawQueryRoute.join('/').replace(/^\/+|\/+$/g, '').replace(/^api\//i, '');
-  }
+  return appPromise;
+}
 
-  const rawUrl = String(req?.url || '');
-  const pathname = rawUrl.split('?')[0] || '';
-  return pathname.replace(/^\/+|\/+$/g, '').replace(/^api\//i, '');
+function normalizeVercelRequestUrl(req: any) {
+  const rawUrl = String(req?.url || '/');
+  const parsed = new URL(rawUrl, 'http://localhost');
+  const routeParam = parsed.searchParams.get('__route');
+
+  if (routeParam) {
+    parsed.searchParams.delete('__route');
+    const cleanRoute = routeParam.replace(/^\/+/, '').replace(/^api\//i, '');
+    const remainingQuery = parsed.searchParams.toString();
+    req.url = `/api/${cleanRoute}${remainingQuery ? `?${remainingQuery}` : ''}`;
+    try {
+      if (req.query && typeof req.query === 'object' && '__route' in req.query) {
+        delete req.query.__route;
+      }
+    } catch {
+      // Ignore read-only query descriptor on Vercel Node runtime
+    }
+  } else if (!parsed.pathname.startsWith('/api/')) {
+    const cleanPath = parsed.pathname.replace(/^\/+/, '');
+    const remainingQuery = parsed.searchParams.toString();
+    req.url = `/api/${cleanPath}${remainingQuery ? `?${remainingQuery}` : ''}`;
+  }
 }
 
 export default async function handler(req: any, res: any) {
-  const routeKey = resolveApiRoute(req);
-
-  if (req?.query && '__route' in req.query) {
-    delete req.query.__route;
-  }
-
-  const targetHandler = ROUTES[routeKey];
-  if (!targetHandler) {
-    applyCorsAndSecurityHeaders(req, res, 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    if (req.method === 'OPTIONS') {
-      return res.status(204).end();
+  try {
+    normalizeVercelRequestUrl(req);
+    try {
+      const incomingBody = req.body;
+      if (incomingBody !== undefined && incomingBody !== null) {
+        if (typeof incomingBody === 'string') {
+          try {
+            Object.defineProperty(req, 'body', {
+              value: JSON.parse(incomingBody),
+              writable: true,
+              configurable: true,
+              enumerable: true
+            });
+          } catch {
+            // Keep raw string if not valid JSON
+          }
+        }
+        req._body = true;
+      }
+    } catch {
+      // Let Express body-parser handle unparsed stream if Vercel lazy body getter threw
     }
-    return res.status(404).json({
-      error: `API route '/api/${routeKey}' not found.`,
-    });
-  }
 
-  return targetHandler(req, res);
+    const app = await getExpressApp();
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const done = (err?: any) => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve();
+      };
+
+      if (typeof res.once === 'function') {
+        res.once('finish', () => done());
+        res.once('close', () => done());
+        res.once('error', (err: any) => done(err));
+      }
+
+      app(req, res, (err: any) => {
+        if (err) done(err);
+        else if (res.writableEnded || res.headersSent) done();
+      });
+    });
+  } catch (err: any) {
+    console.error('[VERCEL API] Handler error:', err);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({
+        error: 'Server error while processing API request.',
+        details: err?.message || 'Unknown error'
+      }));
+    }
+  }
 }

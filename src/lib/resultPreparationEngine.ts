@@ -13,11 +13,11 @@
 import { 
   normalizeClass, 
   getClassConfiguredSubjects, 
-  TeachingAssignment,
+  type TeachingAssignment,
   matchesTeachingContext,
   hasMatchingAssignment
-} from './teacherAssignmentEngine';
-import { getNepalGPA, getGrade } from './nepalGradingEngine';
+} from './teacherAssignmentEngine.js';
+import { getNepalGPA, getGrade } from './nepalGradingEngine.js';
 
 export type WorkflowMode = 'STANDALONE' | 'CONNECTED';
 export type ExamPreparationStatus = 'DRAFT' | 'IN PROGRESS' | 'READY_FOR_REVIEW' | 'READY FOR REVIEW' | 'APPROVED' | 'PUBLISHED';
