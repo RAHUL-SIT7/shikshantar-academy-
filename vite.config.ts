@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    chunkSizeWarningLimit: 7000,
+  },
   optimizeDeps: {
     entries: ['index.html'],
     exclude: ['lucide-react'],

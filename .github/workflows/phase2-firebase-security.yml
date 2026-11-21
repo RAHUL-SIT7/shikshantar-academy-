@@ -45,8 +45,9 @@ jobs:
 
       - name: Execute Firestore Emulator Security Suite (40 Scenarios)
         run: |
-          npx firebase-tools emulators:exec \
+          npx --yes firebase-tools emulators:exec \
             --config firebase.json \
+            --project demo-shikshantar-audit \
             --only firestore \
             "npx tsx tests/test_firestore_emulator_security.ts"
 

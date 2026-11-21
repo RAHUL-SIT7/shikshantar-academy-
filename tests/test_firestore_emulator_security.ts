@@ -1,3 +1,4 @@
+import { initializeTestEnvironment, assertSucceeds, assertFails, RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,305 +18,454 @@ interface TestRecord {
 }
 
 const records: TestRecord[] = [];
-
-const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 const PROJECT_ID = 'demo-shikshantar-audit';
-const BASE_URL = `http://${EMULATOR_HOST}/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-// Helper for REST requests to Firestore Emulator
-async function firestoreRequest(
-  method: string,
-  docPath: string,
-  authHeader?: string,
-  body?: any
-): Promise<{ status: number; data: any }> {
-  const url = `${BASE_URL}/${docPath}`;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (authHeader) {
-    headers['Authorization'] = authHeader;
-  }
-
-  try {
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json().catch(() => ({}));
-    return { status: res.status, data };
-  } catch (err: any) {
-    return { status: 500, data: { error: err.message } };
-  }
-}
-
-// Seed helper (Admin SDK / Emulator bypass)
-async function seedDocument(docPath: string, fields: Record<string, any>): Promise<void> {
-  const url = `${BASE_URL}/${docPath}`;
-  const formattedFields: Record<string, any> = {};
-  for (const [key, val] of Object.entries(fields)) {
-    if (typeof val === 'string') formattedFields[key] = { stringValue: val };
-    else if (typeof val === 'boolean') formattedFields[key] = { booleanValue: val };
-    else if (typeof val === 'number') formattedFields[key] = { integerValue: val };
-    else formattedFields[key] = { stringValue: String(val) };
-  }
-
-  await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer owner',
-    },
-    body: JSON.stringify({ fields: formattedFields }),
-  });
-}
-
-function mockTokenHeader(uid: string, email?: string): string {
-  const token = {
-    sub: uid,
-    user_id: uid,
-    email: email || `${uid}@shikshantar.edu.np`,
-    email_verified: true,
-  };
-  return `Bearer ${JSON.stringify(token)}`;
-}
-
-async function recordTest(
+async function runCase(
   num: number,
   name: string,
-  op: string,
-  auth: string,
-  expectedStatus: 'ALLOW' | 'DENY',
-  actualStatus: number,
-  details?: string
+  operation: string,
+  authIdentity: string,
+  expected: 'ALLOW' | 'DENY',
+  action: () => Promise<unknown>
 ) {
-  const isAllowed = actualStatus >= 200 && actualStatus < 300;
-  const actualStr = isAllowed ? 'ALLOW' : 'DENY';
-  const pass = (expectedStatus === 'ALLOW' && isAllowed) || (expectedStatus === 'DENY' && !isAllowed);
+  let pass = false;
+  let actual = '';
+  let details: string | undefined;
+
+  try {
+    if (expected === 'ALLOW') {
+      await assertSucceeds(action());
+      pass = true;
+      actual = 'ALLOW';
+    } else {
+      await assertFails(action());
+      pass = true;
+      actual = 'DENY';
+    }
+  } catch (err: any) {
+    pass = false;
+    actual = expected === 'ALLOW' ? 'DENY' : 'ALLOW';
+    details = err?.message || String(err);
+  }
 
   records.push({
     testNumber: num,
     testName: name,
-    operation: op,
-    authIdentity: auth,
-    expected: expectedStatus,
-    actual: `${actualStr} (HTTP ${actualStatus})`,
+    operation,
+    authIdentity,
+    expected,
+    actual,
     status: pass ? 'PASS' : 'FAIL',
-    details,
+    ...(details ? { details } : {}),
   });
 
-  console.log(`[TEST ${num.toString().padStart(2, '0')}] ${pass ? '✅ PASS' : '❌ FAIL'} | ${name.padEnd(52)} | Expected: ${expectedStatus.padEnd(5)} | Actual: ${actualStr.padEnd(5)} (HTTP ${actualStatus})`);
+  console.log(
+    `[TEST ${num.toString().padStart(2, '0')}] ${pass ? 'PASS' : 'FAIL'} | ${name.padEnd(56)} | Expected: ${expected.padEnd(5)} | Actual: ${actual}`
+  );
+  if (details) {
+    console.error(`          -> ${details}`);
+  }
 }
 
 async function runSecurityTestSuite() {
-  console.log('===================================================================================');
-  console.log('STARTING FIRESTORE EMULATOR SECURITY TEST SUITE (LIVE FIRESTORE EMULATOR RUNTIME)');
-  console.log(`Target Emulator Host: ${EMULATOR_HOST}`);
-  console.log(`Project ID: ${PROJECT_ID}`);
-  console.log('===================================================================================\n');
+  const hostEnv = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085';
+  const [emuHost, emuPortStr] = hostEnv.split(':');
+  const emuPort = emuPortStr ? parseInt(emuPortStr, 10) : 8085;
 
-  // Verify Rules File loaded
   const rulesPath = path.resolve(__dirname, '../firestore.rules');
   const rulesContent = fs.readFileSync(rulesPath, 'utf8');
-  console.log(`Verified active firestore.rules file loaded (${rulesContent.length} bytes, 316 lines).\n`);
+  const rulesLines = rulesContent.split('\n').length;
 
-  // --- SEED FIXTURE DOCUMENTS FOR RBAC RULES ---
-  console.log('Seeding fixture documents into Firestore Emulator...');
-  await seedDocument('users/admin_primary', { role: 'admin', adminTier: 'primary', email: 'rahulsah4534@gmail.com' });
-  await seedDocument('users/admin_secondary', { role: 'admin', adminTier: 'secondary', email: 'admin2@shikshantar.edu.np' });
-  await seedDocument('users/teacher_assigned', { role: 'teacher', email: 'teacher1@shikshantar.edu.np' });
-  await seedDocument('users/teacher_unassigned', { role: 'teacher', email: 'teacher2@shikshantar.edu.np' });
-  await seedDocument('users/student_own', { role: 'student', email: 'student1@shikshantar.edu.np' });
-  await seedDocument('users/student_other', { role: 'student', email: 'student2@shikshantar.edu.np' });
-  await seedDocument('users/parent_linked', { role: 'parent', email: 'parent1@shikshantar.edu.np' });
-  await seedDocument('salary_records/sal_teacher_assigned', { teacherId: 'teacher_assigned', amount: 50000 });
-  await seedDocument('salary_records/sal_teacher_unassigned', { teacherId: 'teacher_unassigned', amount: 50000 });
-  await seedDocument('user_sessions/sess_student_own', { userUid: 'student_own', active: true });
-  await seedDocument('notices/notice_pub1', { title: 'Exam Schedule', isPublished: true });
-  await seedDocument('custom_subjects/cs1', { name: 'Robotics' });
-  await seedDocument('admissions/adm_pub1', { studentName: 'Applicant One' });
-  console.log('Seeding complete.\n');
-
-  let t = 1;
-
-  // 1. Unauthenticated access
-  const r1 = await firestoreRequest('GET', 'users/admin_primary');
-  await recordTest(t++, 'Unauthenticated Read User Profile', 'getDoc(/users/admin_primary)', 'Unauthenticated', 'DENY', r1.status);
-
-  const r2 = await firestoreRequest('GET', 'results/res_101');
-  await recordTest(t++, 'Unauthenticated Read Results Collection', 'getDoc(/results/res_101)', 'Unauthenticated', 'DENY', r2.status);
-
-  const r3 = await firestoreRequest('PATCH', 'notices/notice_unauth', undefined, { fields: { title: { stringValue: 'Hacked' } } });
-  await recordTest(t++, 'Unauthenticated Direct Write Notice', 'setDoc(/notices/notice_unauth)', 'Unauthenticated', 'DENY', r3.status);
-
-  const r4 = await firestoreRequest('PATCH', 'admissions/adm_pub1', undefined, { fields: { studentName: { stringValue: 'Applicant One' } } });
-  await recordTest(t++, 'Unauthenticated Submit Admission Enquiry', 'setDoc(/admissions/adm_pub1)', 'Unauthenticated', 'ALLOW', r4.status);
-
-  const r5 = await firestoreRequest('PATCH', 'contact_enquiries/cq_pub1', undefined, { fields: { message: { stringValue: 'Inquiry message' } } });
-  await recordTest(t++, 'Unauthenticated Submit Contact Enquiry', 'setDoc(/contact_enquiries/cq_pub1)', 'Unauthenticated', 'ALLOW', r5.status);
-
-  const r6 = await firestoreRequest('GET', 'notices/notice_pub1');
-  await recordTest(t++, 'Unauthenticated Read Public Notice', 'getDoc(/notices/notice_pub1)', 'Unauthenticated', 'ALLOW', r6.status);
-
-  // 2. Admin permissions
-  const adminHeader = mockTokenHeader('admin_primary', 'rahulsah4534@gmail.com');
-
-  const r7 = await firestoreRequest('GET', 'users/student_own', adminHeader);
-  await recordTest(t++, 'Admin Read Student Profile', 'getDoc(/users/student_own)', 'Admin (rahulsah4534@gmail.com)', 'ALLOW', r7.status);
-
-  const r8 = await firestoreRequest('GET', 'results/res_101', adminHeader);
-  await recordTest(t++, 'Admin Direct Read Results Collection', 'getDoc(/results/res_101)', 'Admin', 'ALLOW', r8.status);
-
-  const r9 = await firestoreRequest('PATCH', 'classes/class_10a', adminHeader, { fields: { className: { stringValue: 'Grade 10-A' } } });
-  await recordTest(t++, 'Admin Write Academic Class', 'setDoc(/classes/class_10a)', 'Admin', 'ALLOW', r9.status);
-
-  const r10 = await firestoreRequest('GET', 'cash_ledger/ledger_001', adminHeader);
-  await recordTest(t++, 'Admin Read Cash Ledger Financial Record', 'getDoc(/cash_ledger/ledger_001)', 'Admin', 'ALLOW', r10.status);
-
-  // 3. Assigned Class Teacher permissions
-  const teacherAssignedHeader = mockTokenHeader('teacher_assigned', 'teacher1@shikshantar.edu.np');
-
-  const r11 = await firestoreRequest('GET', 'students/student_own', teacherAssignedHeader);
-  await recordTest(t++, 'Teacher Read Student Record', 'getDoc(/students/student_own)', 'Teacher (Assigned)', 'ALLOW', r11.status);
-
-  const r12 = await firestoreRequest('GET', 'classes/class_10a', teacherAssignedHeader);
-  await recordTest(t++, 'Teacher Read Class Structure', 'getDoc(/classes/class_10a)', 'Teacher', 'ALLOW', r12.status);
-
-  const r13 = await firestoreRequest('PATCH', 'results/res_101', teacherAssignedHeader, { fields: { marks: { integerValue: 95 } } });
-  await recordTest(t++, 'Teacher Direct Write to Results (Denied)', 'setDoc(/results/res_101)', 'Teacher', 'DENY', r13.status);
-
-  // 4. Assigned Subject Teacher permissions
-  const r14 = await firestoreRequest('GET', 'exams/exam_term1', teacherAssignedHeader);
-  await recordTest(t++, 'Subject Teacher Read Exam Metadata', 'getDoc(/exams/exam_term1)', 'Teacher', 'ALLOW', r14.status);
-
-  const r15 = await firestoreRequest('GET', 'subjectConfigs/config_math', teacherAssignedHeader);
-  await recordTest(t++, 'Subject Teacher Read Subject Config', 'getDoc(/subjectConfigs/config_math)', 'Teacher', 'ALLOW', r15.status);
-
-  // 5. Unassigned Teacher restrictions
-  const teacherUnassignedHeader = mockTokenHeader('teacher_unassigned', 'teacher2@shikshantar.edu.np');
-
-  const r16 = await firestoreRequest('GET', 'salary_records/sal_teacher_assigned', teacherUnassignedHeader);
-  await recordTest(t++, 'Unassigned Teacher Read Other Salary Record', 'getDoc(/salary_records/sal_teacher_assigned)', 'Teacher (Unassigned)', 'DENY', r16.status);
-
-  const r17 = await firestoreRequest('GET', 'salary_records/sal_teacher_unassigned', teacherUnassignedHeader);
-  await recordTest(t++, 'Teacher Read Own Salary Record', 'getDoc(/salary_records/sal_teacher_unassigned)', 'Teacher (Self)', 'ALLOW', r17.status);
-
-  const r18 = await firestoreRequest('GET', 'cash_ledger/ledger_001', teacherAssignedHeader);
-  await recordTest(t++, 'Teacher Access Financial Cash Ledger', 'getDoc(/cash_ledger/ledger_001)', 'Teacher', 'DENY', r18.status);
-
-  // 6. Student access to own profile & session
-  const studentOwnHeader = mockTokenHeader('student_own', 'student1@shikshantar.edu.np');
-
-  const r19 = await firestoreRequest('GET', 'results/res_101', studentOwnHeader);
-  await recordTest(t++, 'Student Direct Read Results Collection (Denied)', 'getDoc(/results/res_101)', 'Student (Self)', 'DENY', r19.status);
-
-  const r20 = await firestoreRequest('GET', 'users/student_own', studentOwnHeader);
-  await recordTest(t++, 'Student Read Own Profile', 'getDoc(/users/student_own)', 'Student (Self)', 'ALLOW', r20.status);
-
-  const r21 = await firestoreRequest('GET', 'user_sessions/sess_student_own', studentOwnHeader);
-  await recordTest(t++, 'Student Read Own Session', 'getDoc(/user_sessions/sess_student_own)', 'Student (Self)', 'ALLOW', r21.status);
-
-  // 7. Student access to another student's results & profile
-  const r22 = await firestoreRequest('GET', 'users/student_other', studentOwnHeader);
-  await recordTest(t++, 'Student Read Other Student Profile (Roster Leak)', 'getDoc(/users/student_other)', 'Student', 'DENY', r22.status);
-
-  // 8. Parent access to unrelated students
-  const parentLinkedHeader = mockTokenHeader('parent_linked', 'parent1@shikshantar.edu.np');
-
-  const r23 = await firestoreRequest('GET', 'users/student_other', parentLinkedHeader);
-  await recordTest(t++, 'Parent Read Unrelated Student Profile', 'getDoc(/users/student_other)', 'Parent', 'DENY', r23.status);
-
-  const r24 = await firestoreRequest('GET', 'results/res_101', parentLinkedHeader);
-  await recordTest(t++, 'Parent Direct Read Results Collection', 'getDoc(/results/res_101)', 'Parent', 'DENY', r24.status);
-
-  // 9. Direct client writes to ALL protected result collections
-  const collectionsToTest = [
-    'results/res_test',
-    'academicResults/res_test',
-    'resultSummary/sum_test',
-    'publicationManifests/manifest_test',
-    'exam_subject_status/status_test',
-    'class_reviews/rev_test',
-    'resultHistory/hist_test',
-    'auditLogs/log_test'
-  ];
-
-  for (const cPath of collectionsToTest) {
-    const resWrite = await firestoreRequest('PATCH', cPath, studentOwnHeader, { fields: { fakeData: { stringValue: 'tampered' } } });
-    await recordTest(t++, `Direct Client Write to /${cPath.split('/')[0]}`, `setDoc(/${cPath})`, 'Student/Client SDK', 'DENY', resWrite.status);
-  }
-
-  // 10. User roster privacy
-  const r25 = await firestoreRequest('GET', 'users/teacher_assigned', studentOwnHeader);
-  await recordTest(t++, 'Student Read Teacher Profile (Roster Privacy)', 'getDoc(/users/teacher_assigned)', 'Student', 'DENY', r25.status);
-
-  // 11. Admissions & Contact submissions
-  const r26 = await firestoreRequest('GET', 'admissions/adm_pub1', studentOwnHeader);
-  await recordTest(t++, 'Non-Admin Read Submitted Admissions', 'getDoc(/admissions/adm_pub1)', 'Student', 'DENY', r26.status);
-
-  const r27 = await firestoreRequest('GET', 'admissions/adm_pub1', adminHeader);
-  await recordTest(t++, 'Admin Read Submitted Admissions', 'getDoc(/admissions/adm_pub1)', 'Admin', 'ALLOW', r27.status);
-
-  // 12. Notice & Custom subject permissions
-  const r28 = await firestoreRequest('GET', 'custom_subjects/cs1', studentOwnHeader);
-  await recordTest(t++, 'Signed-In Student Read Custom Subjects', 'getDoc(/custom_subjects/cs1)', 'Student', 'ALLOW', r28.status);
-
-  const r29 = await firestoreRequest('PATCH', 'custom_subjects/cs2', studentOwnHeader, { fields: { name: { stringValue: 'Astronomy' } } });
-  await recordTest(t++, 'Student Write Custom Subject', 'setDoc(/custom_subjects/cs2)', 'Student', 'DENY', r29.status);
-
-  const r30 = await firestoreRequest('PATCH', 'custom_subjects/cs2', adminHeader, { fields: { name: { stringValue: 'Astronomy' } } });
-  await recordTest(t++, 'Admin Write Custom Subject', 'setDoc(/custom_subjects/cs2)', 'Admin', 'ALLOW', r30.status);
-
-  // 13. Default-deny behavior
-  const r31 = await firestoreRequest('GET', 'unmapped_secret_collection/doc1', studentOwnHeader);
-  await recordTest(t++, 'Default-Deny Read Arbitrary Collection', 'getDoc(/unmapped_secret_collection/doc1)', 'Student', 'DENY', r31.status);
-
-  const r32 = await firestoreRequest('PATCH', 'unmapped_secret_collection/doc1', studentOwnHeader, { fields: { val: { stringValue: 'x' } } });
-  await recordTest(t++, 'Default-Deny Write Arbitrary Collection', 'setDoc(/unmapped_secret_collection/doc1)', 'Student', 'DENY', r32.status);
-
-  // SUMMARY
-  const total = records.length;
-  const passed = records.filter(r => r.status === 'PASS').length;
-  const failed = records.filter(r => r.status === 'FAIL').length;
-
-  console.log('\n===================================================================================');
-  console.log(`EMULATOR SECURITY TEST SUITE COMPLETE`);
-  console.log(`Total Scenarios: ${total} | Passed: ${passed} | Failed: ${failed}`);
+  console.log('===================================================================================');
+  console.log('STARTING FIRESTORE EMULATOR SECURITY TEST SUITE (40 SCENARIOS)');
+  console.log(`Target Emulator Host: ${emuHost}:${emuPort}`);
+  console.log(`Project ID: ${PROJECT_ID}`);
+  console.log(`Loaded firestore.rules (${rulesContent.length} bytes, ${rulesLines} lines)`);
   console.log('===================================================================================\n');
 
-  return { total, passed, failed, records };
+  const testEnv: RulesTestEnvironment = await initializeTestEnvironment({
+    projectId: PROJECT_ID,
+    firestore: {
+      rules: rulesContent,
+      host: emuHost || '127.0.0.1',
+      port: emuPort,
+    },
+  });
+
+  try {
+    // Seed realistic fixture documents with security rules disabled (Admin SDK equivalent)
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+
+      await db.collection('users').doc('admin_primary').set({
+        role: 'admin',
+        adminTier: 'primary',
+        status: 'ACTIVE',
+        active: true,
+        email: 'rahulsah4534@gmail.com',
+      });
+      await db.collection('users').doc('teacher_assigned').set({
+        role: 'teacher',
+        status: 'ACTIVE',
+        active: true,
+        email: 'teacher1@shikshantar.edu.np',
+        primaryClassTeacher: '10',
+        primaryClassTeacherYear: '2082 BS',
+        primaryClassTeacherSection: 'A',
+        assignmentKeys: ['10_Mathematics_A_2082 BS'],
+      });
+      await db.collection('users').doc('teacher_unassigned').set({
+        role: 'teacher',
+        status: 'ACTIVE',
+        active: true,
+        email: 'teacher2@shikshantar.edu.np',
+        primaryClassTeacher: '8',
+        primaryClassTeacherYear: '2082 BS',
+        primaryClassTeacherSection: 'B',
+        assignmentKeys: ['8_Science_B_2082 BS'],
+      });
+      await db.collection('users').doc('student_own').set({
+        role: 'student',
+        status: 'ACTIVE',
+        active: true,
+        email: 'student1@shikshantar.edu.np',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+      });
+      await db.collection('users').doc('student_other').set({
+        role: 'student',
+        status: 'ACTIVE',
+        active: true,
+        email: 'student2@shikshantar.edu.np',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+      });
+
+      await db.collection('students').doc('student_own').set({
+        studentUid: 'student_own',
+        name: 'Aarav Sharma',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+      });
+
+      await db.collection('notices').doc('notice_pub1').set({
+        title: 'Annual Exam Schedule',
+        isPublished: true,
+      });
+      await db.collection('academic_years').doc('2082').set({
+        bsYear: 2082,
+        name: '2082 BS',
+        isCurrent: true,
+      });
+      await db.collection('admissions').doc('adm_pub1').set({
+        studentName: 'Applicant One',
+        status: 'pending',
+      });
+      await db.collection('custom_subjects').doc('cs1').set({
+        name: 'Robotics',
+        status: 'ACTIVE',
+      });
+      await db.collection('cash_ledger').doc('ledger_001').set({
+        amount: 12000,
+        type: 'CREDIT',
+      });
+      await db.collection('audit_logs').doc('log_001').set({
+        actionType: 'RESULT_PUBLISH',
+        actorUid: 'admin_primary',
+      });
+      await db.collection('salary_records').doc('sal_teacher_assigned').set({
+        teacherId: 'teacher_assigned',
+        amount: 50000,
+      });
+      await db.collection('salary_records').doc('sal_teacher_unassigned').set({
+        teacherId: 'teacher_unassigned',
+        amount: 45000,
+      });
+      await db.collection('user_sessions').doc('sess_student_own').set({
+        userUid: 'student_own',
+        active: true,
+      });
+      await db.collection('exams').doc('exam_t1').set({
+        id: 'exam_t1',
+        name: 'First Term 2082',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+        status: 'DRAFT',
+        published: false,
+      });
+      await db.collection('exams').doc('exam_pub').set({
+        id: 'exam_pub',
+        name: 'Final Term 2082',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+        status: 'PUBLISHED',
+        published: true,
+      });
+      await db.collection('results').doc('exam_t1_student_own_Mathematics').set({
+        examId: 'exam_t1',
+        studentUid: 'student_own',
+        subjectKey: 'Mathematics',
+        subject: 'Mathematics',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+        thMarks: 68,
+        prMarks: 22,
+        published: false,
+      });
+      await db.collection('results').doc('exam_pub_student_own_Mathematics').set({
+        examId: 'exam_pub',
+        studentUid: 'student_own',
+        subjectKey: 'Mathematics',
+        subject: 'Mathematics',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+        thMarks: 70,
+        prMarks: 24,
+        published: true,
+      });
+      await db.collection('results').doc('exam_pub_student_other_Mathematics').set({
+        examId: 'exam_pub',
+        studentUid: 'student_other',
+        subjectKey: 'Mathematics',
+        subject: 'Mathematics',
+        class: '10',
+        section: 'A',
+        academicYear: '2082 BS',
+        thMarks: 65,
+        prMarks: 20,
+        published: true,
+      });
+      await db.collection('notifications').doc('notif_student_own').set({
+        recipientUid: 'student_own',
+        recipientRole: 'student',
+        type: 'RESULT_PUBLISHED',
+        title: 'Result Published',
+        message: 'Your result is live.',
+        link: '/dashboard',
+        eventId: 'evt_1',
+        read: false,
+      });
+      await db.collection('notifications').doc('notif_other').set({
+        recipientUid: 'student_other',
+        recipientRole: 'student',
+        type: 'RESULT_PUBLISHED',
+        title: 'Result Published',
+        message: 'Private notification.',
+        link: '/dashboard',
+        eventId: 'evt_2',
+        read: false,
+      });
+      await db.collection('unmapped_secret_collection').doc('doc1').set({
+        secret: 'classified',
+      });
+    });
+
+    const unauthDb = testEnv.unauthenticatedContext().firestore();
+    const adminDb = testEnv
+      .authenticatedContext('admin_primary', {
+        email: 'rahulsah4534@gmail.com',
+        email_verified: true,
+      })
+      .firestore();
+    const teacherAssignedDb = testEnv
+      .authenticatedContext('teacher_assigned', {
+        email: 'teacher1@shikshantar.edu.np',
+        email_verified: true,
+      })
+      .firestore();
+    const teacherUnassignedDb = testEnv
+      .authenticatedContext('teacher_unassigned', {
+        email: 'teacher2@shikshantar.edu.np',
+        email_verified: true,
+      })
+      .firestore();
+    const studentOwnDb = testEnv
+      .authenticatedContext('student_own', {
+        email: 'student1@shikshantar.edu.np',
+        email_verified: true,
+      })
+      .firestore();
+
+    let t = 1;
+
+    // 1–7: Unauthenticated Boundaries
+    await runCase(t++, 'Unauthenticated Read User Profile', 'get(/users/admin_primary)', 'Unauthenticated', 'DENY', () =>
+      unauthDb.collection('users').doc('admin_primary').get()
+    );
+    await runCase(t++, 'Unauthenticated Read Results', 'get(/results/exam_t1_student_own_Mathematics)', 'Unauthenticated', 'DENY', () =>
+      unauthDb.collection('results').doc('exam_t1_student_own_Mathematics').get()
+    );
+    await runCase(t++, 'Unauthenticated Direct Write Notice', 'set(/notices/notice_unauth)', 'Unauthenticated', 'DENY', () =>
+      unauthDb.collection('notices').doc('notice_unauth').set({ title: 'Tampered' })
+    );
+    await runCase(t++, 'Unauthenticated Direct Write Admission (Server-Only)', 'set(/admissions/adm_unauth)', 'Unauthenticated', 'DENY', () =>
+      unauthDb.collection('admissions').doc('adm_unauth').set({ studentName: 'Bot' })
+    );
+    await runCase(t++, 'Unauthenticated Direct Write Contact (Server-Only)', 'set(/contact_enquiries/cq_unauth)', 'Unauthenticated', 'DENY', () =>
+      unauthDb.collection('contact_enquiries').doc('cq_unauth').set({ message: 'Spam' })
+    );
+    await runCase(t++, 'Unauthenticated Read Public Notice', 'get(/notices/notice_pub1)', 'Unauthenticated', 'ALLOW', () =>
+      unauthDb.collection('notices').doc('notice_pub1').get()
+    );
+    await runCase(t++, 'Unauthenticated Read Public Academic Year', 'get(/academic_years/2082)', 'Unauthenticated', 'ALLOW', () =>
+      unauthDb.collection('academic_years').doc('2082').get()
+    );
+
+    // 8–16: Admin Permissions & Immutable Server-Only Logs
+    await runCase(t++, 'Admin Read Student Profile', 'get(/users/student_own)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('users').doc('student_own').get()
+    );
+    await runCase(t++, 'Admin Read Results Collection', 'get(/results/exam_t1_student_own_Mathematics)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('results').doc('exam_t1_student_own_Mathematics').get()
+    );
+    await runCase(t++, 'Admin Write Public Notice', 'set(/notices/notice_admin1)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('notices').doc('notice_admin1').set({ title: 'Holiday Notice', isPublished: true })
+    );
+    await runCase(t++, 'Admin Read Cash Ledger Financial Record', 'get(/cash_ledger/ledger_001)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('cash_ledger').doc('ledger_001').get()
+    );
+    await runCase(t++, 'Admin Read Submitted Admissions', 'get(/admissions/adm_pub1)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('admissions').doc('adm_pub1').get()
+    );
+    await runCase(t++, 'Admin Write Custom Subject', 'set(/custom_subjects/cs_admin)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('custom_subjects').doc('cs_admin').set({ name: 'Astronomy', status: 'ACTIVE' })
+    );
+    await runCase(t++, 'Admin Read Audit Logs', 'get(/audit_logs/log_001)', 'Admin', 'ALLOW', () =>
+      adminDb.collection('audit_logs').doc('log_001').get()
+    );
+    await runCase(t++, 'Admin Direct Client Write Audit Logs (Immutable)', 'set(/audit_logs/log_tamper)', 'Admin', 'DENY', () =>
+      adminDb.collection('audit_logs').doc('log_tamper').set({ actionType: 'FAKE' })
+    );
+    await runCase(t++, 'Admin Direct Client Write Ledger Audit Logs (Immutable)', 'set(/ledger_audit_logs/log_tamper)', 'Admin', 'DENY', () =>
+      adminDb.collection('ledger_audit_logs').doc('log_tamper').set({ actionType: 'FAKE' })
+    );
+
+    // 17–23: Teacher RBAC & Scope Isolation
+    await runCase(t++, 'Assigned Class Teacher Read Own Class Student', 'get(/students/student_own)', 'Teacher (Assigned)', 'ALLOW', () =>
+      teacherAssignedDb.collection('students').doc('student_own').get()
+    );
+    await runCase(t++, 'Unassigned Teacher Read Other Class Student', 'get(/students/student_own)', 'Teacher (Unassigned)', 'DENY', () =>
+      teacherUnassignedDb.collection('students').doc('student_own').get()
+    );
+    await runCase(t++, 'Teacher Read Exam Metadata', 'get(/exams/exam_t1)', 'Teacher', 'ALLOW', () =>
+      teacherAssignedDb.collection('exams').doc('exam_t1').get()
+    );
+    await runCase(t++, 'Teacher Direct Invalid Write to Results', 'set(/results/res_invalid)', 'Teacher', 'DENY', () =>
+      teacherAssignedDb.collection('results').doc('res_invalid').set({ marks: 99, published: true })
+    );
+    await runCase(t++, 'Teacher Read Own Salary Record', 'get(/salary_records/sal_teacher_unassigned)', 'Teacher (Self)', 'ALLOW', () =>
+      teacherUnassignedDb.collection('salary_records').doc('sal_teacher_unassigned').get()
+    );
+    await runCase(t++, 'Unassigned Teacher Read Other Teacher Salary', 'get(/salary_records/sal_teacher_assigned)', 'Teacher (Other)', 'DENY', () =>
+      teacherUnassignedDb.collection('salary_records').doc('sal_teacher_assigned').get()
+    );
+    await runCase(t++, 'Teacher Access Financial Cash Ledger', 'get(/cash_ledger/ledger_001)', 'Teacher', 'DENY', () =>
+      teacherAssignedDb.collection('cash_ledger').doc('ledger_001').get()
+    );
+
+    // 24–38: Student Privacy, Anti-Escalation, Results, Sessions & Notifications
+    await runCase(t++, 'Student Read Own Profile', 'get(/users/student_own)', 'Student (Self)', 'ALLOW', () =>
+      studentOwnDb.collection('users').doc('student_own').get()
+    );
+    await runCase(t++, 'Student Read Other Student Profile (Roster Privacy)', 'get(/users/student_other)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('users').doc('student_other').get()
+    );
+    await runCase(t++, 'Student Read Teacher Profile (Roster Privacy)', 'get(/users/teacher_assigned)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('users').doc('teacher_assigned').get()
+    );
+    await runCase(t++, 'Student Self-Escalate Role to Admin', 'update(/users/student_own)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('users').doc('student_own').update({ role: 'admin', adminTier: 'primary' })
+    );
+    await runCase(t++, 'Student Read Own Session', 'get(/user_sessions/sess_student_own)', 'Student (Self)', 'ALLOW', () =>
+      studentOwnDb.collection('user_sessions').doc('sess_student_own').get()
+    );
+    await runCase(t++, 'Student Direct Tamper Own Session (Server-Only)', 'update(/user_sessions/sess_student_own)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('user_sessions').doc('sess_student_own').update({ active: false })
+    );
+    await runCase(t++, 'Student Read Unpublished Draft Result', 'get(/results/exam_t1_student_own_Mathematics)', 'Student (Self)', 'DENY', () =>
+      studentOwnDb.collection('results').doc('exam_t1_student_own_Mathematics').get()
+    );
+    await runCase(t++, 'Student Read Own Published Result', 'get(/results/exam_pub_student_own_Mathematics)', 'Student (Self)', 'ALLOW', () =>
+      studentOwnDb.collection('results').doc('exam_pub_student_own_Mathematics').get()
+    );
+    await runCase(t++, 'Student Read Other Student Published Result', 'get(/results/exam_pub_student_other_Mathematics)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('results').doc('exam_pub_student_other_Mathematics').get()
+    );
+    await runCase(t++, 'Student Direct Client Write to Results', 'set(/results/res_tamper)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('results').doc('res_tamper').set({ thMarks: 100, published: true })
+    );
+    await runCase(t++, 'Student Direct Client Write to ResultSummary', 'set(/resultSummary/sum_tamper)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('resultSummary').doc('sum_tamper').set({ percentage: 100, published: true })
+    );
+    await runCase(t++, 'Student Read Own Notification', 'get(/notifications/notif_student_own)', 'Student (Self)', 'ALLOW', () =>
+      studentOwnDb.collection('notifications').doc('notif_student_own').get()
+    );
+    await runCase(t++, 'Student Read Other User Notification', 'get(/notifications/notif_other)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('notifications').doc('notif_other').get()
+    );
+    await runCase(t++, 'Signed-In Student Read Custom Subjects', 'get(/custom_subjects/cs1)', 'Student', 'ALLOW', () =>
+      studentOwnDb.collection('custom_subjects').doc('cs1').get()
+    );
+    await runCase(t++, 'Student Write Custom Subject', 'set(/custom_subjects/cs_student)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('custom_subjects').doc('cs_student').set({ name: 'Hacked' })
+    );
+
+    // 39–40: Fail-Closed Default-Deny
+    await runCase(t++, 'Default-Deny Read Unmapped Collection', 'get(/unmapped_secret_collection/doc1)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('unmapped_secret_collection').doc('doc1').get()
+    );
+    await runCase(t++, 'Default-Deny Write Unmapped Collection', 'set(/unmapped_secret_collection/doc1)', 'Student', 'DENY', () =>
+      studentOwnDb.collection('unmapped_secret_collection').doc('doc1').set({ val: 'x' })
+    );
+
+    const total = records.length;
+    const passed = records.filter((r) => r.status === 'PASS').length;
+    const failed = records.filter((r) => r.status === 'FAIL').length;
+
+    console.log('\n===================================================================================');
+    console.log('EMULATOR SECURITY TEST SUITE COMPLETE');
+    console.log(`Total Scenarios: ${total} | Passed: ${passed} | Failed: ${failed}`);
+    console.log('===================================================================================\n');
+
+    return { total, passed, failed, records };
+  } finally {
+    await testEnv.cleanup();
+  }
 }
 
-// Execute and save JSON evidence
-runSecurityTestSuite().then((res) => {
-  const outputPath = path.resolve(__dirname, 'emulator_test_results.json');
-  fs.writeFileSync(
-    outputPath,
-    JSON.stringify(res, null, 2)
-  );
-  if (res.failed > 0) {
-    process.exit(1);
-  } else {
-    process.exit(0);
-  }
-}).catch((err) => {
-  console.error('Fatal error running security suite:', err);
-  try {
+runSecurityTestSuite()
+  .then((res) => {
     const outputPath = path.resolve(__dirname, 'emulator_test_results.json');
-    fs.writeFileSync(
-      outputPath,
-      JSON.stringify({
-        total: records.length,
-        passed: records.filter(r => r.status === 'PASS').length,
-        failed: records.filter(r => r.status === 'FAIL').length + 1,
-        fatalError: err.message || String(err),
-        records
-      }, null, 2)
-    );
-  } catch (writeErr) {
-    console.error('Failed writing fallback diagnostic JSON:', writeErr);
-  }
-  process.exit(1);
-});
-
+    fs.writeFileSync(outputPath, JSON.stringify(res, null, 2));
+    process.exit(res.failed > 0 ? 1 : 0);
+  })
+  .catch((err) => {
+    console.error('Fatal error running security suite:', err);
+    try {
+      const outputPath = path.resolve(__dirname, 'emulator_test_results.json');
+      fs.writeFileSync(
+        outputPath,
+        JSON.stringify(
+          {
+            total: records.length,
+            passed: records.filter((r) => r.status === 'PASS').length,
+            failed: records.filter((r) => r.status === 'FAIL').length + 1,
+            fatalError: err?.message || String(err),
+            records,
+          },
+          null,
+          2
+        )
+      );
+    } catch (writeErr) {
+      console.error('Failed writing fallback diagnostic JSON:', writeErr);
+    }
+    process.exit(1);
+  });
