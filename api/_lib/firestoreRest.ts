@@ -60,6 +60,37 @@ export function isAdminCredentialError(err: any): boolean {
   );
 }
 
+let cachedAdminCredsUnavailable = false;
+
+export function hasExplicitAdminCredentialsEnv(): boolean {
+  return Boolean(
+    String(process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '').trim() ||
+    String(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').trim() ||
+    (String(process.env.FIREBASE_CLIENT_EMAIL || '').trim() && String(process.env.FIREBASE_PRIVATE_KEY || '').trim()) ||
+    String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim() ||
+    process.env.USE_FIREBASE_EMULATOR === 'true' ||
+    Boolean(process.env.FIRESTORE_EMULATOR_HOST)
+  );
+}
+
+/**
+ * Returns true immediately on Vercel (or after any Admin SDK credential failure)
+ * when no GCP service account key is configured, avoiding 4-5s GCE metadata
+ * server timeouts on every single Firestore/Auth operation.
+ */
+export function shouldSkipAdminFirestore(): boolean {
+  if (cachedAdminCredsUnavailable) return true;
+  if (hasExplicitAdminCredentialsEnv()) return false;
+  if (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV)) {
+    return true;
+  }
+  return false;
+}
+
+export function markAdminCredentialsUnavailable(): void {
+  cachedAdminCredsUnavailable = true;
+}
+
 // ============================================================
 // Firestore REST v1 Value Codec
 // ============================================================
@@ -274,6 +305,9 @@ export async function hybridGetDoc(
   collection: string,
   docId: string
 ): Promise<HybridDocResult> {
+  if (idToken && shouldSkipAdminFirestore()) {
+    return restGetDoc(collection, docId, idToken);
+  }
   try {
     const snap = await db.collection(collection).doc(docId).get();
     return {
@@ -284,6 +318,7 @@ export async function hybridGetDoc(
     };
   } catch (err: any) {
     if (!isAdminCredentialError(err) || !idToken) throw err;
+    markAdminCredentialsUnavailable();
     return restGetDoc(collection, docId, idToken);
   }
 }
@@ -296,6 +331,10 @@ export async function hybridSetDoc(
   data: Record<string, any>,
   options?: { merge?: boolean }
 ): Promise<{ viaRest: boolean }> {
+  if (idToken && shouldSkipAdminFirestore()) {
+    await restSetDoc(collection, docId, data, idToken, options);
+    return { viaRest: true };
+  }
   try {
     if (options?.merge) {
       await db.collection(collection).doc(docId).set(data, { merge: true });
@@ -305,6 +344,7 @@ export async function hybridSetDoc(
     return { viaRest: false };
   } catch (err: any) {
     if (!isAdminCredentialError(err) || !idToken) throw err;
+    markAdminCredentialsUnavailable();
     await restSetDoc(collection, docId, data, idToken, options);
     return { viaRest: true };
   }
@@ -317,6 +357,10 @@ export async function hybridQueryEq(
   field: string,
   value: string | number | boolean
 ): Promise<{ docs: Array<{ id: string; data: Record<string, any> }>; viaRest: boolean }> {
+  if (idToken && shouldSkipAdminFirestore()) {
+    const docs = await restQueryEq(collection, field, value, idToken);
+    return { docs, viaRest: true };
+  }
   try {
     const snap = await db.collection(collection).where(field, '==', value).get();
     return {
@@ -328,6 +372,7 @@ export async function hybridQueryEq(
     };
   } catch (err: any) {
     if (!isAdminCredentialError(err) || !idToken) throw err;
+    markAdminCredentialsUnavailable();
     const docs = await restQueryEq(collection, field, value, idToken);
     return { docs, viaRest: true };
   }

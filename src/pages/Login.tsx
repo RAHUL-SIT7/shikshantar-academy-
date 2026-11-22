@@ -144,6 +144,10 @@ export default function Login({ setIsAuthenticated }: { setIsAuthenticated?: (va
       setError('Your session has expired due to inactivity. Please sign in again.');
     } else if (reason === 'manual') {
       setMessage('You have been signed out successfully.');
+    } else if (reason === 'device_verification_cancelled') {
+      setMessage('Device verification was cancelled. You have been signed out safely.');
+    } else if (reason === 'device_verification_error') {
+      setError('Device verification could not be completed. Please sign in again.');
     }
   }, [searchParams]);
 

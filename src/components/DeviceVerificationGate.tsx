@@ -1,17 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck,
-  Mail,
   Monitor,
   MapPin,
-  Globe,
   RefreshCw,
   LogOut,
   AlertCircle,
   CheckCircle2,
-  Lock
+  MailWarning
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+
+type DeliveryState = 'sent' | 'failed' | 'unconfigured';
 
 export default function DeviceVerificationGate() {
   const {
@@ -27,8 +27,23 @@ export default function DeviceVerificationGate() {
   const [trustDevice, setTrustDevice] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const [deliveryState, setDeliveryState] = useState<DeliveryState>(() => {
+    if (deviceVerificationMeta?.smtpNotConfigured) return 'unconfigured';
+    if (deviceVerificationMeta?.emailDispatched === false) return 'failed';
+    return 'sent';
+  });
+  const [deliveryHint, setDeliveryHint] = useState<string>(
+    deviceVerificationMeta?.emailErrorHint || ''
+  );
+  const [activeSenderEmail, setActiveSenderEmail] = useState<string>(
+    deviceVerificationMeta?.senderEmail || 'securityalerts@shikshantaracademy.edu.np'
+  );
   const [resendCooldown, setResendCooldown] = useState<number>(
     deviceVerificationMeta?.resendCooldownSeconds ?? 60
   );
@@ -43,7 +58,26 @@ export default function DeviceVerificationGate() {
     if (deviceVerificationMeta?.challengeToken) {
       setActiveChallengeToken(deviceVerificationMeta.challengeToken);
     }
-  }, [deviceVerificationMeta?.sessionId, deviceVerificationMeta?.challengeToken]);
+    if (deviceVerificationMeta?.senderEmail) {
+      setActiveSenderEmail(deviceVerificationMeta.senderEmail);
+    }
+    if (deviceVerificationMeta?.smtpNotConfigured) {
+      setDeliveryState('unconfigured');
+    } else if (deviceVerificationMeta?.emailDispatched === false) {
+      setDeliveryState('failed');
+    } else {
+      setDeliveryState('sent');
+    }
+    setDeliveryHint(deviceVerificationMeta?.emailErrorHint || '');
+  }, [
+    deviceVerificationMeta?.sessionId,
+    deviceVerificationMeta?.challengeToken,
+    deviceVerificationMeta?.emailDispatched,
+    deviceVerificationMeta?.smtpNotConfigured,
+    deviceVerificationMeta?.emailErrorHint,
+    deviceVerificationMeta?.senderEmail,
+    deviceVerificationMeta?.resendCooldownSeconds
+  ]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -117,9 +151,9 @@ export default function DeviceVerificationGate() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || submitting || signingOut) return;
     if (codeValue.length !== 6) {
-      setError('Please enter all 6 digits of your security code.');
+      setError('Please enter all 6 digits of your verification code.');
       return;
     }
 
@@ -156,14 +190,14 @@ export default function DeviceVerificationGate() {
 
       completeDeviceVerification(body?.deviceTrustToken || null);
     } catch {
-      setError('Network error while verifying security code. Please try again.');
+      setError('Network error while verifying your code. Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleResend = async () => {
-    if (!user || resendCooldown > 0 || resending) return;
+    if (!user || resendCooldown > 0 || resending || signingOut) return;
     setResending(true);
     setError(null);
     setStatusMessage(null);
@@ -195,164 +229,184 @@ export default function DeviceVerificationGate() {
       if (typeof body?.challengeToken === 'string' && body.challengeToken) {
         setActiveChallengeToken(body.challengeToken);
       }
+      if (typeof body?.senderEmail === 'string' && body.senderEmail) {
+        setActiveSenderEmail(body.senderEmail);
+      }
       setDigits(['', '', '', '', '', '']);
       setResendCooldown(body?.resendCooldownSeconds ?? 60);
+
       if (body?.smtpNotConfigured) {
-        setError('Outbound SMTP email delivery is not configured in this environment yet.');
+        setDeliveryState('unconfigured');
+        setDeliveryHint(
+          body?.emailErrorHint ||
+            'Outbound email delivery is not configured on this server yet.'
+        );
+      } else if (body?.emailDispatched === false) {
+        setDeliveryState('failed');
+        setDeliveryHint(
+          body?.emailErrorHint ||
+            'Email delivery failed on the mail server. Please check SMTP credentials or retry shortly.'
+        );
       } else {
-        setStatusMessage('A fresh 6-digit verification code has been sent to your registered email.');
+        setDeliveryState('sent');
+        setDeliveryHint('');
+        setStatusMessage('A fresh 6-digit verification code has been sent to your inbox.');
       }
       inputRefs.current[0]?.focus();
     } catch {
-      setError('Network error while requesting a new security code.');
+      setError('Network error while requesting a new verification code.');
     } finally {
       setResending(false);
     }
   };
 
-  const reasonBadgeText =
+  const handleCancelAndSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      await logout('device_verification_cancelled');
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  const reasonText =
     deviceVerificationMeta?.reason === 'NEW_LOCATION'
-      ? 'New Location Detected'
+      ? 'New location detected'
       : deviceVerificationMeta?.reason === 'DEVICE_MISMATCH'
-        ? 'Browser / Device Profile Changed'
-        : 'New Browser or Device Detected';
+        ? 'Browser profile changed'
+        : 'New browser detected';
 
   const roleLabel =
     userRole === 'admin'
-      ? 'Administrator Account'
+      ? 'Administrator Security'
       : userRole === 'teacher'
-        ? 'Teacher Account'
-        : 'Student Account';
+        ? 'Faculty Security'
+        : 'Student Security';
+
+  const maskedRecipient = deviceVerificationMeta?.maskedEmail || 'your registered email';
 
   return (
-    <div className="min-h-screen bg-[#06182C] bg-gradient-to-br from-[#041C2E] via-[#0A2540] to-[#0F172A] flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Institutional Header */}
-        <div className="bg-[#0A2540] px-6 py-5 border-b-4 border-[#F1C40F] flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-[#F1C40F]">
-              <ShieldCheck className="w-6 h-6" />
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-6 sm:py-10">
+      <div className="w-full max-w-[464px] bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+        {/* Subtle institutional top rule */}
+        <div className="h-1 bg-[#0A2540]" />
+
+        <div className="p-6 sm:p-8">
+          {/* Genuine School Brand Header */}
+          <div className="flex items-center gap-3.5 pb-5 border-b border-slate-100">
+            <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200/80 p-1.5 flex items-center justify-center shrink-0">
+              {!logoFailed ? (
+                <img
+                  src="/logo.png"
+                  alt="Shikshantar Academy"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain"
+                  onError={() => setLogoFailed(true)}
+                />
+              ) : (
+                <span className="font-display text-sm font-bold text-[#0A2540]">SA</span>
+              )}
             </div>
-            <div>
-              <h1 className="text-base font-extrabold text-white tracking-wide">
-                SHIKSHANTAR ACADEMY
+            <div className="min-w-0">
+              <h1 className="font-display text-[17px] font-bold text-[#0A2540] leading-tight">
+                Shikshantar Academy
               </h1>
-              <p className="text-xs text-slate-300 font-medium">
-                {roleLabel} &bull; Security Verification
+              <p className="text-xs text-slate-500 mt-0.5 truncate">
+                Karjanha Municipality, Bastipur-05, Siraha
               </p>
             </div>
           </div>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-amber-400/20 text-amber-200 border border-amber-300/30">
-            <Lock className="w-3 h-3" />
-            2-Step Gate
-          </span>
-        </div>
 
-        <div className="p-6 sm:p-7">
-          <div className="mb-5">
-            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md mb-2.5">
-              <AlertCircle className="w-3.5 h-3.5" />
-              {reasonBadgeText}
-            </div>
-            <h2 className="text-xl font-bold text-slate-900">
-              Verify this sign-in to continue
+          {/* Title & Context */}
+          <div className="mt-5">
+            <p className="text-xs font-semibold text-slate-500 tracking-wide">
+              {roleLabel} &middot; {reasonText}
+            </p>
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight mt-1">
+              Verify your sign-in
             </h2>
             <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
-              {deviceVerificationMeta?.smtpNotConfigured ? (
+              {deliveryState === 'unconfigured' ? (
                 <>
-                  A 6-digit security code is required for{' '}
-                  <span className="font-semibold text-slate-900">
-                    {deviceVerificationMeta?.maskedEmail || 'your registered email'}
-                  </span>
-                  , but outbound SMTP email delivery is not configured in this environment yet.
+                  A 6-digit code is required for{' '}
+                  <span className="font-semibold text-slate-900">{maskedRecipient}</span>, but
+                  outbound email is not configured on this server.
+                </>
+              ) : deliveryState === 'failed' ? (
+                <>
+                  We attempted to send a 6-digit code to{' '}
+                  <span className="font-semibold text-slate-900">{maskedRecipient}</span>, but the
+                  mail server could not deliver it.
                 </>
               ) : (
                 <>
-                  We sent a 6-digit security code to{' '}
-                  <span className="font-semibold text-slate-900">
-                    {deviceVerificationMeta?.maskedEmail || 'your registered email'}
-                  </span>{' '}
-                  from{' '}
-                  <span className="font-mono text-xs bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded">
-                    {deviceVerificationMeta?.senderEmail || 'securityalerts@shikshantaracademy.edu.np'}
-                  </span>
-                  .
+                  Enter the 6-digit code sent to{' '}
+                  <span className="font-semibold text-slate-900">{maskedRecipient}</span> from{' '}
+                  <span className="font-mono text-xs text-slate-800">{activeSenderEmail}</span>.
                 </>
               )}
             </p>
           </div>
 
-          {/* Detected Sign-In Context */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-            <div className="flex items-start gap-2">
-              <Monitor className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />
-              <div>
-                <div className="text-slate-500 font-medium">Browser &amp; OS</div>
-                <div className="text-slate-900 font-semibold">
-                  {deviceVerificationMeta?.browser || 'Browser'} &bull;{' '}
-                  {deviceVerificationMeta?.os || 'Device'}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-start gap-2">
-              <MapPin className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />
-              <div>
-                <div className="text-slate-500 font-medium">Approx. Location</div>
-                <div className="text-slate-900 font-semibold">
-                  {deviceVerificationMeta?.location || 'Detected Network'}
-                </div>
-              </div>
-            </div>
+          {/* Clean Hairline Context Strip (no nested box) */}
+          <div className="mt-4 py-3 border-y border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600">
+            <span className="inline-flex items-center gap-1.5 font-medium text-slate-800">
+              <Monitor className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              {deviceVerificationMeta?.browser || 'Browser'} &middot;{' '}
+              {deviceVerificationMeta?.os || 'Device'}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              {deviceVerificationMeta?.location || 'Detected Network'}
+            </span>
             {deviceVerificationMeta?.ipAddress && (
-              <div className="flex items-start gap-2 sm:col-span-2 pt-1.5 border-t border-slate-200/80">
-                <Globe className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-slate-500 font-medium">IP Address:</span>
-                  <span className="font-mono text-slate-800 font-semibold">
-                    {deviceVerificationMeta.ipAddress}
-                  </span>
-                </div>
-              </div>
+              <span className="font-mono tabular-nums text-[11px] text-slate-500">
+                IP {deviceVerificationMeta.ipAddress}
+              </span>
             )}
           </div>
 
-          {deviceVerificationMeta?.smtpNotConfigured ? (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-900 flex items-start gap-2">
-              <Mail className="w-4 h-4 shrink-0 mt-0.5 text-red-700" />
-              <span>
-                <strong>Email delivery not configured in this environment:</strong> Configure{' '}
-                <span className="font-mono">SMTP_HOST</span>, <span className="font-mono">SMTP_USER</span>, and{' '}
-                <span className="font-mono">SMTP_PASSWORD</span> on this server so 6-digit security codes are delivered to your inbox.
-              </span>
-            </div>
-          ) : deviceVerificationMeta?.emailDispatched === false && (
-            <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
-              <Mail className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
-              <span>
-                Email delivery encountered a temporary delay. Please click <strong>Resend Code</strong> after a moment if the code does not arrive in your inbox or spam folder.
-              </span>
-            </div>
-          )}
-
-          {error && (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs font-medium text-red-800 flex items-start gap-2">
+          {/* Single Honest Status / Error Slot (never renders contradictory alerts together) */}
+          {error ? (
+            <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200/80 text-xs text-red-800 flex items-start gap-2 leading-relaxed">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
               <span>{error}</span>
             </div>
-          )}
-
-          {statusMessage && (
-            <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800 flex items-start gap-2">
+          ) : deliveryState === 'unconfigured' ? (
+            <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200/80 text-xs text-red-800 flex items-start gap-2 leading-relaxed">
+              <MailWarning className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+              <span>
+                {deliveryHint ||
+                  'Configure RESEND_API_KEY or SMTP_HOST, SMTP_USER, and SMTP_PASSWORD on this server so verification codes can be delivered.'}
+              </span>
+            </div>
+          ) : deliveryState === 'failed' ? (
+            <div className="mt-4 p-3 rounded-lg bg-amber-50 border border-amber-200/90 text-xs text-amber-900 flex items-start gap-2 leading-relaxed">
+              <MailWarning className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
+              <span>
+                {deliveryHint ||
+                  'Email delivery could not complete right now. Please click Resend code below or check your mail server settings.'}
+              </span>
+            </div>
+          ) : statusMessage ? (
+            <div className="mt-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200/80 text-xs text-emerald-800 flex items-start gap-2 leading-relaxed">
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
               <span>{statusMessage}</span>
             </div>
-          )}
+          ) : null}
 
-          <form onSubmit={handleVerify} className="space-y-5">
+          {/* 6-Digit Verification Form */}
+          <form onSubmit={handleVerify} className="mt-5 space-y-5">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
-                Enter 6-Digit Security Code
-              </label>
+              <div className="flex items-baseline justify-between mb-2">
+                <label className="text-xs font-semibold text-slate-700">
+                  6-digit verification code
+                </label>
+                <span className="text-[11px] text-slate-400">Valid for 10 min</span>
+              </div>
               <div className="grid grid-cols-6 gap-2 sm:gap-2.5">
                 {digits.map((digit, idx) => (
                   <input
@@ -365,77 +419,91 @@ export default function DeviceVerificationGate() {
                     autoComplete={idx === 0 ? 'one-time-code' : 'off'}
                     maxLength={6}
                     value={digit}
+                    disabled={submitting || signingOut}
                     onChange={(e) => handleDigitChange(idx, e.target.value)}
                     onKeyDown={(e) => handleKeyDown(idx, e)}
                     onPaste={handlePaste}
-                    aria-label={`Security code digit ${idx + 1}`}
-                    className="h-12 sm:h-14 text-center text-xl sm:text-2xl font-extrabold font-mono text-[#0A2540] bg-white border-2 border-slate-300 rounded-xl focus:border-[#0A3D62] focus:ring-2 focus:ring-[#0A3D62]/20 outline-none transition-all"
+                    aria-label={`Verification code digit ${idx + 1}`}
+                    className="h-12 sm:h-13 text-center text-xl font-bold font-mono tabular-nums text-[#0A2540] bg-white border border-slate-300 rounded-xl focus:border-[#0A2540] focus:ring-2 focus:ring-[#0A2540]/15 outline-none transition-all disabled:bg-slate-50"
                   />
                 ))}
               </div>
-              <p className="text-[11px] text-slate-500 mt-2">
-                Code expires in 10 minutes. You can paste the full 6-digit code directly.
-              </p>
             </div>
 
-            <label className="flex items-start gap-2.5 cursor-pointer select-none bg-slate-50 border border-slate-200 rounded-xl p-3">
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={trustDevice}
+                disabled={submitting || signingOut}
                 onChange={(e) => setTrustDevice(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#0A3D62] focus:ring-[#0A3D62]"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#0A2540] focus:ring-[#0A2540]"
               />
-              <span className="text-xs text-slate-700 leading-snug">
-                <strong className="text-slate-900 block">Trust this browser for 30 days</strong>
-                Future sign-ins from this browser &amp; location will skip verification automatically.
+              <span className="text-xs text-slate-600 leading-relaxed">
+                <span className="font-semibold text-slate-800">Trust this browser for 30 days.</span>{' '}
+                Skip verification on future sign-ins from this browser.
               </span>
             </label>
 
             <button
               type="submit"
-              disabled={submitting || codeValue.length !== 6}
-              className="w-full py-3 px-4 rounded-xl bg-[#0A3D62] hover:bg-[#041C2E] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-sm shadow-sm transition-colors flex items-center justify-center gap-2"
+              disabled={submitting || signingOut || codeValue.length !== 6}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#0A2540] hover:bg-[#06182C] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
               {submitting ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Verifying Code...
+                  Verifying...
                 </>
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4" />
-                  Verify &amp; Continue to Portal
+                  Verify &amp; Continue
                 </>
               )}
             </button>
           </form>
 
-          <div className="mt-5 pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+          {/* Footer Actions */}
+          <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-3 text-xs">
             <button
               type="button"
               onClick={handleResend}
-              disabled={resendCooldown > 0 || resending}
-              className="inline-flex items-center gap-1.5 font-semibold text-[#0A3D62] hover:text-[#041C2E] disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+              disabled={resendCooldown > 0 || resending || signingOut}
+              className="inline-flex items-center gap-1.5 font-semibold text-[#0A2540] hover:text-[#06182C] disabled:text-slate-400 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${resending ? 'animate-spin' : ''}`} />
               {resendCooldown > 0
-                ? `Resend code in ${resendCooldown}s`
+                ? `Resend in ${resendCooldown}s`
                 : resending
-                  ? 'Sending new code...'
-                  : 'Resend 6-digit code'}
+                  ? 'Sending...'
+                  : 'Resend code'}
             </button>
 
             <button
               type="button"
-              onClick={() => logout('device_verification_cancelled')}
-              className="inline-flex items-center gap-1.5 font-semibold text-slate-600 hover:text-red-700 transition-colors"
+              onClick={handleCancelAndSignOut}
+              disabled={signingOut}
+              className="inline-flex items-center gap-1.5 font-semibold text-slate-500 hover:text-red-700 disabled:opacity-60 transition-colors cursor-pointer"
             >
-              <LogOut className="w-3.5 h-3.5" />
-              Cancel &amp; Sign Out
+              {signingOut ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Signing out...
+                </>
+              ) : (
+                <>
+                  <LogOut className="w-3.5 h-3.5" />
+                  Cancel &amp; Sign Out
+                </>
+              )}
             </button>
           </div>
         </div>
       </div>
+
+      <p className="mt-4 text-[11px] text-slate-400 text-center">
+        Protected portal sign-in &middot; Shikshantar Academy, Siraha
+      </p>
     </div>
   );
 }

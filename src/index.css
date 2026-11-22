@@ -200,3 +200,19 @@
 .animate-rainbow-spin {
   animation: border-rainbow-spin 2.5s linear infinite;
 }
+
+@keyframes indeterminate-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+.animate-indeterminate-progress {
+  animation: indeterminate-progress 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

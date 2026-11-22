@@ -34,7 +34,9 @@ import {
   issueSignedOtpChallengeToken,
   verifySignedOtpChallengeToken,
   resolveTrustedDeviceDocId,
-  isAdminCredentialError
+  isAdminCredentialError,
+  shouldSkipAdminFirestore,
+  markAdminCredentialsUnavailable
 } from './api/_lib/firestoreRest.js';
 
 function parseCookieHeader(req: Request): Record<string, string> {
@@ -71,6 +73,17 @@ async function syncUserSessionState(
     enforceDeviceVerification?: boolean;
   }
 ): Promise<void> {
+  if (shouldSkipAdminFirestore()) {
+    if (opts.enforceDeviceVerification) {
+      try {
+        await hybridSetDoc(db, idToken, 'users', uid, { deviceVerificationEnforced: true }, { merge: true });
+      } catch (restErr: any) {
+        console.warn('[SECURITY] Could not persist deviceVerificationEnforced via REST:', restErr?.message || restErr);
+      }
+    }
+    return;
+  }
+
   const adminPayload: Record<string, any> = {};
   if (opts.replaceActiveSessions) {
     adminPayload.activeSessions = opts.replaceActiveSessions;
@@ -88,6 +101,7 @@ async function syncUserSessionState(
     await db.collection('users').doc(uid).set(adminPayload, { merge: true });
   } catch (err: any) {
     if (!isAdminCredentialError(err)) throw err;
+    markAdminCredentialsUnavailable();
     // In Firestore REST mode, only persist deviceVerificationEnforced (activeSessions is tracked in user_sessions)
     if (opts.enforceDeviceVerification) {
       try {
@@ -730,36 +744,50 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     }
 
     let decoded: admin.auth.DecodedIdToken;
-    try {
-      decoded = await admin.auth().verifyIdToken(token, true);
-    } catch (err: any) {
-      const msg = String(err?.message || err || '');
-      const isHostProjectIamLookupError =
-        isFirestoreCredentialUnavailableError(err) ||
-        isAdminCredentialError(err) ||
-        msg.includes('USER_PROJECT_DENIED') ||
-        msg.includes('SERVICE_DISABLED') ||
-        msg.includes('accessNotConfigured') ||
-        msg.includes('serviceusage.services.use') ||
-        msg.includes('identitytoolkit.googleapis.com');
+    if (shouldSkipAdminFirestore()) {
+      try {
+        decoded = await admin.auth().verifyIdToken(token, false);
+      } catch {
+        res.status(401).json({
+          error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
+        });
+        return null;
+      }
+    } else {
+      try {
+        decoded = await admin.auth().verifyIdToken(token, true);
+      } catch (err: any) {
+        const msg = String(err?.message || err || '');
+        const isHostProjectIamLookupError =
+          isFirestoreCredentialUnavailableError(err) ||
+          isAdminCredentialError(err) ||
+          msg.includes('USER_PROJECT_DENIED') ||
+          msg.includes('SERVICE_DISABLED') ||
+          msg.includes('accessNotConfigured') ||
+          msg.includes('serviceusage.services.use') ||
+          msg.includes('identitytoolkit.googleapis.com');
 
-      if (isHostProjectIamLookupError) {
-        try {
-          decoded = await admin.auth().verifyIdToken(token, false);
-        } catch {
+        if (isHostProjectIamLookupError) {
+          if (isFirestoreCredentialUnavailableError(err) || isAdminCredentialError(err)) {
+            markAdminCredentialsUnavailable();
+          }
+          try {
+            decoded = await admin.auth().verifyIdToken(token, false);
+          } catch {
+            res.status(401).json({
+              error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
+            });
+            return null;
+          }
+        } else {
+          const isRevoked = err?.code === 'auth/id-token-revoked';
           res.status(401).json({
-            error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
+            error: isRevoked
+              ? 'Unauthorized: Session token has been revoked. Please sign in again.'
+              : 'Unauthorized: Invalid, expired, or malformed authentication token.'
           });
           return null;
         }
-      } else {
-        const isRevoked = err?.code === 'auth/id-token-revoked';
-        res.status(401).json({
-          error: isRevoked
-            ? 'Unauthorized: Session token has been revoked. Please sign in again.'
-            : 'Unauthorized: Invalid, expired, or malformed authentication token.'
-        });
-        return null;
       }
     }
 
@@ -958,6 +986,10 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     console.log(
       `[SECURITY AUDIT] ${timestamp} | Actor: ${entry.actorUid} (${entry.actorEmail || 'no-email'}) [${entry.actorRole}] | Action: ${entry.action} | Target: ${entry.targetName || entry.targetUid || entry.targetId || 'system'} | Result: ${entry.result} | Reason: ${entry.reason || 'N/A'}`
     );
+
+    if (shouldSkipAdminFirestore()) {
+      return;
+    }
 
     try {
       const db = getAdminDb();
@@ -5846,14 +5878,34 @@ export async function createApp(options?: { skipVite?: boolean; skipOutboxWorker
     return { browser, os, deviceType, deviceName, compositeName: `${browser} on ${os}` };
   }
 
-  async function resolveApproximateLocation(ip: string): Promise<string> {
+  async function resolveApproximateLocation(ip: string, req?: Request): Promise<string> {
+    // 0ms instant geolocation on Vercel Edge / Proxy headers
+    if (req?.headers) {
+      const rawCity = String(req.headers['x-vercel-ip-city'] || '').trim();
+      const rawRegion = String(req.headers['x-vercel-ip-country-region'] || '').trim();
+      const rawCountry = String(req.headers['x-vercel-ip-country'] || '').trim();
+      if (rawCity || rawCountry) {
+        const safeDecode = (s: string) => {
+          try {
+            return decodeURIComponent(s);
+          } catch {
+            return s;
+          }
+        };
+        const parts = [safeDecode(rawCity), safeDecode(rawRegion), safeDecode(rawCountry)].filter(Boolean);
+        if (parts.length > 0) {
+          return parts.join(', ');
+        }
+      }
+    }
+
     if (!ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('172.16.') || ip === 'localhost') {
       return 'Location unavailable';
     }
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1500);
+      const timeoutId = setTimeout(() => controller.abort(), 900);
       const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city`, {
         signal: controller.signal
       });
@@ -6040,6 +6092,160 @@ https://www.shikshantaracademy.edu.np/`;
       .replace(/'/g, '&#39;');
   }
 
+  async function dispatchSecurityEmail(params: {
+    toEmail: string;
+    subject: string;
+    textBody: string;
+    htmlBody: string;
+    bypassCooldown?: boolean;
+    logPrefix: string;
+  }): Promise<{
+    success: boolean;
+    simulated?: boolean;
+    authFailed?: boolean;
+    senderEmail: string;
+    errorCode?: string;
+    errorHint?: string;
+    error?: string;
+  }> {
+    const smtpConfig = getSmtpTransportConfig();
+
+    // 1. Prefer Resend HTTPS API when RESEND_API_KEY is configured (sends authentically from securityalerts@shikshantaracademy.edu.np in ~150ms)
+    if (smtpConfig.resendApiKey) {
+      const officialFrom = smtpConfig.fromSecurity || 'securityalerts@shikshantaracademy.edu.np';
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 8000);
+        const rRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${smtpConfig.resendApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: `Shikshantar Academy Security <${officialFrom}>`,
+            reply_to: officialFrom,
+            to: [params.toEmail],
+            subject: params.subject,
+            text: params.textBody,
+            html: params.htmlBody
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(tid);
+        if (rRes.ok) {
+          console.log(`[${params.logPrefix}] Sent via Resend (${officialFrom}) to ${maskEmailAddress(params.toEmail)}`);
+          return { success: true, senderEmail: officialFrom };
+        }
+        const errBody = await rRes.text().catch(() => '');
+        console.error(`[${params.logPrefix}] Resend API rejected (${rRes.status}):`, errBody.slice(0, 240));
+        // Fall through to SMTP if SMTP is also configured
+        if (!smtpConfig.transportOptions) {
+          return {
+            success: false,
+            senderEmail: officialFrom,
+            errorCode: `RESEND_${rRes.status}`,
+            errorHint: 'Email provider rejected the sender domain or API key. Verify RESEND_API_KEY and domain DNS records.'
+          };
+        }
+      } catch (resendErr: any) {
+        console.error(`[${params.logPrefix}] Resend request error:`, resendErr?.message || resendErr);
+        if (!smtpConfig.transportOptions) {
+          return {
+            success: false,
+            senderEmail: officialFrom,
+            errorCode: 'RESEND_NETWORK',
+            errorHint: 'Could not reach the email delivery service. Please click Resend Code.'
+          };
+        }
+      }
+    }
+
+    // 2. Nodemailer SMTP transport (with automatic Gmail port 465 <-> 587 TLS retry)
+    const smtpSender = smtpConfig.fromSecurity || smtpConfig.user || 'securityalerts@shikshantaracademy.edu.np';
+    if (!smtpConfig.configured || !smtpConfig.transportOptions) {
+      console.log(`[${params.logPrefix} SIMULATED] Mail for ${maskEmailAddress(params.toEmail)} from ${smtpSender}`);
+      return { success: true, simulated: true, senderEmail: smtpSender };
+    }
+
+    if (!params.bypassCooldown && (sendLoginAlertEmail as any)._authCooldownUntilMs > Date.now()) {
+      return {
+        success: false,
+        simulated: false,
+        authFailed: true,
+        senderEmail: smtpSender,
+        errorCode: 'SMTP_AUTH_FAILED',
+        errorHint: 'Mail server rejected SMTP_USER / SMTP_PASSWORD. Verify your 16-character Google App Password in Vercel Environment Variables.'
+      };
+    }
+
+    const sendWithOptions = async (opts: Record<string, any>, fromAddr: string) => {
+      const transporter = nodemailer.createTransport(opts as any);
+      await transporter.sendMail({
+        from: `"Shikshantar Academy Security" <${fromAddr}>`,
+        replyTo: smtpSender,
+        to: params.toEmail,
+        subject: params.subject,
+        text: params.textBody,
+        html: params.htmlBody
+      });
+    };
+
+    try {
+      await sendWithOptions(smtpConfig.transportOptions, smtpSender);
+      (sendLoginAlertEmail as any)._authCooldownUntilMs = 0;
+      console.log(`[${params.logPrefix}] Sent via SMTP (${smtpSender}) to ${maskEmailAddress(params.toEmail)}`);
+      return { success: true, senderEmail: smtpSender };
+    } catch (firstErr: any) {
+      const errMsg = String(firstErr?.message || '');
+      const isAuth = isSmtpAuthError(firstErr);
+
+      // If Gmail/SMTP failed on TLS/port (not auth), immediately retry on alternate TLS port (465 <-> 587)
+      if (!isAuth && smtpConfig.host.toLowerCase().includes('gmail')) {
+        const altPort = smtpConfig.port === 465 ? 587 : 465;
+        const altSecure = altPort === 465;
+        const altOpts = {
+          ...smtpConfig.transportOptions,
+          port: altPort,
+          secure: altSecure,
+          ...(altPort === 587 ? { requireTLS: true } : { requireTLS: undefined })
+        };
+        try {
+          await sendWithOptions(altOpts, smtpConfig.user || smtpSender);
+          (sendLoginAlertEmail as any)._authCooldownUntilMs = 0;
+          console.log(`[${params.logPrefix}] Sent via SMTP fallback port ${altPort} to ${maskEmailAddress(params.toEmail)}`);
+          return { success: true, senderEmail: smtpConfig.user || smtpSender };
+        } catch (retryErr: any) {
+          console.error(`[${params.logPrefix}] SMTP fallback port ${altPort} failed:`, retryErr?.code || retryErr?.message);
+          firstErr = retryErr;
+        }
+      }
+
+      if (isSmtpAuthError(firstErr)) {
+        (sendLoginAlertEmail as any)._authCooldownUntilMs = Date.now() + 2 * 60 * 1000;
+        console.error(`[${params.logPrefix}] SMTP auth rejected by mail provider (${firstErr?.code || 'EAUTH'}).`);
+        return {
+          success: false,
+          authFailed: true,
+          senderEmail: smtpSender,
+          errorCode: 'SMTP_AUTH_FAILED',
+          errorHint: 'Gmail rejected SMTP login credentials. Generate a fresh 16-character Google App Password for SMTP_PASSWORD in Vercel and redeploy.',
+          error: 'SMTP credentials rejected by mail provider.'
+        };
+      }
+
+      const code = String(firstErr?.code || 'SMTP_ERROR');
+      console.error(`[${params.logPrefix}] SMTP delivery failed (${code}):`, errMsg);
+      return {
+        success: false,
+        senderEmail: smtpSender,
+        errorCode: code,
+        errorHint: `Email server could not deliver the code (${code}). Please click Resend Code or check SMTP settings.`,
+        error: errMsg || 'Failed to dispatch verification email.'
+      };
+    }
+  }
+
   async function sendDeviceVerificationOtpEmail(details: {
     toEmail: string;
     userName: string;
@@ -6052,9 +6258,21 @@ https://www.shikshantaracademy.edu.np/`;
     ipAddress: string;
     dateTimeStr: string;
     expiresMinutes: number;
-  }): Promise<{ success: boolean; simulated?: boolean; authFailed?: boolean; error?: any }> {
-    const subject = `Security Verification Code (${details.otpCode}) – Shikshantar Academy Portal`;
+    bypassCooldown?: boolean;
+  }): Promise<{
+    success: boolean;
+    simulated?: boolean;
+    authFailed?: boolean;
+    senderEmail: string;
+    errorCode?: string;
+    errorHint?: string;
+    error?: any;
+  }> {
+    const subject = `Security Verification Code (${details.otpCode}) – Shikshantar Academy`;
     const textBody = [
+      `SHIKSHANTAR ACADEMY`,
+      `Karjanha Municipality, Bastipur-05, Siraha, Nepal`,
+      '',
       `Dear ${details.userName},`,
       '',
       `A sign-in attempt to your Shikshantar Academy Portal account was detected from a ${details.reasonLabel}.`,
@@ -6089,20 +6307,17 @@ https://www.shikshantaracademy.edu.np/`;
     const htmlBody = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1e293b; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
         <div style="background: #0a2540; padding: 20px 24px; border-bottom: 3px solid #f1c40f;">
-          <div style="font-size: 15px; font-weight: 800; color: #ffffff; letter-spacing: 0.4px;">SHIKSHANTAR ACADEMY</div>
-          <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">Account Security &amp; New Device Verification</div>
+          <div style="font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: 0.4px;">SHIKSHANTAR ACADEMY</div>
+          <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">Karjanha Municipality, Bastipur-05, Siraha &bull; Account Security</div>
         </div>
 
         <div style="padding: 24px;">
-          <div style="display: inline-block; background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 12px;">
-            Verification Required
-          </div>
           <h2 style="margin: 0 0 10px 0; font-size: 18px; color: #0f172a;">Confirm your sign-in, ${safeName}</h2>
           <p style="font-size: 14px; color: #475569; margin: 0 0 18px 0; line-height: 1.55;">
             We detected a sign-in attempt to your Shikshantar Academy account from a <strong>${safeReason}</strong>. Enter the 6-digit security code below to continue:
           </p>
 
-          <div style="background: #f8fafc; border: 2px dashed #0a3d62; border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 18px;">
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 18px;">
             <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">One-Time Security Code</div>
             <div style="font-size: 32px; font-weight: 800; color: #0a2540; letter-spacing: 6px; font-family: 'SFMono-Regular', Consolas, monospace;">${spacedOtp}</div>
             <div style="font-size: 12px; color: #64748b; margin-top: 6px;">Valid for ${details.expiresMinutes} minutes &bull; Single use only</div>
@@ -6123,48 +6338,20 @@ https://www.shikshantaracademy.edu.np/`;
           </p>
 
           <div style="padding-top: 14px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center;">
-            Shikshantar Academy &bull; Automated Account Protection
+            Shikshantar Academy &bull; Karjanha Municipality, Bastipur-05, Siraha, Nepal
           </div>
         </div>
       </div>
     `;
 
-    const smtpConfig = getSmtpTransportConfig();
-
-    try {
-      if (smtpConfig.configured && smtpConfig.transportOptions) {
-        if ((sendLoginAlertEmail as any)._authCooldownUntilMs > Date.now()) {
-          return {
-            success: false,
-            simulated: false,
-            authFailed: true,
-            error: 'SMTP authentication temporarily paused after provider credential rejection.'
-          };
-        }
-        const transporter = nodemailer.createTransport(smtpConfig.transportOptions as any);
-        await transporter.sendMail({
-          from: `"Shikshantar Academy Security" <${smtpConfig.fromSecurity}>`,
-          replyTo: smtpConfig.fromSecurity,
-          to: details.toEmail,
-          subject,
-          text: textBody,
-          html: htmlBody,
-        });
-        (sendLoginAlertEmail as any)._authCooldownUntilMs = 0;
-        console.log(`[DEVICE OTP] Verification code sent via ${smtpConfig.fromSecurity} to ${maskEmailAddress(details.toEmail)}`);
-        return { success: true };
-      } else {
-        console.log(`[DEVICE OTP SIMULATED] Code for ${maskEmailAddress(details.toEmail)} from ${smtpConfig.fromSecurity || 'securityalerts@shikshantaracademy.edu.np'}`);
-        return { success: true, simulated: true };
-      }
-    } catch (err: any) {
-      if (isSmtpAuthError(err)) {
-        (sendLoginAlertEmail as any)._authCooldownUntilMs = Date.now() + 10 * 60 * 1000;
-        return { success: false, authFailed: true, error: 'SMTP credentials rejected by mail provider.' };
-      }
-      console.error(`[DEVICE OTP] Failed to send verification email (${err?.code || 'SMTP_ERROR'}):`, err?.message || err);
-      return { success: false, error: err?.message || 'Failed to dispatch verification email.' };
-    }
+    return dispatchSecurityEmail({
+      toEmail: details.toEmail,
+      subject,
+      textBody,
+      htmlBody,
+      bypassCooldown: details.bypassCooldown,
+      logPrefix: 'DEVICE OTP'
+    });
   }
 
   // 1. Record Login Event with Risk-Based Device Trust & New Browser/Location OTP Gate
@@ -6192,7 +6379,7 @@ https://www.shikshantaracademy.edu.np/`;
       const db = getAdminDb();
       const nowMs = getEffectiveNowMs(req);
       const normEmail = String(authUser.email || '').trim().toLowerCase();
-      if (normEmail) {
+      if (normEmail && !shouldSkipAdminFirestore()) {
         try {
           const acctKey = `login_acct_${crypto.createHash('sha256').update(normEmail).digest('hex').slice(0, 32)}`;
           const acctSnap = await db.collection('security_rate_limits').doc(acctKey).get();
@@ -6208,6 +6395,7 @@ https://www.shikshantaracademy.edu.np/`;
           }
         } catch (lockErr: any) {
           if (!isAdminCredentialError(lockErr)) throw lockErr;
+          markAdminCredentialsUnavailable();
         }
       }
 
@@ -6238,7 +6426,7 @@ https://www.shikshantaracademy.edu.np/`;
       const ip = typeof forwarded === 'string'
         ? forwarded.split(',')[0].trim()
         : (req.socket.remoteAddress || req.ip || '127.0.0.1');
-      const location = await resolveApproximateLocation(ip);
+      const location = await resolveApproximateLocation(ip, req);
       const dateTimeFormatted = now.toLocaleDateString('en-US', {
         timeZone: 'Asia/Kathmandu',
         day: 'numeric',
@@ -6301,31 +6489,34 @@ https://www.shikshantaracademy.edu.np/`;
       if (existingSession && existingSession.status === 'PENDING_VERIFICATION' && requiresDeviceOtp) {
         let activeChallenge: any = null;
         let reusedChallengeToken = '';
-        try {
-          const challengeSnap = await db.collection('device_verification_challenges').doc(cleanSessionId).get();
-          const ch = challengeSnap.exists ? challengeSnap.data() : null;
-          if (ch && ch.status === 'PENDING' && Number(ch.expiresAtMs || 0) > nowMs) {
-            activeChallenge = ch;
-            reusedChallengeToken = issueSignedOtpChallengeToken({
-              uid: authUser.uid,
-              sid: cleanSessionId,
-              h: String(ch.otpHash || ''),
-              s: String(ch.otpSalt || ''),
-              r: String(ch.reason || existingSession.verificationReason || 'NEW_BROWSER_OR_DEVICE'),
-              b: String(ch.browser || existingSession.browser || device.browser),
-              o: String(ch.os || existingSession.operatingSystem || device.os),
-              d: String(ch.deviceName || existingSession.deviceName || device.deviceName),
-              loc: String(ch.location || existingSession.approximateLocation || location),
-              ip: String(ch.ipAddress || existingSession.ipAddress || ip),
-              rc: Number(ch.resendCount || 0),
-              ls: Number(ch.lastSentAtMs || nowMs),
-              exp: Number(ch.expiresAtMs || nowMs + 600000),
-              ed: ch.emailDispatched === true,
-              sn: ch.smtpNotConfigured === true
-            });
+        if (!shouldSkipAdminFirestore()) {
+          try {
+            const challengeSnap = await db.collection('device_verification_challenges').doc(cleanSessionId).get();
+            const ch = challengeSnap.exists ? challengeSnap.data() : null;
+            if (ch && ch.status === 'PENDING' && Number(ch.expiresAtMs || 0) > nowMs) {
+              activeChallenge = ch;
+              reusedChallengeToken = issueSignedOtpChallengeToken({
+                uid: authUser.uid,
+                sid: cleanSessionId,
+                h: String(ch.otpHash || ''),
+                s: String(ch.otpSalt || ''),
+                r: String(ch.reason || existingSession.verificationReason || 'NEW_BROWSER_OR_DEVICE'),
+                b: String(ch.browser || existingSession.browser || device.browser),
+                o: String(ch.os || existingSession.operatingSystem || device.os),
+                d: String(ch.deviceName || existingSession.deviceName || device.deviceName),
+                loc: String(ch.location || existingSession.approximateLocation || location),
+                ip: String(ch.ipAddress || existingSession.ipAddress || ip),
+                rc: Number(ch.resendCount || 0),
+                ls: Number(ch.lastSentAtMs || nowMs),
+                exp: Number(ch.expiresAtMs || nowMs + 600000),
+                ed: ch.emailDispatched === true,
+                sn: ch.smtpNotConfigured === true
+              });
+            }
+          } catch (chErr: any) {
+            if (!isAdminCredentialError(chErr)) throw chErr;
+            markAdminCredentialsUnavailable();
           }
-        } catch (chErr: any) {
-          if (!isAdminCredentialError(chErr)) throw chErr;
         }
 
         if (!activeChallenge && parsedCookies.shikshantar_otp_ch) {
@@ -6659,54 +6850,55 @@ https://www.shikshantaracademy.edu.np/`;
               ? 'different browser or device profile'
               : 'new browser or unrecognized device';
 
-        // Hold session in PENDING_VERIFICATION (NO sessionSeal and NOT added to activeSessions until OTP passes)
-        await hybridSetDoc(
-          db,
-          authUser.rawToken,
-          'user_sessions',
-          cleanSessionId,
-          {
-            sessionId: cleanSessionId,
-            userUid: authUser.uid,
-            loginEventId: cleanLoginEventId,
-            email: authUser.email,
+        // Run PENDING_VERIFICATION session save and OTP email dispatch in parallel for sub-second speed
+        const [, otpEmailResult] = await Promise.all([
+          hybridSetDoc(
+            db,
+            authUser.rawToken,
+            'user_sessions',
+            cleanSessionId,
+            {
+              sessionId: cleanSessionId,
+              userUid: authUser.uid,
+              loginEventId: cleanLoginEventId,
+              email: authUser.email,
+              userName,
+              role: userRole,
+              loginAt: existingSession?.loginAt || nowIso,
+              lastActiveAt: nowIso,
+              revokedAt: null,
+              logoutAt: null,
+              status: 'PENDING_VERIFICATION',
+              sessionSeal: null,
+              verificationReason: finalReason,
+              ipAddress: ip,
+              approximateLocation: location,
+              userAgent: ua,
+              deviceType: device.deviceType,
+              deviceName: device.deviceName,
+              browser: device.browser,
+              operatingSystem: (device as any).operatingSystem || device.os,
+              compositeName: device.compositeName,
+              emailSent: false,
+              createdAt: existingSession?.createdAt || nowIso,
+              updatedAt: nowIso
+            },
+            { merge: true }
+          ),
+          sendDeviceVerificationOtpEmail({
+            toEmail: authUser.email,
             userName,
-            role: userRole,
-            loginAt: existingSession?.loginAt || nowIso,
-            lastActiveAt: nowIso,
-            revokedAt: null,
-            logoutAt: null,
-            status: 'PENDING_VERIFICATION',
-            sessionSeal: null,
-            verificationReason: finalReason,
-            ipAddress: ip,
-            approximateLocation: location,
-            userAgent: ua,
-            deviceType: device.deviceType,
+            otpCode,
+            reasonLabel,
             deviceName: device.deviceName,
             browser: device.browser,
-            operatingSystem: (device as any).operatingSystem || device.os,
-            compositeName: device.compositeName,
-            emailSent: false,
-            createdAt: existingSession?.createdAt || nowIso,
-            updatedAt: nowIso
-          },
-          { merge: true }
-        );
-
-        const otpEmailResult = await sendDeviceVerificationOtpEmail({
-          toEmail: authUser.email,
-          userName,
-          otpCode,
-          reasonLabel,
-          deviceName: device.deviceName,
-          browser: device.browser,
-          operatingSystem: device.os,
-          approximateLocation: location,
-          ipAddress: ip,
-          dateTimeStr: dateTimeFormatted,
-          expiresMinutes
-        });
+            operatingSystem: device.os,
+            approximateLocation: location,
+            ipAddress: ip,
+            dateTimeStr: dateTimeFormatted,
+            expiresMinutes
+          })
+        ]);
 
         const realOtpDispatched = otpEmailResult.success === true && otpEmailResult.simulated !== true;
         const smtpNotConfigured = otpEmailResult.simulated === true;
@@ -6729,35 +6921,38 @@ https://www.shikshantaracademy.edu.np/`;
           sn: smtpNotConfigured
         });
 
-        try {
-          await db.collection('device_verification_challenges').doc(cleanSessionId).set({
-            sessionId: cleanSessionId,
-            userUid: authUser.uid,
-            email: authUser.email,
-            role: userRole,
-            reason: finalReason,
-            otpHash,
-            otpSalt,
-            hashVersion: 'hmac_v1',
-            attempts: 0,
-            maxAttempts: 5,
-            resendCount: 0,
-            maxResends: 5,
-            status: 'PENDING',
-            browser: device.browser,
-            os: device.os,
-            deviceName: device.deviceName,
-            location,
-            ipAddress: ip,
-            emailDispatched: realOtpDispatched,
-            smtpNotConfigured,
-            lastSentAtMs: nowMs,
-            expiresAtMs,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          });
-        } catch (chWriteErr: any) {
-          if (!isAdminCredentialError(chWriteErr)) throw chWriteErr;
+        if (!shouldSkipAdminFirestore()) {
+          try {
+            await db.collection('device_verification_challenges').doc(cleanSessionId).set({
+              sessionId: cleanSessionId,
+              userUid: authUser.uid,
+              email: authUser.email,
+              role: userRole,
+              reason: finalReason,
+              otpHash,
+              otpSalt,
+              hashVersion: 'hmac_v1',
+              attempts: 0,
+              maxAttempts: 5,
+              resendCount: 0,
+              maxResends: 5,
+              status: 'PENDING',
+              browser: device.browser,
+              os: device.os,
+              deviceName: device.deviceName,
+              location,
+              ipAddress: ip,
+              emailDispatched: realOtpDispatched,
+              smtpNotConfigured,
+              lastSentAtMs: nowMs,
+              expiresAtMs,
+              createdAt: nowIso,
+              updatedAt: nowIso
+            });
+          } catch (chWriteErr: any) {
+            if (!isAdminCredentialError(chWriteErr)) throw chWriteErr;
+            markAdminCredentialsUnavailable();
+          }
         }
 
         res.cookie('shikshantar_otp_ch', signedChallengeToken, {
@@ -6777,7 +6972,7 @@ https://www.shikshantaracademy.edu.np/`;
           targetUid: authUser.uid,
           action: 'SUSPICIOUS_LOGIN_OTP_SENT',
           result: realOtpDispatched ? 'SUCCESS' : 'FAILED',
-          reason: `New-device OTP required (${finalReason}) for ${device.compositeName} (${location}, IP: ${ip})${smtpNotConfigured ? ' [SMTP not configured in this environment]' : ''}`
+          reason: `New-device OTP required (${finalReason}) for ${device.compositeName} (${location}, IP: ${ip})${smtpNotConfigured ? ' [SMTP not configured in this environment]' : otpEmailResult.errorCode ? ` [${otpEmailResult.errorCode}]` : ''}`
         });
 
         return res.json({
@@ -6787,7 +6982,7 @@ https://www.shikshantaracademy.edu.np/`;
           verification: {
             sessionId: cleanSessionId,
             maskedEmail: maskEmailAddress(authUser.email),
-            senderEmail: smtpConfig.fromSecurity || 'securityalerts@shikshantaracademy.edu.np',
+            senderEmail: otpEmailResult.senderEmail || smtpConfig.fromSecurity || 'securityalerts@shikshantaracademy.edu.np',
             reason: finalReason,
             browser: device.browser,
             os: device.os,
@@ -6798,6 +6993,8 @@ https://www.shikshantaracademy.edu.np/`;
             resendCooldownSeconds: 60,
             emailDispatched: realOtpDispatched,
             smtpNotConfigured,
+            emailAuthFailed: otpEmailResult.authFailed === true,
+            emailErrorHint: realOtpDispatched || smtpNotConfigured ? undefined : otpEmailResult.errorHint,
             challengeToken: signedChallengeToken
           }
         });
@@ -6937,15 +7134,18 @@ https://www.shikshantaracademy.edu.np/`;
       let ch: Record<string, any> | null = null;
       let usingStatelessChallenge = false;
 
-      try {
-        const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
-        const challengeSnap = await challengeRef.get();
-        if (challengeSnap.exists) {
-          adminChallengeRef = challengeRef;
-          ch = challengeSnap.data() || {};
+      if (!shouldSkipAdminFirestore()) {
+        try {
+          const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
+          const challengeSnap = await challengeRef.get();
+          if (challengeSnap.exists) {
+            adminChallengeRef = challengeRef;
+            ch = challengeSnap.data() || {};
+          }
+        } catch (chErr: any) {
+          if (!isAdminCredentialError(chErr)) throw chErr;
+          markAdminCredentialsUnavailable();
         }
-      } catch (chErr: any) {
-        if (!isAdminCredentialError(chErr)) throw chErr;
       }
 
       if (!ch && rawChallengeToken) {
@@ -7191,15 +7391,18 @@ https://www.shikshantaracademy.edu.np/`;
       let adminChallengeRef: FirebaseFirestore.DocumentReference | null = null;
       let ch: Record<string, any> | null = null;
 
-      try {
-        const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
-        const challengeSnap = await challengeRef.get();
-        if (challengeSnap.exists) {
-          adminChallengeRef = challengeRef;
-          ch = challengeSnap.data() || {};
+      if (!shouldSkipAdminFirestore()) {
+        try {
+          const challengeRef = db.collection('device_verification_challenges').doc(cleanSessionId);
+          const challengeSnap = await challengeRef.get();
+          if (challengeSnap.exists) {
+            adminChallengeRef = challengeRef;
+            ch = challengeSnap.data() || {};
+          }
+        } catch (chErr: any) {
+          if (!isAdminCredentialError(chErr)) throw chErr;
+          markAdminCredentialsUnavailable();
         }
-      } catch (chErr: any) {
-        if (!isAdminCredentialError(chErr)) throw chErr;
       }
 
       if (!ch && rawChallengeToken) {
@@ -7308,7 +7511,8 @@ https://www.shikshantaracademy.edu.np/`;
         approximateLocation: ch.location || 'Unknown Location',
         ipAddress: ch.ipAddress || '',
         dateTimeStr: dateTimeFormatted,
-        expiresMinutes
+        expiresMinutes,
+        bypassCooldown: true
       });
 
       const realOtpDispatched = emailResult.success === true && emailResult.simulated !== true;
@@ -7362,6 +7566,9 @@ https://www.shikshantaracademy.edu.np/`;
         success: true,
         emailDispatched: realOtpDispatched,
         smtpNotConfigured,
+        emailAuthFailed: emailResult.authFailed === true,
+        emailErrorHint: realOtpDispatched || smtpNotConfigured ? undefined : emailResult.errorHint,
+        senderEmail: emailResult.senderEmail,
         expiresInSeconds: expiresMinutes * 60,
         resendCooldownSeconds: 60,
         challengeToken: nextChallengeToken

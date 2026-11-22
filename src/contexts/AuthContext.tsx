@@ -19,6 +19,8 @@ export interface DeviceVerificationMeta {
   expiresInSeconds: number;
   resendCooldownSeconds: number;
   emailDispatched: boolean;
+  emailAuthFailed?: boolean;
+  emailErrorHint?: string;
   smtpNotConfigured?: boolean;
   challengeToken?: string;
 }
@@ -319,34 +321,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const logout = useCallback(async (_redirectReason?: string) => {
-    try {
-      if (auth.currentUser) {
-        const currentSid = localStorage.getItem('localSessionId') || sessionId;
-        const token = await auth.currentUser.getIdToken().catch(() => null);
-        if (token && currentSid) {
-          await fetch('/api/auth/logout', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ sessionId: currentSid })
-          }).catch(() => {});
-        }
+  const logout = useCallback(async (redirectReason?: string) => {
+    const currentUser = auth.currentUser;
+    const currentSid = localStorage.getItem('localSessionId') || sessionId;
+
+    // Grab ID token quickly (cached token is instantaneous) before signing out locally
+    let token: string | null = null;
+    if (currentUser && currentSid) {
+      token = await Promise.race([
+        currentUser.getIdToken().catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 250))
+      ]);
+    }
+
+    // Fire server session-logout cleanup in background (keepalive) so UI never hangs
+    if (token && currentSid) {
+      const controller = new AbortController();
+      const abortTimer = window.setTimeout(() => controller.abort(), 3000);
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        keepalive: true,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ sessionId: currentSid })
+      })
+        .catch(() => {})
+        .finally(() => window.clearTimeout(abortTimer));
+    }
+
+    // Clear client state and Firebase Auth immediately so sign-out feels instant
+    clearClientSessionStorage();
+    inFlightSessionsRef.current.clear();
+    serverConfirmedSessionsRef.current.clear();
+    sawCurrentSidInActiveSessionsRef.current.clear();
+    setUser(null);
+    setUserProfile(null);
+    setUserRole('guest');
+    setAdminTier('');
+    setIsAuthenticated(false);
+    setVerifyingDeviceSession(false);
+    setDeviceVerificationRequired(false);
+    setDeviceVerificationMeta(null);
+    setDeviceVerificationError(null);
+
+    await signOut(auth).catch(() => {});
+
+    if (
+      typeof window !== 'undefined' &&
+      (redirectReason === 'device_verification_cancelled' || redirectReason === 'device_verification_error')
+    ) {
+      const target = `/login?reason=${encodeURIComponent(redirectReason)}`;
+      if (window.location.pathname + window.location.search !== target) {
+        window.location.replace(target);
       }
-    } finally {
-      await signOut(auth).catch(() => {});
-      clearClientSessionStorage();
-      setUser(null);
-      setUserProfile(null);
-      setUserRole('guest');
-      setAdminTier('');
-      setIsAuthenticated(false);
-      setVerifyingDeviceSession(false);
-      setDeviceVerificationRequired(false);
-      setDeviceVerificationMeta(null);
-      setDeviceVerificationError(null);
     }
   }, [clearClientSessionStorage, sessionId]);
 
@@ -543,12 +574,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('userRoleOverride');
 
     let unsubDoc: (() => void) | null = null;
+    let unsubSessionDoc: (() => void) | null = null;
     const isCancelledRef = { current: false };
 
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (unsubDoc) {
         unsubDoc();
         unsubDoc = null;
+      }
+      if (unsubSessionDoc) {
+        unsubSessionDoc();
+        unsubSessionDoc = null;
       }
 
       if (!fbUser) {
@@ -666,14 +702,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               sawCurrentSidInActiveSessionsRef.current.add(sessionKey);
             }
 
-            // Enforce cross-device revocation ONLY after server confirmed registration
-            // AND on a live server snapshot where currentSid was seen or omitted without pending writes
+            // Enforce cross-device revocation via users.activeSessions ONLY if this session
+            // was observed inside activeSessions first and subsequently removed.
             if (
               !snap.metadata.fromCache &&
               serverConfirmedSessionsRef.current.has(sessionKey) &&
-              (sawCurrentSidInActiveSessionsRef.current.has(sessionKey) || !snap.metadata.hasPendingWrites) &&
+              sawCurrentSidInActiveSessionsRef.current.has(sessionKey) &&
               Array.isArray(d.activeSessions) &&
-              d.activeSessions.length > 0 &&
               !d.activeSessions.includes(currentSid)
             ) {
               signOut(auth).catch(() => {});
@@ -681,6 +716,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
           (err) => {
             console.warn('AuthContext profile listener warning:', err?.message);
+          }
+        );
+
+        // Real-time session revocation watcher (works identically on both Vercel REST & Admin SDK modes)
+        unsubSessionDoc = onSnapshot(
+          doc(db, 'user_sessions', currentSid),
+          (sessSnap) => {
+            if (isCancelledRef.current || !sessSnap.exists()) return;
+            const sData = sessSnap.data();
+            if (
+              !sessSnap.metadata.fromCache &&
+              sData?.userUid === fbUser.uid &&
+              String(sData?.status || '').toUpperCase() === 'REVOKED'
+            ) {
+              signOut(auth).catch(() => {});
+            }
+          },
+          () => {
+            // Non-fatal if session doc isn't created yet
           }
         );
       } catch (err: any) {
@@ -707,6 +761,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isCancelledRef.current = true;
       unsubAuth();
       if (unsubDoc) unsubDoc();
+      if (unsubSessionDoc) unsubSessionDoc();
     };
   }, [clearClientSessionStorage, resolveAuthoritativeState, runRecordLoginHandshake]);
 

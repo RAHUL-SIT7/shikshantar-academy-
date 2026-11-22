@@ -3,7 +3,11 @@ import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
-import { hybridGetDoc } from './firestoreRest.js';
+import {
+  hybridGetDoc,
+  shouldSkipAdminFirestore,
+  markAdminCredentialsUnavailable
+} from './firestoreRest.js';
 
 export const BOOTSTRAP_OWNER_EMAIL = 'rahulsah4534@gmail.com';
 
@@ -211,35 +215,49 @@ export async function verifyVercelCaller(req: any, res: any): Promise<VerifiedCa
   }
 
   let decoded: admin.auth.DecodedIdToken;
-  try {
-    decoded = await admin.auth().verifyIdToken(token, true);
-  } catch (err: any) {
-    const msg = String(err?.message || err || '');
-    const isHostProjectIamLookupError =
-      isFirestoreCredentialUnavailableError(err) ||
-      msg.includes('USER_PROJECT_DENIED') ||
-      msg.includes('SERVICE_DISABLED') ||
-      msg.includes('accessNotConfigured') ||
-      msg.includes('serviceusage.services.use') ||
-      msg.includes('identitytoolkit.googleapis.com');
+  if (shouldSkipAdminFirestore()) {
+    try {
+      decoded = await admin.auth().verifyIdToken(token, false);
+    } catch {
+      res.status(401).json({
+        error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
+      });
+      return null;
+    }
+  } else {
+    try {
+      decoded = await admin.auth().verifyIdToken(token, true);
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      const isHostProjectIamLookupError =
+        isFirestoreCredentialUnavailableError(err) ||
+        msg.includes('USER_PROJECT_DENIED') ||
+        msg.includes('SERVICE_DISABLED') ||
+        msg.includes('accessNotConfigured') ||
+        msg.includes('serviceusage.services.use') ||
+        msg.includes('identitytoolkit.googleapis.com');
 
-    if (isHostProjectIamLookupError) {
-      try {
-        decoded = await admin.auth().verifyIdToken(token, false);
-      } catch {
+      if (isHostProjectIamLookupError) {
+        if (isFirestoreCredentialUnavailableError(err)) {
+          markAdminCredentialsUnavailable();
+        }
+        try {
+          decoded = await admin.auth().verifyIdToken(token, false);
+        } catch {
+          res.status(401).json({
+            error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
+          });
+          return null;
+        }
+      } else {
+        const isRevoked = err?.code === 'auth/id-token-revoked';
         res.status(401).json({
-          error: 'Unauthorized: Invalid, expired, or malformed authentication token.'
+          error: isRevoked
+            ? 'Unauthorized: Session token has been revoked. Please sign in again.'
+            : 'Unauthorized: Invalid, expired, or malformed authentication token.'
         });
         return null;
       }
-    } else {
-      const isRevoked = err?.code === 'auth/id-token-revoked';
-      res.status(401).json({
-        error: isRevoked
-          ? 'Unauthorized: Session token has been revoked. Please sign in again.'
-          : 'Unauthorized: Invalid, expired, or malformed authentication token.'
-      });
-      return null;
     }
   }
 
@@ -433,7 +451,7 @@ export async function verifyTurnstileToken(
     secretKey === CLOUDFLARE_TEST_SECRET && cleanToken === 'XXXX.DUMMY.TOKEN.XXXX';
   const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
   const usedRef = db.collection('used_turnstile_tokens').doc(`ts_${tokenHash}`);
-  let useMemoryReplayStore = false;
+  let useMemoryReplayStore = shouldSkipAdminFirestore();
 
   // Pre-check replay before calling external Siteverify
   // Cloudflare's official test keypair (1x0000...AA) always emits static dummy token 'XXXX.DUMMY.TOKEN.XXXX'.
@@ -442,16 +460,19 @@ export async function verifyTurnstileToken(
     if (memoryUsedTurnstileTokens.has(tokenHash)) {
       return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
     }
-    try {
-      const preSnap = await usedRef.get();
-      if (preSnap.exists) {
-        return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
-      }
-    } catch (err) {
-      if (isFirestoreCredentialUnavailableError(err)) {
-        useMemoryReplayStore = true;
-      } else {
-        throw err;
+    if (!useMemoryReplayStore) {
+      try {
+        const preSnap = await usedRef.get();
+        if (preSnap.exists) {
+          return { valid: false, statusCode: 409, error: 'Turnstile token has already been used (replay rejected).' };
+        }
+      } catch (err) {
+        if (isFirestoreCredentialUnavailableError(err)) {
+          markAdminCredentialsUnavailable();
+          useMemoryReplayStore = true;
+        } else {
+          throw err;
+        }
       }
     }
   }
@@ -687,33 +708,49 @@ const PLACEHOLDER_SMTP_PASSWORDS = new Set([
 export function getSmtpTransportConfig(): {
   configured: boolean;
   user: string;
+  host: string;
+  port: number;
+  secure: boolean;
   fromResults: string;
   fromSecurity: string;
   fromGeneral: string;
+  resendApiKey: string;
   transportOptions: Record<string, any> | null;
 } {
   const stripWrappingQuotes = (val: string) => val.trim().replace(/^["']|["']$/g, '').trim();
   const isValidEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+  const extractEmail = (val: string): string => {
+    const clean = stripWrappingQuotes(val);
+    if (!clean) return '';
+    const angleMatch = clean.match(/<([^<>\s]+@[^<>\s]+)>/);
+    if (angleMatch && isValidEmail(angleMatch[1])) return angleMatch[1].trim();
+    if (isValidEmail(clean)) return clean;
+    return '';
+  };
 
-  const rawUser = stripWrappingQuotes(
-    process.env.SMTP_USER || process.env.SMTP_EMAIL || ''
-  );
+  const resendApiKey = stripWrappingQuotes(process.env.RESEND_API_KEY || '');
+  const rawUser = extractEmail(process.env.SMTP_USER || process.env.SMTP_EMAIL || '');
   const rawHost = stripWrappingQuotes(process.env.SMTP_HOST || '');
   let rawPass = stripWrappingQuotes(
     process.env.SMTP_PASSWORD || process.env.SMTP_PASS || ''
   );
 
   const pickFrom = (specificEnv: string | undefined, fallbackEnv: string | undefined, defaultUser: string): string => {
-    const specific = stripWrappingQuotes(specificEnv || '');
-    if (isValidEmail(specific)) return specific;
-    const fallback = stripWrappingQuotes(fallbackEnv || '');
-    if (isValidEmail(fallback)) return fallback;
+    const specific = extractEmail(specificEnv || '');
+    if (specific) return specific;
+    const fallback = extractEmail(fallbackEnv || '');
+    if (fallback) return fallback;
     return defaultUser;
   };
 
-  const fromResults = pickFrom(process.env.SMTP_FROM_RESULTS, process.env.SMTP_FROM, rawUser);
-  const fromSecurity = pickFrom(process.env.SMTP_FROM_SECURITY, process.env.SMTP_FROM, rawUser);
-  const fromGeneral = pickFrom(process.env.SMTP_FROM_GENERAL, process.env.SMTP_FROM, rawUser);
+  const defaultOfficialSecurityFrom = resendApiKey
+    ? 'securityalerts@shikshantaracademy.edu.np'
+    : (rawUser || 'securityalerts@shikshantaracademy.edu.np');
+  const fromResults = pickFrom(process.env.SMTP_FROM_RESULTS, process.env.SMTP_FROM, rawUser || 'results@shikshantaracademy.edu.np');
+  const fromSecurity = resendApiKey
+    ? pickFrom(process.env.SMTP_FROM_SECURITY, undefined, 'securityalerts@shikshantaracademy.edu.np')
+    : pickFrom(process.env.SMTP_FROM_SECURITY, process.env.SMTP_FROM, defaultOfficialSecurityFrom);
+  const fromGeneral = pickFrom(process.env.SMTP_FROM_GENERAL, process.env.SMTP_FROM, rawUser || 'info@shikshantaracademy.edu.np');
 
   const isGmail = !rawHost || rawHost.toLowerCase().includes('gmail');
   if (isGmail && rawPass) {
@@ -721,35 +758,56 @@ export function getSmtpTransportConfig(): {
     rawPass = rawPass.replace(/\s+/g, '');
   }
 
-  if (
-    !rawUser ||
-    !rawPass ||
-    rawUser.toLowerCase() === 'school@gmail.com' ||
-    PLACEHOLDER_SMTP_PASSWORDS.has(rawPass.toLowerCase())
-  ) {
+  const hasValidSmtp = Boolean(
+    rawUser &&
+    rawPass &&
+    rawUser.toLowerCase() !== 'school@gmail.com' &&
+    !PLACEHOLDER_SMTP_PASSWORDS.has(rawPass.toLowerCase())
+  );
+
+  if (!hasValidSmtp) {
     return {
-      configured: false,
+      configured: Boolean(resendApiKey),
       user: rawUser,
+      host: rawHost,
+      port: 587,
+      secure: false,
       fromResults,
       fromSecurity,
       fromGeneral,
+      resendApiKey,
       transportOptions: null
     };
   }
 
   if (rawHost) {
-    const port = Number(process.env.SMTP_PORT || 587);
-    const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
+    const parsedPort = Number(process.env.SMTP_PORT || 587);
+    const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 587;
+    // Prevent common SSL wrong-version-number failure when SMTP_PORT=587 has SMTP_SECURE=true
+    const secure =
+      port === 465
+        ? true
+        : port === 587
+          ? false
+          : String(process.env.SMTP_SECURE || '').toLowerCase() === 'true';
     return {
       configured: true,
       user: rawUser,
+      host: rawHost,
+      port,
+      secure,
       fromResults,
       fromSecurity,
       fromGeneral,
+      resendApiKey,
       transportOptions: {
         host: rawHost,
-        port: Number.isFinite(port) && port > 0 ? port : 587,
+        port,
         secure,
+        ...(port === 587 ? { requireTLS: true } : {}),
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
         auth: { user: rawUser, pass: rawPass }
       }
     };
@@ -758,11 +816,20 @@ export function getSmtpTransportConfig(): {
   return {
     configured: true,
     user: rawUser,
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     fromResults,
     fromSecurity,
     fromGeneral,
+    resendApiKey,
     transportOptions: {
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
       auth: { user: rawUser, pass: rawPass }
     }
   };

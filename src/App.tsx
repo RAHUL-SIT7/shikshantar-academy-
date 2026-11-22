@@ -313,14 +313,33 @@ function AppContent() {
 
   if (loading || (isAuthenticated && verifyingDeviceSession)) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#f3f4f6]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-gray-300 border-t-primary rounded-full animate-spin"></div>
-          {isAuthenticated && verifyingDeviceSession && (
-            <p className="text-xs font-semibold text-slate-600">
-              Verifying device security...
-            </p>
-          )}
+      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-6">
+        <div className="w-full max-w-xs flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex items-center justify-center p-2 mb-4">
+            <img
+              src="/logo.png"
+              alt="Shikshantar Academy"
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+          <h1 className="font-display text-lg font-bold text-[#0A2540] tracking-tight">
+            Shikshantar Academy
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Karjanha Municipality, Bastipur-05, Siraha
+          </p>
+          <div className="w-44 h-1 bg-slate-200 rounded-full overflow-hidden mt-6">
+            <div className="h-full w-1/3 bg-[#0A2540] rounded-full animate-indeterminate-progress" />
+          </div>
+          <p className="text-xs font-medium text-slate-500 mt-3">
+            {isAuthenticated && verifyingDeviceSession
+              ? 'Checking trusted device...'
+              : 'Loading portal...'}
+          </p>
         </div>
       </div>
     );
@@ -332,38 +351,59 @@ function AppContent() {
 
   if (isAuthenticated && deviceVerificationError) {
     return (
-      <div className="min-h-screen bg-[#06182C] bg-gradient-to-br from-[#041C2E] via-[#0A2540] to-[#0F172A] flex items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-          <div className="bg-[#0A2540] px-6 py-4 border-b-4 border-red-500">
-            <h1 className="text-base font-extrabold text-white tracking-wide">
-              SHIKSHANTAR ACADEMY
-            </h1>
-            <p className="text-xs text-slate-300 font-medium">
-              Device Security Check Required
-            </p>
-          </div>
-          <div className="p-6 space-y-4">
-            <h2 className="text-lg font-bold text-slate-900">
-              Sign-in paused for account protection
-            </h2>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              We could not verify this device with the security server. For your protection, portal access is paused until verification succeeds.
-            </p>
-            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs font-medium text-red-800">
-              {deviceVerificationError}
+      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-[440px] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="h-1 bg-[#0A2540]" />
+          <div className="p-6 sm:p-8">
+            <div className="flex items-center gap-3.5 pb-5 border-b border-slate-100">
+              <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200/80 p-1.5 flex items-center justify-center shrink-0">
+                <img
+                  src="/logo.png"
+                  alt="Shikshantar Academy"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
+              <div className="min-w-0">
+                <h1 className="font-display text-base font-bold text-[#0A2540] leading-tight">
+                  Shikshantar Academy
+                </h1>
+                <p className="text-xs text-slate-500 truncate mt-0.5">
+                  Karjanha Municipality, Bastipur-05, Siraha
+                </p>
+              </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+
+            <div className="mt-5 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
+                Security Check Unavailable
+              </p>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                Sign-in paused for account protection
+              </h2>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                We could not complete device verification with the security server. Portal access remains paused until the check succeeds.
+              </p>
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200/80 text-xs font-medium text-red-800 leading-relaxed">
+                {deviceVerificationError}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 mt-6">
               <button
                 type="button"
                 onClick={retryDeviceVerification}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-[#0A3D62] hover:bg-[#041C2E] text-white font-bold text-sm transition-colors cursor-pointer"
+                className="flex-1 py-2.5 px-4 rounded-xl bg-[#0A2540] hover:bg-[#06182C] text-white font-semibold text-sm transition-colors cursor-pointer"
               >
                 Retry Security Check
               </button>
               <button
                 type="button"
                 onClick={() => logout('device_verification_error')}
-                className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-colors cursor-pointer"
+                className="py-2.5 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-sm transition-colors cursor-pointer"
               >
                 Sign Out
               </button>
